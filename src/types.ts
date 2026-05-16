@@ -112,6 +112,12 @@ export type PromoteResult = {
   data: PartyData
 }
 
+export type SetSizeResult = {
+  status: 'updated' | 'unauthorized' | 'too_small' | 'invalid' | 'unchanged'
+  data: PartyData
+  promoted: string[]
+}
+
 export interface UserProfile {
   igns: Record<string, string>
 }

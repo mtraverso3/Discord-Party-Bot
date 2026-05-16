@@ -44,6 +44,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'deny':    return await deny(c, guildId, userId, opts)
         case 'remove':    return await removeUserFromParty(c, guildId, userId, opts)
         case 'promote': return await promote(c, guildId, userId, opts)
+        case 'size':    return await setSize(c, guildId, userId, opts)
         case 'disband': return await disband(c, guildId, userId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
@@ -455,6 +456,32 @@ async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `You are now the owner of **${result.data.name}**.`)
 
   return c.followup({ content: `Ownership transferred to <@${targetId}>.`, flags: 64 })
+}
+
+// ── /party size ───────────────────────────────────────────────────────────────
+
+async function setSize(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const newSize = opts['cap'] as number
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const result = await callParty<{ status: string; data: PartyData; promoted: string[] }>(stub, 'setsize', { requesterId, maxSize: newSize })
+
+  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can change the party size.', flags: 64 })
+  if (result.status === 'invalid')      return c.followup({ content: 'Size must be between 2 and 50.', flags: 64 })
+  if (result.status === 'unchanged')    return c.followup({ content: `The cap is already ${newSize}.`, flags: 64 })
+  if (result.status === 'too_small')    return c.followup({ content: `The party currently has ${result.data.members.length} members. Remove some first or pick a higher cap.`, flags: 64 })
+
+  await Promise.all(result.promoted.map(async (uid) => {
+    await setUserPartyId(c.env.PARTY_KV, guildId, uid, partyId)
+    await sendDM(c.env.DISCORD_BOT_TOKEN, uid, `You've been moved from the queue into **${result.data.name}**! Head to the voice channel and get ready.`)
+  }))
+
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+
+  const promotedNote = result.promoted.length > 0 ? ` ${result.promoted.length} player(s) auto-promoted from queue.` : ''
+  return c.followup({ content: `Party cap set to **${newSize}**.${promotedNote}`, flags: 64 })
 }
 
 // ── /party bump ───────────────────────────────────────────────────────────────

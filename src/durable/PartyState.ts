@@ -3,7 +3,7 @@ import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
-  SetGameResult, ForceAddResult, PromoteResult,
+  SetGameResult, ForceAddResult, PromoteResult, SetSizeResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -37,6 +37,7 @@ export class PartyState extends DurableObject {
         case 'deny':       return Response.json(await this.deny(body))
         case 'remove':     return Response.json(await this.removeFromParty(body))
         case 'promote':    return Response.json(await this.promote(body))
+        case 'setsize':    return Response.json(await this.setSize(body))
         case 'close':      return Response.json(await this.close(body))
         case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
@@ -227,6 +228,33 @@ export class PartyState extends DurableObject {
     data.ownerName = newOwner.displayName
     await this.save(data)
     return { status: 'promoted', data }
+  }
+
+  private async setSize(body: any): Promise<SetSizeResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data, promoted: [] }
+
+    const newSize = Number(body.maxSize)
+    if (!Number.isInteger(newSize) || newSize < 2 || newSize > 50) return { status: 'invalid', data, promoted: [] }
+    if (newSize === data.maxSize) return { status: 'unchanged', data, promoted: [] }
+    if (newSize < data.members.length) return { status: 'too_small', data, promoted: [] }
+
+    data.maxSize = newSize
+
+    // Growing the cap while open opens spots — pull from the queue
+    const promoted: string[] = []
+    if (!data.isClosed) {
+      while (data.queue.length > 0 && data.members.length < data.maxSize) {
+        const next = data.queue.shift()!
+        data.members.push({ ...next, joinedAt: Date.now() })
+        promoted.push(next.userId)
+      }
+    }
+
+    await this.save(data)
+    return { status: 'updated', data, promoted }
   }
 
   private async close(body: any): Promise<CloseResult> {

@@ -134,6 +134,14 @@ const commands = [
       },
       {
         type: 1,
+        name: 'size',
+        description: 'Change your party size (owner only)',
+        options: [
+          { type: 4, name: 'cap', description: 'New max number of players', required: true, min_value: 2, max_value: 50 },
+        ],
+      },
+      {
+        type: 1,
         name: 'promote',
         description: 'Transfer ownership of your party to another member (owner only)',
         options: [
