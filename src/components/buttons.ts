@@ -2,20 +2,9 @@ import type { ComponentContext } from 'discord-hono'
 import type { AppEnv, PartyData } from '../types'
 import {
   callParty, extractMemberInfo, findPartyById, getPartyStub,
-  getUserPartyId, getUserProfile, setUserPartyId,
+  getUserPartyId, getUserProfile, setUserPartyId, trySyncEmbed,
 } from '../lib/party'
-import { editMessage, sendDM } from '../lib/discord'
-import { buildPartyComponents, buildPartyEmbed } from '../lib/embeds'
-
-async function trySyncEmbed(token: string, party: PartyData): Promise<void> {
-  if (!party.embedMessageId || !party.embedChannelId) return
-  try {
-    await editMessage(token, party.embedChannelId, party.embedMessageId, {
-      embeds: [buildPartyEmbed(party)],
-      components: buildPartyComponents(party),
-    })
-  } catch { /* message may have been deleted */ }
-}
+import { sendDM } from '../lib/discord'
 
 // ── Join button (party_join;<partyId>) ────────────────────────────────────────
 

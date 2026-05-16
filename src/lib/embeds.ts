@@ -1,13 +1,5 @@
 import type { PartyData } from '../types'
-
-const GAME_EMOJI: Record<string, string> = {
-  'LoL NA': '⚔️',
-  'LoL PBE': '⚔️',
-  'Starcraft 2': '🌌',
-  'Valorant': '🔫',
-  'Overwatch 2': '🦸',
-  'Other': '🎮',
-}
+import { GAME_EMOJI } from './games'
 
 function embedColor(party: PartyData): number {
   if (party.isClosed) return 0xed4245

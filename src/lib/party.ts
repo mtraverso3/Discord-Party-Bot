@@ -96,6 +96,10 @@ export async function syncEmbed(token: string, party: PartyData): Promise<void> 
   })
 }
 
+export async function trySyncEmbed(token: string, party: PartyData): Promise<void> {
+  try { await syncEmbed(token, party) } catch { /* message may have been deleted */ }
+}
+
 export async function postPartyEmbed(
   token: string,
   channelId: string,

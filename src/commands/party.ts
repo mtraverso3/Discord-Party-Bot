@@ -4,7 +4,7 @@ import {
   addToIndex, callParty, extractMemberInfo, findParty,
   getPartyIndex, getPartyStub, getUserPartyId, getUserProfile,
   markDisbanded, postPartyEmbed, randomId, removeFromIndex,
-  saveUserIgn, setUserPartyId, syncEmbed,
+  saveUserIgn, setUserPartyId, trySyncEmbed,
 } from '../lib/party'
 import { deleteMessage, sendDM } from '../lib/discord'
 import { buildPartyEmbed } from '../lib/embeds'
@@ -17,10 +17,6 @@ function sub(c: CommandContext<AppEnv>): { name: string; opts: Record<string, an
   const opts: Record<string, any> = {}
   for (const o of subCmd?.options ?? []) opts[o.name] = o.value
   return { name: subCmd?.name ?? '', opts }
-}
-
-async function trySyncEmbed(token: string, party: PartyData): Promise<void> {
-  try { await syncEmbed(token, party) } catch { /* message may have been deleted */ }
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────

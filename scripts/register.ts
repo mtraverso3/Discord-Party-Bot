@@ -8,7 +8,7 @@
  * Omit --guild to register globally (takes up to 1 hour to propagate).
  */
 
-export {}
+import { GAMES } from '../src/lib/games'
 
 const APP_ID = process.env['DISCORD_APPLICATION_ID']
 const TOKEN = process.env['DISCORD_BOT_TOKEN']
@@ -23,15 +23,6 @@ const guildId = guildArg !== -1 ? process.argv[guildArg + 1] : undefined
 const endpoint = guildId
   ? `https://discord.com/api/v10/applications/${APP_ID}/guilds/${guildId}/commands`
   : `https://discord.com/api/v10/applications/${APP_ID}/commands`
-
-const GAMES = [
-  { name: 'LoL NA', value: 'LoL NA' },
-  { name: 'LoL PBE', value: 'LoL PBE' },
-  { name: 'Starcraft 2', value: 'Starcraft 2' },
-  { name: 'Valorant', value: 'Valorant' },
-  { name: 'Overwatch 2', value: 'Overwatch 2' },
-  { name: 'Other', value: 'Other' },
-]
 
 const commands = [
   {
