@@ -1,5 +1,4 @@
 import type { PartyData } from '../types'
-import { GAME_EMOJI } from './games'
 
 function embedColor(party: PartyData): number {
   if (party.isClosed) return 0xed4245
@@ -8,7 +7,6 @@ function embedColor(party: PartyData): number {
 }
 
 export function buildPartyEmbed(party: PartyData) {
-  const emoji = GAME_EMOJI[party.game] ?? '🎮'
   const isFull = party.members.length >= party.maxSize
   const statusLabel = party.isClosed ? '🔒 CLOSED' : isFull ? '🟡 FULL' : '🟢 OPEN'
 
@@ -42,12 +40,12 @@ export function buildPartyEmbed(party: PartyData) {
   }
 
   return {
-    title: `${emoji} ${party.name}`,
+    title: party.name,
     description: party.description || null,
     color: embedColor(party),
     fields,
     footer: {
-      text: `${party.game} · ${statusLabel} · ID: ${party.id} · Owner: ${party.ownerName}`,
+      text: `${party.game} · ${statusLabel} · ID: ${party.id}`,
     },
     timestamp: new Date(party.createdAt).toISOString(),
   }

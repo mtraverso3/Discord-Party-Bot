@@ -6,12 +6,3 @@ export const GAMES = [
   { name: 'Overwatch 2', value: 'Overwatch 2' },
   { name: 'Other', value: 'Other' },
 ] as const
-
-export const GAME_EMOJI: Record<string, string> = {
-  'LoL NA': '⚔️',
-  'LoL PBE': '⚔️',
-  'Starcraft 2': '🌌',
-  'Valorant': '🔫',
-  'Overwatch 2': '🦸',
-  'Other': '🎮',
-}
