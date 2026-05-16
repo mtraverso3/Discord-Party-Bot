@@ -84,6 +84,14 @@ const commands = [
       },
       {
         type: 1,
+        name: 'game',
+        description: "Change your party's current game (owner only)",
+        options: [
+          { type: 3, name: 'game', description: 'New game', required: true, choices: GAMES },
+        ],
+      },
+      {
+        type: 1,
         name: 'close',
         description: 'Close your party — new joiners go to queue (owner only)',
       },

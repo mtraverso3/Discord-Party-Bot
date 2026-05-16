@@ -3,6 +3,7 @@ import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
+  SetGameResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -37,6 +38,7 @@ export class PartyState extends DurableObject {
         case 'close':      return Response.json(await this.close(body))
         case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
+        case 'setgame':    return Response.json(await this.setGame(body))
         case 'setmessage': return Response.json(await this.setMessage(body))
         case 'disband':    return Response.json(await this.disband(body))
         default:           return new Response('Not found', { status: 404 })
@@ -237,6 +239,25 @@ export class PartyState extends DurableObject {
     }
 
     return { status: 'not_in', data }
+  }
+
+  private async setGame(body: any): Promise<SetGameResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+    if (data.game === body.game) return { status: 'same_game', data }
+
+    data.game = body.game
+    const ignMap: Record<string, string> = body.ignMap ?? {}
+    for (const m of data.members) {
+      m.ign = ignMap[m.userId]
+    }
+    for (const q of data.queue) {
+      q.ign = ignMap[q.userId]
+    }
+    await this.save(data)
+    return { status: 'updated', data }
   }
 
   private async setMessage(body: any): Promise<PartyData> {

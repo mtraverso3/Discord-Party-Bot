@@ -97,6 +97,11 @@ export type DisbandResult = {
   data: PartyData
 }
 
+export type SetGameResult = {
+  status: 'updated' | 'unauthorized' | 'same_game'
+  data: PartyData
+}
+
 export interface UserProfile {
   igns: Record<string, string>
 }

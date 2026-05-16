@@ -4,7 +4,7 @@ import {
   addToIndex, callParty, extractMemberInfo, findParty,
   getPartyIndex, getPartyStub, getUserPartyId, getUserProfile,
   markDisbanded, postPartyEmbed, randomId, removeFromIndex,
-  saveUserIgn, setUserPartyId, trySyncEmbed,
+  saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
 import { deleteMessage, sendDM } from '../lib/discord'
 import { buildPartyEmbed } from '../lib/embeds'
@@ -36,6 +36,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'info':    return await info(c, guildId, userId, opts)
         case 'list':    return await list(c, guildId)
         case 'ign':     return await ign(c, guildId, userId, opts)
+        case 'game':    return await changeGame(c, guildId, userId, opts)
         case 'close':   return await closeParty(c, guildId, userId)
         case 'open':    return await openParty(c, guildId, userId)
         case 'approve': return await approve(c, guildId, userId, opts)
@@ -254,6 +255,37 @@ async function ign(c: CommandContext<AppEnv>, guildId: string, userId: string, o
   }
 
   return c.followup({ content: `IGN for **${game}** set to **${ignValue}**.`, flags: 64 })
+}
+
+// ── /party game ───────────────────────────────────────────────────────────────
+
+async function changeGame(c: CommandContext<AppEnv>, guildId: string, userId: string, opts: Record<string, any>) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const game = opts['game'] as string
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const party = await callParty<PartyData | null>(stub, 'get')
+  if (!party) return c.followup({ content: 'Party not found.', flags: 64 })
+  if (party.ownerId !== userId) return c.followup({ content: 'Only the party owner can change the game.', flags: 64 })
+  if (party.game === game) return c.followup({ content: `The party is already set to **${game}**.`, flags: 64 })
+
+  // Build IGN map for the new game by fetching every member's and queue entry's profile
+  const allUserIds = [...party.members.map(m => m.userId), ...party.queue.map(q => q.userId)]
+  const profiles = await Promise.all(allUserIds.map(uid => getUserProfile(c.env.PARTY_KV, uid)))
+  const ignMap: Record<string, string> = {}
+  allUserIds.forEach((uid, i) => {
+    const ign = profiles[i]!.igns[game]
+    if (ign) ignMap[uid] = ign
+  })
+
+  const result = await callParty<{ status: string; data: PartyData }>(stub, 'setgame', { requesterId: userId, game, ignMap })
+  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can change the game.', flags: 64 })
+
+  await updateIndexEntry(c.env.PARTY_KV, guildId, partyId, { game })
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+
+  return c.followup({ content: `Game changed to **${game}**.`, flags: 64 })
 }
 
 // ── /party close ──────────────────────────────────────────────────────────────

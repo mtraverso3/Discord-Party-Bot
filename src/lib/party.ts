@@ -24,6 +24,19 @@ export async function removeFromIndex(kv: KVNamespace, guildId: string, partyId:
   await savePartyIndex(kv, guildId, index.filter(e => e.id !== partyId))
 }
 
+export async function updateIndexEntry(
+  kv: KVNamespace,
+  guildId: string,
+  partyId: string,
+  updates: Partial<PartyIndexEntry>,
+): Promise<void> {
+  const index = await getPartyIndex(kv, guildId)
+  const idx = index.findIndex(e => e.id === partyId)
+  if (idx === -1) return
+  index[idx] = { ...index[idx]!, ...updates }
+  await savePartyIndex(kv, guildId, index)
+}
+
 export async function getUserPartyId(kv: KVNamespace, guildId: string, userId: string): Promise<string | null> {
   return kv.get(`user:${guildId}:${userId}`)
 }
