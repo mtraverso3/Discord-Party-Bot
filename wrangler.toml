@@ -1,0 +1,23 @@
+name = "discord-party-bot"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+name = "PARTY_STATE"
+class_name = "PartyState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PartyState"]
+
+[[kv_namespaces]]
+binding = "PARTY_KV"
+id = "placeholder_replace_with_real_id"
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+# Secrets set via: wrangler secret put SECRET_NAME
+# DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID
