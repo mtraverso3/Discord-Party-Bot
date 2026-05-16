@@ -43,6 +43,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'approve': return await approve(c, guildId, userId, opts)
         case 'deny':    return await deny(c, guildId, userId, opts)
         case 'remove':    return await removeUserFromParty(c, guildId, userId, opts)
+        case 'promote': return await promote(c, guildId, userId, opts)
         case 'disband': return await disband(c, guildId, userId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
@@ -434,6 +435,26 @@ async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, r
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
   return c.followup({ content: `<@${targetId}> removed from the party.${result.promoted ? ` <@${result.promoted}> promoted from queue.` : ''}`, flags: 64 })
+}
+
+// ── /party promote ────────────────────────────────────────────────────────────
+
+async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const targetId = opts['user'] as string
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const result = await callParty<{ status: string; data: PartyData }>(stub, 'promote', { requesterId, userId: targetId })
+
+  if (result.status === 'unauthorized')  return c.followup({ content: 'Only the party owner can transfer ownership.', flags: 64 })
+  if (result.status === 'already_owner') return c.followup({ content: "You're already the owner.", flags: 64 })
+  if (result.status === 'not_in')        return c.followup({ content: 'That user is not in the party.', flags: 64 })
+
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `You are now the owner of **${result.data.name}**.`)
+
+  return c.followup({ content: `Ownership transferred to <@${targetId}>.`, flags: 64 })
 }
 
 // ── /party bump ───────────────────────────────────────────────────────────────

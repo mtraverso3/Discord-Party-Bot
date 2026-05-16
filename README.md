@@ -30,6 +30,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party approve @user`     | Approve a queued player (owner only)           |
 | `/party deny @user`        | Remove a player from the queue (owner only)    |
 | `/party remove @user`      | Remove a member (owner only)                   |
+| `/party promote @user`     | Transfer ownership to another member           |
 | `/party bump`              | Repost embed to bottom of channel (owner only) |
 | `/party disband`           | Disband the party and notify everyone          |
 

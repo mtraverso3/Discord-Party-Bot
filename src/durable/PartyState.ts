@@ -3,7 +3,7 @@ import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
-  SetGameResult, ForceAddResult,
+  SetGameResult, ForceAddResult, PromoteResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -36,6 +36,7 @@ export class PartyState extends DurableObject {
         case 'approve':    return Response.json(await this.approve(body))
         case 'deny':       return Response.json(await this.deny(body))
         case 'remove':     return Response.json(await this.removeFromParty(body))
+        case 'promote':    return Response.json(await this.promote(body))
         case 'close':      return Response.json(await this.close(body))
         case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
@@ -210,6 +211,22 @@ export class PartyState extends DurableObject {
 
     await this.save(data)
     return { status: 'removed', data, promoted }
+  }
+
+  private async promote(body: any): Promise<PromoteResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+    if (body.userId === data.ownerId) return { status: 'already_owner', data }
+
+    const newOwner = data.members.find(m => m.userId === body.userId)
+    if (!newOwner) return { status: 'not_in', data }
+
+    data.ownerId = newOwner.userId
+    data.ownerName = newOwner.displayName
+    await this.save(data)
+    return { status: 'promoted', data }
   }
 
   private async close(body: any): Promise<CloseResult> {

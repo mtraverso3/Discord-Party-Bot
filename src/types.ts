@@ -107,6 +107,11 @@ export type ForceAddResult = {
   data: PartyData
 }
 
+export type PromoteResult = {
+  status: 'promoted' | 'unauthorized' | 'not_in' | 'already_owner'
+  data: PartyData
+}
+
 export interface UserProfile {
   igns: Record<string, string>
 }

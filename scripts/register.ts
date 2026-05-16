@@ -134,6 +134,14 @@ const commands = [
       },
       {
         type: 1,
+        name: 'promote',
+        description: 'Transfer ownership of your party to another member (owner only)',
+        options: [
+          { type: 6, name: 'user', description: 'New owner', required: true },
+        ],
+      },
+      {
+        type: 1,
         name: 'disband',
         description: 'Disband your party (owner only)',
       },
