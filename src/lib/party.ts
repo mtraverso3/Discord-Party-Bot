@@ -151,6 +151,16 @@ export function extractMemberInfo(interaction: any): {
   }
 }
 
+export function isGuildAdmin(interaction: any): boolean {
+  const perms = interaction.member?.permissions
+  if (!perms) return false
+  try {
+    return (BigInt(perms) & 0x8n) === 0x8n
+  } catch {
+    return false
+  }
+}
+
 export function extractResolvedUser(interaction: any, userId: string): {
   username: string
   displayName: string

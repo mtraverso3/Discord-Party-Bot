@@ -44,6 +44,7 @@ export class PartyState extends DurableObject {
         case 'setgame':    return Response.json(await this.setGame(body))
         case 'setmessage': return Response.json(await this.setMessage(body))
         case 'disband':    return Response.json(await this.disband(body))
+        case 'forcedisband': return Response.json(await this.forceDisband())
         default:           return new Response('Not found', { status: 404 })
       }
     } catch (e) {
@@ -344,6 +345,15 @@ export class PartyState extends DurableObject {
 
     if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
 
+    const finalData = { ...data }
+    await this.ctx.storage.deleteAll()
+    this.cache = null
+    return { status: 'disbanded', data: finalData }
+  }
+
+  private async forceDisband(): Promise<DisbandResult | { status: 'gone' }> {
+    const data = await this.load()
+    if (!data) return { status: 'gone' }
     const finalData = { ...data }
     await this.ctx.storage.deleteAll()
     this.cache = null

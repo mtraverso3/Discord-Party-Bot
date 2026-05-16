@@ -34,6 +34,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party promote @user`     | Transfer ownership to another member           |
 | `/party bump`              | Repost embed to bottom of channel (owner only) |
 | `/party disband`           | Disband the party and notify everyone          |
+| `/party clear`             | Clear all parties in this server (admin only)  |
 
 ## Stack
 

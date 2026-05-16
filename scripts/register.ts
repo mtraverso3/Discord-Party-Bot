@@ -158,6 +158,12 @@ const commands = [
         name: 'bump',
         description: 'Repost the party embed to the bottom of this channel (owner only)',
       },
+      {
+        type: 1,
+        name: 'clear',
+        description: 'Clear all active parties in this server (admin only)',
+        default_member_permissions: '8',
+      },
     ],
   },
 ]

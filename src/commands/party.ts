@@ -2,7 +2,7 @@ import type { CommandContext } from 'discord-hono'
 import type { AppEnv, PartyData } from '../types'
 import {
   addToIndex, callParty, extractMemberInfo, extractResolvedUser, findParty,
-  getPartyIndex, getPartyStub, getUserPartyId, getUserProfile,
+  getPartyIndex, getPartyStub, getUserPartyId, getUserProfile, isGuildAdmin,
   markDisbanded, postPartyEmbed, randomId, removeFromIndex,
   saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
@@ -46,6 +46,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'promote': return await promote(c, guildId, userId, opts)
         case 'size':    return await setSize(c, guildId, userId, opts)
         case 'disband': return await disband(c, guildId, userId)
+        case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
       }
@@ -504,6 +505,42 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
   await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
 
   return c.followup({ content: 'Party bumped!', flags: 64 })
+}
+
+// ── /party clear (admin) ──────────────────────────────────────────────────────
+
+async function clearAll(c: CommandContext<AppEnv>, guildId: string) {
+  if (!isGuildAdmin(c.interaction)) {
+    return c.followup({ content: 'Only server admins can clear all parties.', flags: 64 })
+  }
+
+  const index = await getPartyIndex(c.env.PARTY_KV, guildId)
+  if (index.length === 0) return c.followup({ content: 'No active parties to clear.', flags: 64 })
+
+  let cleared = 0
+  await Promise.all(index.map(async (entry) => {
+    const stub = getPartyStub(c.env, guildId, entry.id)
+    const result = await callParty<{ status: string; data?: PartyData }>(stub, 'forcedisband').catch(() => null)
+    if (!result || result.status === 'gone' || !result.data) return
+    cleared++
+    const party = result.data
+
+    const notifyIds = [
+      ...party.members.map(m => m.userId),
+      ...party.queue.map(q => q.userId),
+    ]
+    await Promise.all([
+      ...notifyIds.map(uid => sendDM(c.env.DISCORD_BOT_TOKEN, uid, `**${party.name}** was cleared by a server admin.`)),
+      ...party.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
+      ...party.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
+      markDisbanded(c.env.DISCORD_BOT_TOKEN, party).catch(() => {}),
+    ])
+  }))
+
+  // Reset the guild index in one shot
+  await c.env.PARTY_KV.put(`guild:${guildId}:parties`, JSON.stringify([]))
+
+  return c.followup({ content: `Cleared ${cleared} ${cleared === 1 ? 'party' : 'parties'}.`, flags: 64 })
 }
 
 // ── /party disband ────────────────────────────────────────────────────────────
