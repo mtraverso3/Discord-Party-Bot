@@ -4,7 +4,6 @@ import {
   callParty, extractMemberInfo, findPartyById, getPartyStub,
   getUserPartyId, getUserProfile, setUserPartyId, trySyncEmbed,
 } from '../lib/party'
-import { sendDM } from '../lib/discord'
 
 // ── Join button (party_join;<partyId>) ────────────────────────────────────────
 
@@ -128,15 +127,6 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
 
       if (result.promoted) {
         await setUserPartyId(c.env.PARTY_KV, guildId, result.promoted, partyId)
-        await sendDM(c.env.DISCORD_BOT_TOKEN, result.promoted, `You've been moved from the queue into **${result.data.name}**! Head to the voice channel and get ready.`)
-      }
-
-      if (result.data.isClosed && result.status === 'left' && !result.promoted && result.data.queue.length > 0) {
-        await sendDM(
-          c.env.DISCORD_BOT_TOKEN,
-          result.data.ownerId,
-          `A spot opened in **${result.data.name}** (${result.data.members.length}/${result.data.maxSize}). ${result.data.queue.length} player(s) in queue — use \`/party approve @user\` to let someone in.`,
-        )
       }
 
       const msg = result.status === 'left'

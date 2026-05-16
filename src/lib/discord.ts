@@ -44,13 +44,3 @@ export async function deleteMessage(
 ): Promise<void> {
   await discordFetch(token, `/channels/${channelId}/messages/${messageId}`, { method: 'DELETE' })
 }
-
-export async function sendDM(token: string, userId: string, content: string): Promise<void> {
-  const dmRes = await discordFetch(token, '/users/@me/channels', {
-    method: 'POST',
-    body: JSON.stringify({ recipient_id: userId }),
-  })
-  if (!dmRes.ok) return
-  const dm = await dmRes.json<{ id: string }>()
-  await postMessage(token, dm.id, { content })
-}

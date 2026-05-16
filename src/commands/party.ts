@@ -6,7 +6,7 @@ import {
   markDisbanded, postPartyEmbed, randomId, removeFromIndex,
   saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
-import { deleteMessage, sendDM } from '../lib/discord'
+import { deleteMessage } from '../lib/discord'
 import { buildPartyEmbed } from '../lib/embeds'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -169,15 +169,6 @@ async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string)
 
   if (result.promoted) {
     await setUserPartyId(c.env.PARTY_KV, guildId, result.promoted, partyId)
-    await sendDM(c.env.DISCORD_BOT_TOKEN, result.promoted, `You've been moved from the queue into **${result.data.name}**! Head to the voice channel and get ready.`)
-  }
-
-  if (result.data.isClosed && result.status === 'left' && !result.promoted && result.data.queue.length > 0) {
-    await sendDM(
-      c.env.DISCORD_BOT_TOKEN,
-      result.data.ownerId,
-      `A spot opened in **${result.data.name}** (${result.data.members.length}/${result.data.maxSize}). ${result.data.queue.length} player(s) in queue — use \`/party approve @user\` to let someone in.`,
-    )
   }
 
   const msg = result.status === 'left'
@@ -321,10 +312,9 @@ async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: str
   if (result.status === 'unauthorized')  return c.followup({ content: 'Only the party owner can open the party.', flags: 64 })
   if (result.status === 'already_open') return c.followup({ content: 'The party is already open.', flags: 64 })
 
-  await Promise.all(result.promoted.map(async (uid) => {
-    await setUserPartyId(c.env.PARTY_KV, guildId, uid, partyId)
-    await sendDM(c.env.DISCORD_BOT_TOKEN, uid, `You've been moved from the queue into **${result.data.name}**! Head to the voice channel and get ready.`)
-  }))
+  await Promise.all(result.promoted.map(uid =>
+    setUserPartyId(c.env.PARTY_KV, guildId, uid, partyId),
+  ))
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
@@ -368,7 +358,6 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
 
   await setUserPartyId(c.env.PARTY_KV, guildId, targetId, partyId)
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-  await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `You were added to **${result.data.name}**! Head to the voice channel and get ready.`)
 
   return c.followup({ content: `<@${targetId}> added to the party.`, flags: 64 })
 }
@@ -389,7 +378,6 @@ async function approve(c: CommandContext<AppEnv>, guildId: string, requesterId: 
 
   await setUserPartyId(c.env.PARTY_KV, guildId, targetId, partyId)
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-  await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `You've been approved into **${result.data.name}**! Head to the voice channel and get ready.`)
 
   return c.followup({ content: `<@${targetId}> approved into the party.`, flags: 64 })
 }
@@ -409,7 +397,6 @@ async function deny(c: CommandContext<AppEnv>, guildId: string, requesterId: str
 
   await setUserPartyId(c.env.PARTY_KV, guildId, targetId, null)
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-  await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `Your request to join **${result.data.name}** was denied.`)
 
   return c.followup({ content: `<@${targetId}> removed from the queue.`, flags: 64 })
 }
@@ -429,11 +416,9 @@ async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, r
   if (result.status === 'not_in')       return c.followup({ content: 'That user is not in the party.', flags: 64 })
 
   await setUserPartyId(c.env.PARTY_KV, guildId, targetId, null)
-  await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `You were removed from **${result.data.name}**.`)
 
   if (result.promoted) {
     await setUserPartyId(c.env.PARTY_KV, guildId, result.promoted, partyId)
-    await sendDM(c.env.DISCORD_BOT_TOKEN, result.promoted, `You've been moved from the queue into **${result.data.name}**! Head to the voice channel and get ready.`)
   }
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
@@ -455,7 +440,6 @@ async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (result.status === 'not_in')        return c.followup({ content: 'That user is not in the party.', flags: 64 })
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-  await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `You are now the owner of **${result.data.name}**.`)
 
   return c.followup({ content: `Ownership transferred to <@${targetId}>.`, flags: 64 })
 }
@@ -475,10 +459,9 @@ async function setSize(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (result.status === 'unchanged')    return c.followup({ content: `The cap is already ${newSize}.`, flags: 64 })
   if (result.status === 'too_small')    return c.followup({ content: `The party currently has ${result.data.members.length} members. Remove some first or pick a higher cap.`, flags: 64 })
 
-  await Promise.all(result.promoted.map(async (uid) => {
-    await setUserPartyId(c.env.PARTY_KV, guildId, uid, partyId)
-    await sendDM(c.env.DISCORD_BOT_TOKEN, uid, `You've been moved from the queue into **${result.data.name}**! Head to the voice channel and get ready.`)
-  }))
+  await Promise.all(result.promoted.map(uid =>
+    setUserPartyId(c.env.PARTY_KV, guildId, uid, partyId),
+  ))
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
@@ -525,12 +508,7 @@ async function clearAll(c: CommandContext<AppEnv>, guildId: string) {
     cleared++
     const party = result.data
 
-    const notifyIds = [
-      ...party.members.map(m => m.userId),
-      ...party.queue.map(q => q.userId),
-    ]
     await Promise.all([
-      ...notifyIds.map(uid => sendDM(c.env.DISCORD_BOT_TOKEN, uid, `**${party.name}** was cleared by a server admin.`)),
       ...party.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
       ...party.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
       markDisbanded(c.env.DISCORD_BOT_TOKEN, party).catch(() => {}),
@@ -554,12 +532,7 @@ async function disband(c: CommandContext<AppEnv>, guildId: string, userId: strin
 
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can disband the party.', flags: 64 })
 
-  const notifyIds = [
-    ...result.data.members.filter(m => m.userId !== userId).map(m => m.userId),
-    ...result.data.queue.map(q => q.userId),
-  ]
   await Promise.all([
-    ...notifyIds.map(uid => sendDM(c.env.DISCORD_BOT_TOKEN, uid, `**${result.data.name}** has been disbanded by the owner.`)),
     ...result.data.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
     ...result.data.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
     removeFromIndex(c.env.PARTY_KV, guildId, partyId),
