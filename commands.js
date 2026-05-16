@@ -97,4 +97,4 @@ const PARTY_COMMAND = {
   ],
 };
 
-InstallGlobalCommands(process.env.APP_ID, [PARTY_COMMAND]);
+InstallGlobalCommands(process.env.DISCORD_APPLICATION_ID, [PARTY_COMMAND]);

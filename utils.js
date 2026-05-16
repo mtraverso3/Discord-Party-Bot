@@ -5,7 +5,7 @@ export async function DiscordRequest(endpoint, options) {
   if (options.body) options.body = JSON.stringify(options.body);
   const res = await fetch(url, {
     headers: {
-      Authorization: `Bot ${process.env.DISCORD_TOKEN}`,
+      Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`,
       'Content-Type': 'application/json; charset=UTF-8',
       'User-Agent': 'DiscordBot (https://github.com/discord/discord-example-app, 1.0.0)',
     },
