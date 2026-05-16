@@ -81,13 +81,14 @@ async function create(
   }
 
   const game = opts['game'] ?? 'Other'
+  const name = (opts['name'] as string | undefined)?.trim() || `${displayName}'s party`
   const partyId = randomId()
   const stub = getPartyStub(c.env, guildId, partyId)
 
   const party = await callParty<PartyData>(stub, 'create', {
     id: partyId,
     guildId,
-    name: opts['name'],
+    name,
     description: opts['description'] ?? '',
     game,
     ownerId: userId,
