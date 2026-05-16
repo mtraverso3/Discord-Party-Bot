@@ -3,7 +3,7 @@ import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
-  SetGameResult,
+  SetGameResult, ForceAddResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -31,6 +31,7 @@ export class PartyState extends DurableObject {
         case 'create':     return Response.json(await this.create(body))
         case 'get':        return Response.json(await this.load())
         case 'join':       return Response.json(await this.join(body))
+        case 'forceadd':   return Response.json(await this.forceAdd(body))
         case 'leave':      return Response.json(await this.leave(body))
         case 'approve':    return Response.json(await this.approve(body))
         case 'deny':       return Response.json(await this.deny(body))
@@ -101,6 +102,29 @@ export class PartyState extends DurableObject {
     data.queue.push(qEntry)
     await this.save(data)
     return { status: 'queued', data }
+  }
+
+  private async forceAdd(body: any): Promise<ForceAddResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+    if (data.members.some(m => m.userId === body.userId)) return { status: 'already_member', data }
+    if (data.members.length >= data.maxSize) return { status: 'full', data }
+
+    // If the user was waiting in the queue, lift them out first
+    const queueIdx = data.queue.findIndex(q => q.userId === body.userId)
+    if (queueIdx !== -1) data.queue.splice(queueIdx, 1)
+
+    data.members.push({
+      userId: body.userId,
+      username: body.username,
+      displayName: body.displayName,
+      ign: body.ign,
+      joinedAt: Date.now(),
+    })
+    await this.save(data)
+    return { status: 'added', data }
   }
 
   private async leave(body: any): Promise<LeaveResult> {

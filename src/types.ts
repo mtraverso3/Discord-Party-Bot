@@ -102,6 +102,11 @@ export type SetGameResult = {
   data: PartyData
 }
 
+export type ForceAddResult = {
+  status: 'added' | 'already_member' | 'full' | 'unauthorized'
+  data: PartyData
+}
+
 export interface UserProfile {
   igns: Record<string, string>
 }

@@ -150,3 +150,17 @@ export function extractMemberInfo(interaction: any): {
     displayName: (interaction.member?.nick ?? user.global_name ?? user.username) as string,
   }
 }
+
+export function extractResolvedUser(interaction: any, userId: string): {
+  username: string
+  displayName: string
+} | null {
+  const resolved = (interaction.data as any)?.resolved
+  const user = resolved?.users?.[userId]
+  if (!user) return null
+  const member = resolved?.members?.[userId]
+  return {
+    username: user.username as string,
+    displayName: (member?.nick ?? user.global_name ?? user.username) as string,
+  }
+}

@@ -102,6 +102,14 @@ const commands = [
       },
       {
         type: 1,
+        name: 'adduser',
+        description: 'Directly add a user to your party (owner only)',
+        options: [
+          { type: 6, name: 'user', description: 'User to add', required: true },
+        ],
+      },
+      {
+        type: 1,
         name: 'approve',
         description: 'Approve a queued player into the party (owner only)',
         options: [

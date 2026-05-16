@@ -1,7 +1,7 @@
 import type { CommandContext } from 'discord-hono'
 import type { AppEnv, PartyData } from '../types'
 import {
-  addToIndex, callParty, extractMemberInfo, findParty,
+  addToIndex, callParty, extractMemberInfo, extractResolvedUser, findParty,
   getPartyIndex, getPartyStub, getUserPartyId, getUserProfile,
   markDisbanded, postPartyEmbed, randomId, removeFromIndex,
   saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
@@ -39,6 +39,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'game':    return await changeGame(c, guildId, userId, opts)
         case 'close':   return await closeParty(c, guildId, userId)
         case 'open':    return await openParty(c, guildId, userId)
+        case 'adduser': return await addUser(c, guildId, userId, opts)
         case 'approve': return await approve(c, guildId, userId, opts)
         case 'deny':    return await deny(c, guildId, userId, opts)
         case 'remove':    return await removeUserFromParty(c, guildId, userId, opts)
@@ -327,6 +328,45 @@ async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: str
     ? ` ${result.promoted.length} player(s) auto-promoted from queue.`
     : ''
   return c.followup({ content: `Party opened!${promotedNote}`, flags: 64 })
+}
+
+// ── /party adduser ────────────────────────────────────────────────────────────
+
+async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const targetId = opts['user'] as string
+  if (targetId === requesterId) return c.followup({ content: "You're already in the party.", flags: 64 })
+
+  const resolved = extractResolvedUser(c.interaction, targetId)
+  if (!resolved) return c.followup({ content: "Couldn't resolve that user.", flags: 64 })
+
+  const [targetParty, indexEntry, profile] = await Promise.all([
+    getUserPartyId(c.env.PARTY_KV, guildId, targetId),
+    findParty(c.env.PARTY_KV, guildId, partyId),
+    getUserProfile(c.env.PARTY_KV, targetId),
+  ])
+
+  if (targetParty && targetParty !== partyId) {
+    return c.followup({ content: `<@${targetId}> is already in party \`${targetParty}\`.`, flags: 64 })
+  }
+
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const ign = indexEntry ? profile.igns[indexEntry.game] : undefined
+  const result = await callParty<{ status: string; data: PartyData }>(stub, 'forceadd', {
+    requesterId, userId: targetId, username: resolved.username, displayName: resolved.displayName, ign,
+  })
+
+  if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can add members directly.', flags: 64 })
+  if (result.status === 'already_member') return c.followup({ content: `<@${targetId}> is already in the party.`, flags: 64 })
+  if (result.status === 'full')           return c.followup({ content: 'The party is full. Raise the cap or remove someone first.', flags: 64 })
+
+  await setUserPartyId(c.env.PARTY_KV, guildId, targetId, partyId)
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await sendDM(c.env.DISCORD_BOT_TOKEN, targetId, `You were added to **${result.data.name}**! Head to the voice channel and get ready.`)
+
+  return c.followup({ content: `<@${targetId}> added to the party.`, flags: 64 })
 }
 
 // ── /party approve ────────────────────────────────────────────────────────────
