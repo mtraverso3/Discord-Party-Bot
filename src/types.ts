@@ -70,8 +70,8 @@ export type DenyResult = {
   data: PartyData
 }
 
-export type KickResult = {
-  status: 'kicked' | 'not_in' | 'unauthorized' | 'is_owner'
+export type RemoveResult = {
+  status: 'removed' | 'not_in' | 'unauthorized' | 'is_owner'
   data: PartyData
   promoted?: string
 }

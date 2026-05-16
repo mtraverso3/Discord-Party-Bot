@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
-  KickResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
+  RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -33,7 +33,7 @@ export class PartyState extends DurableObject {
         case 'leave':      return Response.json(await this.leave(body))
         case 'approve':    return Response.json(await this.approve(body))
         case 'deny':       return Response.json(await this.deny(body))
-        case 'kick':       return Response.json(await this.kick(body))
+        case 'remove':     return Response.json(await this.removeFromParty(body))
         case 'close':      return Response.json(await this.close(body))
         case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
@@ -163,7 +163,7 @@ export class PartyState extends DurableObject {
     return { status: 'denied', data }
   }
 
-  private async kick(body: any): Promise<KickResult> {
+  private async removeFromParty(body: any): Promise<RemoveResult> {
     const data = await this.load()
     if (!data) throw new Error('Party not found')
 
@@ -183,7 +183,7 @@ export class PartyState extends DurableObject {
     }
 
     await this.save(data)
-    return { status: 'kicked', data, promoted }
+    return { status: 'removed', data, promoted }
   }
 
   private async close(body: any): Promise<CloseResult> {

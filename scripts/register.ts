@@ -110,10 +110,10 @@ const commands = [
       },
       {
         type: 1,
-        name: 'kick',
-        description: 'Kick a member from your party (owner only)',
+        name: 'remove',
+        description: 'Remove a member from your party (owner only)',
         options: [
-          { type: 6, name: 'user', description: 'User to kick', required: true },
+          { type: 6, name: 'user', description: 'User to remove from party', required: true },
         ],
       },
       {

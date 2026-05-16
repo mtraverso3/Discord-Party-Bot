@@ -40,7 +40,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'open':    return await openParty(c, guildId, userId)
         case 'approve': return await approve(c, guildId, userId, opts)
         case 'deny':    return await deny(c, guildId, userId, opts)
-        case 'kick':    return await kick(c, guildId, userId, opts)
+        case 'remove':    return await removeUserFromParty(c, guildId, userId, opts)
         case 'disband': return await disband(c, guildId, userId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
@@ -338,18 +338,18 @@ async function deny(c: CommandContext<AppEnv>, guildId: string, requesterId: str
   return c.followup({ content: `<@${targetId}> removed from the queue.`, flags: 64 })
 }
 
-// ── /party kick ───────────────────────────────────────────────────────────────
+// ── /party remove ───────────────────────────────────────────────────────────────
 
-async function kick(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
+async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
   const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
   const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData; promoted?: string }>(stub, 'kick', { requesterId, userId: targetId })
+  const result = await callParty<{ status: string; data: PartyData; promoted?: string }>(stub, 'remove', { requesterId, userId: targetId })
 
-  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can kick members.', flags: 64 })
-  if (result.status === 'is_owner')     return c.followup({ content: "You can't kick yourself. Use `/party disband` to end the party.", flags: 64 })
+  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can remove members.', flags: 64 })
+  if (result.status === 'is_owner')     return c.followup({ content: "You can't remove yourself. Use `/party disband` to end the party.", flags: 64 })
   if (result.status === 'not_in')       return c.followup({ content: 'That user is not in the party.', flags: 64 })
 
   await setUserPartyId(c.env.PARTY_KV, guildId, targetId, null)

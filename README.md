@@ -11,25 +11,25 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 - Join/Leave buttons directly on the embed
 - Queue system: close a party to funnel joiners to queue, approve/deny individually or re-open to auto-promote
 - Per-user IGN profiles stored globally (set once, auto-filled on join/create)
-- DM notifications: kicked, promoted from queue, party disbanded
+- DM notifications: removed, promoted from queue, party disbanded
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `/party create` | Create a new party |
-| `/party join <name or ID>` | Join a party or its queue |
-| `/party leave` | Leave your current party or queue |
-| `/party info [party]` | Show party embed (defaults to yours) |
-| `/party list` | List all active parties |
-| `/party ign <game> <name>` | Save your in-game name for a game |
-| `/party close` | Close your party — new joiners queue |
-| `/party open` | Re-open and auto-promote queued players |
-| `/party approve @user` | Approve a queued player (owner only) |
-| `/party deny @user` | Remove a player from the queue (owner only) |
-| `/party kick @user` | Kick a member (owner only) |
-| `/party bump` | Repost embed to bottom of channel (owner only) |
-| `/party disband` | Disband the party and notify everyone |
+| Command                    | Description                                    |
+|----------------------------|------------------------------------------------|
+| `/party create`            | Create a new party                             |
+| `/party join <name or ID>` | Join a party or its queue                      |
+| `/party leave`             | Leave your current party or queue              |
+| `/party info [party]`      | Show party embed (defaults to yours)           |
+| `/party list`              | List all active parties                        |
+| `/party ign <game> <name>` | Save your in-game name for a game              |
+| `/party close`             | Close your party — new joiners queue           |
+| `/party open`              | Re-open and auto-promote queued players        |
+| `/party approve @user`     | Approve a queued player (owner only)           |
+| `/party deny @user`        | Remove a player from the queue (owner only)    |
+| `/party remove @user`      | Remove a member (owner only)                   |
+| `/party bump`              | Repost embed to bottom of channel (owner only) |
+| `/party disband`           | Disband the party and notify everyone          |
 
 ## Stack
 
