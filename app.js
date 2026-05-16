@@ -8,14 +8,11 @@ import {
   MessageComponentTypes,
   verifyKeyMiddleware,
 } from 'discord-interactions';
-import { getRandomEmoji, DiscordRequest } from './utils.js';
+import { DiscordRequest } from './utils.js';
 import PlayerManager from './ignmanager.js';
 
-// Create an express app
 const app = express();
-// Get port, or default to 3000
 const PORT = process.env.PORT || 3000;
-// To keep track of active parties
 const activeParties = {};
 const playerManager = new PlayerManager();
 
@@ -75,48 +72,17 @@ function createPartyComponents(party) {
     },
   ];
 }
-/**
- * Interactions endpoint URL where Discord will send HTTP requests
- * Parse request body and verifies incoming requests using discord-interactions package
- */
+
 app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async function (req, res) {
-  // Interaction id, type and data
   const { id, type, data } = req.body;
 
-  /**
-   * Handle verification requests
-   */
   if (type === InteractionType.PING) {
     return res.send({ type: InteractionResponseType.PONG });
   }
 
-  /**
-   * Handle slash command requests
-   * See https://discord.com/developers/docs/interactions/application-commands#slash-commands
-   */
   if (type === InteractionType.APPLICATION_COMMAND) {
     const { name } = data;
 
-    // "test" command
-    if (name === 'test') {
-      // Send a message into the channel where command was triggered from
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          flags: InteractionResponseFlags.IS_COMPONENTS_V2,
-          components: [
-            {
-              type: MessageComponentTypes.TEXT_DISPLAY,
-              // Fetches a random emoji to send from a helper function
-              content: `Yeah I'm here`
-            }
-          ]
-        },
-      });
-    }
-
-    
-    
     if (name === 'party') {
       const subcommand = req.body.data.options?.[0]?.name;
       const suboptions = req.body.data.options?.[0]?.options || [];
@@ -157,20 +123,14 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (!party) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You do not have a party to add members to.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You do not have a party to add members to.' },
           });
         }
 
         if (!targetUserId) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Please select a user to add.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'Please select a user to add.' },
           });
         }
 
@@ -178,17 +138,9 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
           party.members.push(targetUserId);
         }
 
-        const countText = `${party.members.length}/${party.userLimit}`;
-        const memberList = party.members.map((memberId) => `<@${memberId}>`).join(', ');
         const updateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
-
         try {
-          await DiscordRequest(updateEndpoint, {
-            method: 'PATCH',
-            body: {
-              components: createPartyComponents(party),
-            },
-          });
+          await DiscordRequest(updateEndpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
         } catch (err) {
           console.error('Error updating party message after add:', err);
         }
@@ -207,20 +159,14 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (!party) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You do not have a party to remove members from.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You do not have a party to remove members from.' },
           });
         }
 
         if (!targetUserId) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Please select a user to remove.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'Please select a user to remove.' },
           });
         }
 
@@ -228,25 +174,16 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         party.waitlist = party.waitlist || [];
         if (party.members.length < party.userLimit && party.waitlist.length) {
           const promotedUser = party.waitlist.shift();
-          if (!party.members.includes(promotedUser)) {
-            party.members.push(promotedUser);
-          }
+          if (!party.members.includes(promotedUser)) party.members.push(promotedUser);
         }
 
-        const countText = `${party.members.length}/${party.userLimit}`;
         const updateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
-
         try {
           if (party.members.length === 0) {
             delete activeParties[party.partyId];
             await DiscordRequest(updateEndpoint, { method: 'DELETE' });
           } else {
-            await DiscordRequest(updateEndpoint, {
-              method: 'PATCH',
-              body: {
-                components: createPartyComponents(party),
-              },
-            });
+            await DiscordRequest(updateEndpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
           }
         } catch (err) {
           console.error('Error updating party message after remove:', err);
@@ -266,62 +203,42 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (!party) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You do not have a party to ban users from.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You do not have a party to ban users from.' },
           });
         }
 
         if (!targetUserId) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Please select a user to ban.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'Please select a user to ban.' },
           });
         }
 
         if (targetUserId === userId) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You cannot ban yourself.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You cannot ban yourself.' },
           });
         }
 
         party.bannedUsers = party.bannedUsers || [];
-        if (!party.bannedUsers.includes(targetUserId)) {
-          party.bannedUsers.push(targetUserId);
-        }
+        if (!party.bannedUsers.includes(targetUserId)) party.bannedUsers.push(targetUserId);
 
         party.members = party.members.filter((memberId) => memberId !== targetUserId);
-        party.waitlist = party.waitlist || [];
-        party.waitlist = party.waitlist.filter((memberId) => memberId !== targetUserId);
+        party.waitlist = (party.waitlist || []).filter((memberId) => memberId !== targetUserId);
 
         if (party.members.length < party.userLimit && party.waitlist.length) {
           const promotedUser = party.waitlist.shift();
-          if (!party.members.includes(promotedUser)) {
-            party.members.push(promotedUser);
-          }
+          if (!party.members.includes(promotedUser)) party.members.push(promotedUser);
         }
 
         const updateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
-
         try {
           if (party.members.length === 0) {
             delete activeParties[party.partyId];
             await DiscordRequest(updateEndpoint, { method: 'DELETE' });
           } else {
-            await DiscordRequest(updateEndpoint, {
-              method: 'PATCH',
-              body: {
-                components: createPartyComponents(party),
-              },
-            });
+            await DiscordRequest(updateEndpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
           }
         } catch (err) {
           console.error('Error updating party message after ban:', err);
@@ -329,10 +246,7 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
 
         return res.send({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            flags: InteractionResponseFlags.EPHEMERAL,
-            content: `Banned <@${targetUserId}> from ${party.partyName}.`,
-          },
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: `Banned <@${targetUserId}> from ${party.partyName}.` },
         });
       } else if (subcommand === 'changevc') {
         const newVcChannel = getOption('voice_channel');
@@ -341,44 +255,28 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (!party) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You are not in a party to change the voice channel for.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You are not in a party to change the voice channel for.' },
           });
         }
 
         if (!newVcChannel) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Please select a voice channel.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'Please select a voice channel.' },
           });
         }
 
         party.vcLink = newVcChannel;
-
         const updateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
-
         try {
-          await DiscordRequest(updateEndpoint, {
-            method: 'PATCH',
-            body: {
-              components: createPartyComponents(party),
-            },
-          });
+          await DiscordRequest(updateEndpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
         } catch (err) {
           console.error('Error updating party message after changevc:', err);
         }
 
         return res.send({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            flags: InteractionResponseFlags.EPHEMERAL,
-            content: `Changed voice channel to <#${newVcChannel}>.`,
-          },
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: `Changed voice channel to <#${newVcChannel}>.` },
         });
       } else if (subcommand === 'invite') {
         const inviteMessage = getOption('message');
@@ -390,30 +288,14 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (!party) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You do not have a party to invite users to.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You do not have a party to invite users to.' },
           });
         }
 
-        if (!inviteMessage) {
+        if (!inviteMessage || inviteUserIds.length === 0) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Please provide an invite message.',
-            },
-          });
-        }
-
-        if (inviteUserIds.length === 0) {
-          return res.send({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Please select at least one user to invite.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'Please provide an invite message and at least one user.' },
           });
         }
 
@@ -425,28 +307,22 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
             data: {
               flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'No valid invite targets were selected. Make sure you are not inviting yourself or users who are already in the party.',
+              content: 'No valid invite targets — do not invite yourself or current members.',
             },
           });
         }
 
         party.invitedUsers = party.invitedUsers || [];
         uniqueInviteIds.forEach((targetId) => {
-          if (!party.invitedUsers.includes(targetId)) {
-            party.invitedUsers.push(targetId);
-          }
+          if (!party.invitedUsers.includes(targetId)) party.invitedUsers.push(targetId);
         });
 
         const invitedMentions = uniqueInviteIds.map((id) => `<@${id}>`).join(', ');
-
         return res.send({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
             content: `Invited ${invitedMentions} to ${party.partyName}.\nMessage: ${inviteMessage}`,
-            allowed_mentions: {
-              parse: [],
-              users: uniqueInviteIds,
-            },
+            allowed_mentions: { parse: [], users: uniqueInviteIds },
             components: [
               {
                 type: MessageComponentTypes.ACTION_ROW,
@@ -465,15 +341,12 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
       } else if (subcommand === 'list') {
         const parties = Object.values(activeParties);
         const responseText = parties.length
-          ? parties.map((party) => `• ${party.partyName} — ID: ${party.partyId}`).join('\n')
-          : 'There are no active parties right now.';
+          ? parties.map((party) => `• ${party.partyName} — ${party.members.length}/${party.userLimit} — Game: ${party.gameName}`).join('\n')
+          : 'No active parties right now.';
 
         return res.send({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            flags: InteractionResponseFlags.EPHEMERAL,
-            content: responseText,
-          },
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: responseText },
         });
       } else if (subcommand === 'ign') {
         const gameName = getOption('game_name');
@@ -482,10 +355,7 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (!gameName || !ign) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Please provide both a game name and an IGN.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'Please provide both a game name and an IGN.' },
           });
         }
 
@@ -499,42 +369,28 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
           for (const party of partiesToUpdate) {
             const updateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
             try {
-              await DiscordRequest(updateEndpoint, {
-                method: 'PATCH',
-                body: {
-                  components: createPartyComponents(party),
-                },
-              });
+              await DiscordRequest(updateEndpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
             } catch (patchError) {
-              console.error(`Error updating party message for ${party.partyId}:`, patchError);
+              console.error(`Error updating party ${party.partyId}:`, patchError);
             }
           }
 
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: `Saved your IGN for ${gameName}: ${ign}`,
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: `Saved your IGN for ${gameName}: ${ign}` },
           });
         } catch (error) {
           console.error('Error saving IGN:', error);
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'Failed to save your IGN. Please try again.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'Failed to save your IGN. Please try again.' },
           });
         }
       } else if (subcommand === 'delete') {
         if (!isAdminUser(req)) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You do not have permission to delete parties.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You do not have permission to delete parties.' },
           });
         }
 
@@ -544,10 +400,7 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (!party) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: `No party found with ID ${partyId}.`,
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: `No party found with ID ${partyId}.` },
           });
         }
 
@@ -559,13 +412,9 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         }
 
         delete activeParties[partyId];
-
         return res.send({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            flags: InteractionResponseFlags.EPHEMERAL,
-            content: `Deleted party ${party.partyName} (ID: ${partyId}).`,
-          },
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: `Deleted party ${party.partyName}.` },
         });
       } else if (subcommand === 'disband') {
         const ownedParties = Object.values(activeParties).filter((party) => party.createdBy === userId);
@@ -573,14 +422,10 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
         if (ownedParties.length === 0) {
           return res.send({
             type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              flags: InteractionResponseFlags.EPHEMERAL,
-              content: 'You do not own any parties to disband.',
-            },
+            data: { flags: InteractionResponseFlags.EPHEMERAL, content: 'You do not own any parties to disband.' },
           });
         }
 
-        let disbandCount = 0;
         for (const party of ownedParties) {
           const updateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
           try {
@@ -589,313 +434,161 @@ app.post('/interactions', verifyKeyMiddleware(process.env.PUBLIC_KEY), async fun
             console.error(`Error deleting party message for ${party.partyId}:`, err);
           }
           delete activeParties[party.partyId];
-          disbandCount += 1;
         }
 
         return res.send({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
             flags: InteractionResponseFlags.EPHEMERAL,
-            content: `Disbanded ${disbandCount} ${disbandCount === 1 ? 'party' : 'parties'} that you created.`,
+            content: `Disbanded ${ownedParties.length} ${ownedParties.length === 1 ? 'party' : 'parties'}.`,
           },
         });
       }
     }
+
     console.error(`unknown command: ${name}`);
     return res.status(400).json({ error: 'unknown command' });
   }
+
   if (type === InteractionType.MESSAGE_COMPONENT) {
-      // custom_id set in payload when sending message component
-      const componentId = data.custom_id;
+    const componentId = data.custom_id;
 
-      if (componentId.startsWith('accept_button_')) {
-        // get the associated game ID
-        const gameId = componentId.replace('accept_button_', '');
-        // Delete message with token in request body
-        const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
-        try {
-          await res.send({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              // Indicates it'll be an ephemeral message
-              flags: InteractionResponseFlags.EPHEMERAL | InteractionResponseFlags.IS_COMPONENTS_V2,
-              components: [
-                {
-                  type: MessageComponentTypes.TEXT_DISPLAY,
-                  content: 'What is your object of choice?',
-                },
-                {
-                  type: MessageComponentTypes.ACTION_ROW,
-                  components: [
-                    {
-                      type: MessageComponentTypes.STRING_SELECT,
-                      // Append game ID
-                      custom_id: `select_choice_${gameId}`,
-                      options: getShuffledOptions(),
-                    },
-                  ],
-                },
-              ],
-            },
-          });
-          // Delete previous message
-          await DiscordRequest(endpoint, { method: 'DELETE' });
-        } catch (err) {
-          console.error('Error sending message:', err);
-        }
-      } else if (componentId.startsWith('join_party_')) {
-        const partyId = componentId.replace('join_party_', '');
-        const party = activeParties[partyId];
+    if (componentId.startsWith('join_party_')) {
+      const partyId = componentId.replace('join_party_', '');
+      const party = activeParties[partyId];
 
-        if (party) {
-          const context = req.body.context;
-          const userId = context === 0 ? req.body.member.user.id : req.body.user.id;
+      if (!party) return res.status(400).json({ error: 'party not found' });
 
-          party.bannedUsers = party.bannedUsers || [];
-          if (party.bannedUsers.includes(userId)) {
-            return res.send({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                flags: InteractionResponseFlags.EPHEMERAL,
-                content: `You are banned from ${party.partyName}.`,
-              },
-            });
-          }
+      const context = req.body.context;
+      const userId = context === 0 ? req.body.member.user.id : req.body.user.id;
 
-          party.waitlist = party.waitlist || [];
-          const isMember = party.members.includes(userId);
-          const isWaitlisted = party.waitlist.includes(userId);
-          let responseMessage;
-
-          if (isMember) {
-            responseMessage = `You are already a member of ${party.partyName}.`;
-          } else if (isWaitlisted) {
-            const position = party.waitlist.indexOf(userId) + 1;
-            responseMessage = `You are already on the waitlist for ${party.partyName} at position ${position}.`;
-          } else if (party.members.length < party.userLimit) {
-            party.members.push(userId);
-            responseMessage = `You joined ${party.partyName}! ${party.members.length}/${party.userLimit}`;
-          } else {
-            party.waitlist.push(userId);
-            const position = party.waitlist.length;
-            responseMessage = `The party is full. You've been added to the waitlist at position ${position}.`;
-          }
-
-          const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
-
-          try {
-            await res.send({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                flags: InteractionResponseFlags.EPHEMERAL,
-                content: responseMessage,
-              },
-            });
-
-            await DiscordRequest(endpoint, {
-              method: 'PATCH',
-              body: {
-                components: createPartyComponents(party),
-              },
-            });
-          } catch (err) {
-            console.error('Error handling join button:', err);
-          }
-        } else {
-          return res.status(400).json({ error: 'party not found' });
-        }
-      } else if (componentId.startsWith('accept_invite_')) {
-        const partyId = componentId.replace('accept_invite_', '');
-        const party = activeParties[partyId];
-
-        if (party) {
-          const context = req.body.context;
-          const userId = context === 0 ? req.body.member.user.id : req.body.user.id;
-
-          party.bannedUsers = party.bannedUsers || [];
-          if (party.bannedUsers.includes(userId)) {
-            return res.send({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                flags: InteractionResponseFlags.EPHEMERAL,
-                content: `You are banned from ${party.partyName}.`,
-              },
-            });
-          }
-
-          party.waitlist = party.waitlist || [];
-          const isMember = party.members.includes(userId);
-          const isWaitlisted = party.waitlist.includes(userId);
-          let responseMessage;
-
-          if (isMember) {
-            responseMessage = `You are already a member of ${party.partyName}.`;
-          } else if (isWaitlisted) {
-            const position = party.waitlist.indexOf(userId) + 1;
-            responseMessage = `You are already on the waitlist for ${party.partyName} at position ${position}.`;
-          } else if (party.members.length < party.userLimit) {
-            party.members.push(userId);
-            responseMessage = `You joined ${party.partyName}! ${party.members.length}/${party.userLimit}`;
-          } else {
-            party.waitlist.push(userId);
-            const position = party.waitlist.length;
-            responseMessage = `The party is full. You've been added to the waitlist at position ${position}.`;
-          }
-
-          const countText = `${party.members.length}/${party.userLimit}`;
-          const inviteMessageEndpoint = `channels/${req.body.channel_id}/messages/${req.body.message.id}`;
-          const partyUpdateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
-
-          try {
-            await DiscordRequest(partyUpdateEndpoint, {
-              method: 'PATCH',
-              body: {
-                components: createPartyComponents(party),
-              },
-            });
-
-            // await DiscordRequest(inviteMessageEndpoint, {
-            //   method: 'PATCH',
-            //   body: {
-            //     components: [
-            //       {
-            //         type: MessageComponentTypes.TEXT_DISPLAY,
-            //         content: `Accepted invite to ${party.partyName}.`,
-            //       },
-            //     ],
-            //   },
-            // });
-
-            await res.send({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                flags: InteractionResponseFlags.EPHEMERAL,
-                content: responseMessage,
-              },
-            });
-          } catch (err) {
-            console.error('Error handling invite accept button:', err);
-          }
-        } else {
-          return res.status(400).json({ error: 'party not found' });
-        }
-      } else if (componentId.startsWith('leave_party_')) {
-        const partyId = componentId.replace('leave_party_', '');
-        const party = activeParties[partyId];
-
-        if (party) {
-          const context = req.body.context;
-          const userId = context === 0 ? req.body.member.user.id : req.body.user.id;
-          const wasMember = party.members.includes(userId);
-          party.waitlist = party.waitlist || [];
-          const wasWaitlisted = party.waitlist.includes(userId);
-
-          if (wasMember) {
-            party.members = party.members.filter((memberId) => memberId !== userId);
-          }
-
-          if (wasWaitlisted) {
-            party.waitlist = party.waitlist.filter((memberId) => memberId !== userId);
-          }
-
-          if (wasMember && party.members.length < party.userLimit && party.waitlist.length) {
-            const promotedUser = party.waitlist.shift();
-            if (!party.members.includes(promotedUser)) {
-              party.members.push(promotedUser);
-            }
-          }
-
-          const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
-          const wasLastMember = wasMember && party.members.length === 0;
-          const responseMessage = wasMember
-            ? wasLastMember
-              ? `You left ${party.partyName}. The party has been closed because no members remain.`
-              : `You left ${party.partyName}. ${party.members.length}/${party.userLimit}`
-            : wasWaitlisted
-              ? `You were removed from the waitlist for ${party.partyName}.`
-              : `You are not in ${party.partyName}.`;
-
-          try {
-            await res.send({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                flags: InteractionResponseFlags.EPHEMERAL,
-                content: responseMessage,
-              },
-            });
-
-            if (wasLastMember) {
-              delete activeParties[partyId];
-              await DiscordRequest(endpoint, { method: 'DELETE' });
-            } else {
-              await DiscordRequest(endpoint, {
-                method: 'PATCH',
-                body: {
-                  components: createPartyComponents(party),
-                },
-              });
-            }
-          } catch (err) {
-            console.error('Error handling leave button:', err);
-          }
-        } else {
-          return res.status(400).json({ error: 'party not found' });
-        }
-      } else if (componentId.startsWith('select_choice_')) {
-        // get the associated game ID
-        const gameId = componentId.replace('select_choice_', '');
-
-        if (activeGames[gameId]) {
-          // Interaction context
-          const context = req.body.context;
-          // Get user ID and object choice for responding user
-          // User ID is in user field for (G)DMs, and member for servers
-          const userId = context === 0 ? req.body.member.user.id : req.body.user.id;
-          const objectName = data.values[0];
-          // Calculate result from helper function
-          const resultStr = getResult(activeGames[gameId], {
-            id: userId,
-            objectName,
-          });
-
-          // Remove game from storage
-          delete activeGames[gameId];
-          // Update message with token in request body
-          const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
-
-          try {
-            // Send results
-            await res.send({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                flags: InteractionResponseFlags.IS_COMPONENTS_V2,
-                components: [
-                  {
-                    type: MessageComponentTypes.TEXT_DISPLAY,
-                    content: resultStr
-                  }
-                ]
-                },
-            });
-            // Update ephemeral message
-            await DiscordRequest(endpoint, {
-              method: 'PATCH',
-              body: {
-                components: [
-                  {
-                    type: MessageComponentTypes.TEXT_DISPLAY,
-                    content: 'Nice choice ' + getRandomEmoji()
-                  }
-                ],
-              },
-            });
-          } catch (err) {
-            console.error('Error sending message:', err);
-          }
-        }
+      party.bannedUsers = party.bannedUsers || [];
+      if (party.bannedUsers.includes(userId)) {
+        return res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: `You are banned from ${party.partyName}.` },
+        });
       }
 
-      return;
+      party.waitlist = party.waitlist || [];
+      const isMember = party.members.includes(userId);
+      const isWaitlisted = party.waitlist.includes(userId);
+      let responseMessage;
+
+      if (isMember) {
+        responseMessage = `You are already a member of ${party.partyName}.`;
+      } else if (isWaitlisted) {
+        responseMessage = `You are already on the waitlist at position ${party.waitlist.indexOf(userId) + 1}.`;
+      } else if (party.members.length < party.userLimit) {
+        party.members.push(userId);
+        responseMessage = `You joined ${party.partyName}! (${party.members.length}/${party.userLimit})`;
+      } else {
+        party.waitlist.push(userId);
+        responseMessage = `Party is full — you're on the waitlist at position ${party.waitlist.length}.`;
+      }
+
+      const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
+      try {
+        await res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: responseMessage },
+        });
+        await DiscordRequest(endpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
+      } catch (err) {
+        console.error('Error handling join button:', err);
+      }
+    } else if (componentId.startsWith('accept_invite_')) {
+      const partyId = componentId.replace('accept_invite_', '');
+      const party = activeParties[partyId];
+
+      if (!party) return res.status(400).json({ error: 'party not found' });
+
+      const context = req.body.context;
+      const userId = context === 0 ? req.body.member.user.id : req.body.user.id;
+
+      party.bannedUsers = party.bannedUsers || [];
+      if (party.bannedUsers.includes(userId)) {
+        return res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: `You are banned from ${party.partyName}.` },
+        });
+      }
+
+      party.waitlist = party.waitlist || [];
+      const isMember = party.members.includes(userId);
+      const isWaitlisted = party.waitlist.includes(userId);
+      let responseMessage;
+
+      if (isMember) {
+        responseMessage = `You are already a member of ${party.partyName}.`;
+      } else if (isWaitlisted) {
+        responseMessage = `You are already on the waitlist at position ${party.waitlist.indexOf(userId) + 1}.`;
+      } else if (party.members.length < party.userLimit) {
+        party.members.push(userId);
+        responseMessage = `You joined ${party.partyName}! (${party.members.length}/${party.userLimit})`;
+      } else {
+        party.waitlist.push(userId);
+        responseMessage = `Party is full — added to waitlist at position ${party.waitlist.length}.`;
+      }
+
+      const partyUpdateEndpoint = `webhooks/${process.env.APP_ID}/${party.token}/messages/@original`;
+      try {
+        await DiscordRequest(partyUpdateEndpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
+        await res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: responseMessage },
+        });
+      } catch (err) {
+        console.error('Error handling invite accept:', err);
+      }
+    } else if (componentId.startsWith('leave_party_')) {
+      const partyId = componentId.replace('leave_party_', '');
+      const party = activeParties[partyId];
+
+      if (!party) return res.status(400).json({ error: 'party not found' });
+
+      const context = req.body.context;
+      const userId = context === 0 ? req.body.member.user.id : req.body.user.id;
+      const wasMember = party.members.includes(userId);
+      party.waitlist = party.waitlist || [];
+      const wasWaitlisted = party.waitlist.includes(userId);
+
+      if (wasMember) party.members = party.members.filter((id) => id !== userId);
+      if (wasWaitlisted) party.waitlist = party.waitlist.filter((id) => id !== userId);
+
+      if (wasMember && party.members.length < party.userLimit && party.waitlist.length) {
+        const promoted = party.waitlist.shift();
+        if (!party.members.includes(promoted)) party.members.push(promoted);
+      }
+
+      const endpoint = `webhooks/${process.env.APP_ID}/${req.body.token}/messages/${req.body.message.id}`;
+      const wasLastMember = wasMember && party.members.length === 0;
+      const responseMessage = wasMember
+        ? wasLastMember
+          ? `You left ${party.partyName}. Party closed — no members remain.`
+          : `You left ${party.partyName}. (${party.members.length}/${party.userLimit})`
+        : wasWaitlisted
+          ? `You left the waitlist for ${party.partyName}.`
+          : `You are not in ${party.partyName}.`;
+
+      try {
+        await res.send({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { flags: InteractionResponseFlags.EPHEMERAL, content: responseMessage },
+        });
+
+        if (wasLastMember) {
+          delete activeParties[partyId];
+          await DiscordRequest(endpoint, { method: 'DELETE' });
+        } else {
+          await DiscordRequest(endpoint, { method: 'PATCH', body: { components: createPartyComponents(party) } });
+        }
+      } catch (err) {
+        console.error('Error handling leave button:', err);
+      }
+    }
+
+    return;
   }
 
   console.error('unknown interaction type', type);
