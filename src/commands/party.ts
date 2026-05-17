@@ -7,7 +7,7 @@ import {
   saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
 import { deleteMessage } from '../lib/discord'
-import { buildPartyEmbed } from '../lib/embeds'
+import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +30,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
 
     try {
       switch (name) {
+        case 'help':    return await help(c)
         case 'create':  return await create(c, guildId, channelId, userId, username, displayName, opts)
         case 'join':    return await join(c, guildId, userId, username, displayName, opts)
         case 'leave':   return await leave(c, guildId, userId)
@@ -42,7 +43,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'adduser': return await addUser(c, guildId, userId, opts)
         case 'approve': return await approve(c, guildId, userId, opts)
         case 'deny':    return await deny(c, guildId, userId, opts)
-        case 'remove':    return await removeUserFromParty(c, guildId, userId, opts)
+        case 'remove':  return await removeUserFromParty(c, guildId, userId, opts)
         case 'promote': return await promote(c, guildId, userId, opts)
         case 'size':    return await setSize(c, guildId, userId, opts)
         case 'disband': return await disband(c, guildId, userId)
@@ -54,6 +55,16 @@ export async function handleParty(c: CommandContext<AppEnv>) {
       console.error('handleParty error:', e)
       return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
     }
+  })
+}
+
+// ── /party help ───────────────────────────────────────────────────────────────
+
+async function help(c: CommandContext<AppEnv>) {
+  return c.followup({
+    embeds: [buildHelpEmbed(1)],
+    components: buildHelpComponents(1),
+    flags: 64,
   })
 }
 

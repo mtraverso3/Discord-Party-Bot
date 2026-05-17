@@ -1,7 +1,7 @@
 import { DiscordHono } from 'discord-hono'
 import type { AppEnv } from './types'
 import { handleParty } from './commands/party'
-import { handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
+import { handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
 
 export { PartyState } from './durable/PartyState'
 
@@ -10,5 +10,6 @@ const app = new DiscordHono<AppEnv>()
   .component('party_join', handleJoinButton)
   .component('party_queue', handleQueueButton)
   .component('party_leave', handleLeaveButton)
+  .component('help_page', handleHelpPage)
 
 export default app

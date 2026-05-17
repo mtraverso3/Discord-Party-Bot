@@ -31,6 +31,11 @@ const commands = [
     options: [
       {
         type: 1,
+        name: 'help',
+        description: 'Show how to use PartyBot',
+      },
+      {
+        type: 1,
         name: 'create',
         description: 'Create a new party',
         options: [

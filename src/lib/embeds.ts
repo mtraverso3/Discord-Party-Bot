@@ -64,6 +64,103 @@ export function buildPartyComponents(party: PartyData) {
   return [{ type: 1, components: [joinButton, leaveButton] }]
 }
 
+// ── Help pages ──────────────────────────────────────────────────────────────
+
+export const HELP_PAGES = 3
+
+const SOURCE_URL = 'https://github.com/mtraverso3/Discord-Party-Bot'
+
+export function buildHelpEmbed(page: number) {
+  if (page === 1) {
+    return {
+      title: 'PartyBot — Quick Start',
+      color: 0x5865f2,
+      description: "Spin up an inhouse lobby in three commands.",
+      fields: [
+        {
+          name: '1. Create a party',
+          value: '`/party create cap:<n> voice-channel:#vc`\nOnly `cap` and `voice-channel` are required. Optional: `name`, `game`, `description`.',
+        },
+        {
+          name: '2. Save your IGN (once per game)',
+          value: '`/party ign game:<game> name:<your-IGN>`\nSaved to your profile and auto-filled whenever you join a party for that game.',
+        },
+        {
+          name: '3. Join a party',
+          value: 'Click the green **Join** button on a party embed, or run `/party join <name or ID>`. Use `/party leave` to leave or drop from the queue. Use `/party list` to see all active parties.',
+        },
+      ],
+      footer: { text: 'Page 1 / 3 · Quick Start' },
+    }
+  }
+
+  if (page === 2) {
+    return {
+      title: 'PartyBot — Owner Controls',
+      color: 0x5865f2,
+      description: 'Once your party exists, these let you run it.',
+      fields: [
+        {
+          name: 'Members',
+          value: '`/party adduser @user` — directly add\n`/party remove @user` — remove a member\n`/party promote @user` — transfer ownership',
+        },
+        {
+          name: 'Queue',
+          value: '`/party close` — funnel new joiners to the queue\n`/party open` — re-open and auto-promote from queue\n`/party approve @user` — let a queued player in\n`/party deny @user` — remove a player from the queue',
+        },
+        {
+          name: 'Adjust',
+          value: "`/party size cap:<n>` — change the player cap\n`/party game game:<game>` — change the party's game\n`/party bump` — repost the embed to the bottom of the channel",
+        },
+        {
+          name: 'End',
+          value: '`/party disband` — end the party',
+        },
+      ],
+      footer: { text: 'Page 2 / 3 · Owner Controls' },
+    }
+  }
+
+  return {
+    title: 'PartyBot — About',
+    color: 0x5865f2,
+    description: 'Runs on Cloudflare Workers + Durable Objects. Open source.',
+    fields: [
+      {
+        name: 'Source code',
+        value: `[${SOURCE_URL.replace('https://', '')}](${SOURCE_URL})`,
+      },
+      {
+        name: 'Issues / pings',
+        value: 'Ping **@mtraverso** or **@aureateAnatidae** for issues, bugs, or feature requests.',
+      },
+    ],
+    footer: { text: 'Page 3 / 3 · About' },
+  }
+}
+
+export function buildHelpComponents(page: number) {
+  return [{
+    type: 1,
+    components: [
+      {
+        type: 2,
+        style: 2,
+        label: '◀ Previous',
+        custom_id: `help_page;${page - 1}`,
+        disabled: page <= 1,
+      },
+      {
+        type: 2,
+        style: 2,
+        label: 'Next ▶',
+        custom_id: `help_page;${page + 1}`,
+        disabled: page >= HELP_PAGES,
+      },
+    ],
+  }]
+}
+
 export function buildDisbandedEmbed(party: PartyData) {
   return {
     title: `~~${party.name}~~`,

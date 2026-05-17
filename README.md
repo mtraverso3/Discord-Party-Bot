@@ -16,6 +16,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 
 | Command                    | Description                                    |
 |----------------------------|------------------------------------------------|
+| `/party help`              | Paged in-Discord usage guide                   |
 | `/party create`            | Create a new party                             |
 | `/party join <name or ID>` | Join a party or its queue                      |
 | `/party leave`             | Leave your current party or queue              |

@@ -4,6 +4,18 @@ import {
   callParty, extractMemberInfo, findPartyById, getPartyStub,
   getUserPartyId, getUserProfile, setUserPartyId, trySyncEmbed,
 } from '../lib/party'
+import { HELP_PAGES, buildHelpComponents, buildHelpEmbed } from '../lib/embeds'
+
+// ── Help paging (help_page;<n>) ───────────────────────────────────────────────
+
+export async function handleHelpPage(c: ComponentContext<AppEnv>) {
+  const raw = parseInt((c.interaction.data as any).custom_id as string, 10)
+  const page = Math.min(Math.max(raw || 1, 1), HELP_PAGES)
+  return c.resUpdate({
+    embeds: [buildHelpEmbed(page)],
+    components: buildHelpComponents(page),
+  })
+}
 
 // ── Join button (party_join;<partyId>) ────────────────────────────────────────
 
