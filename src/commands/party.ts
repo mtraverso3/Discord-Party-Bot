@@ -566,7 +566,7 @@ async function openDescriptionModal(c: CommandContext<AppEnv>) {
   if (party.description) input.value(party.description)
 
   return c.resModal(
-    new Modal(`party_description;${partyId}`, 'Edit party description').row(input),
+    new Modal('party_description', 'Edit party description').custom_id(partyId).row(input),
   )
 }
 
@@ -620,7 +620,7 @@ async function openBanlistModal(c: CommandContext<AppEnv>) {
   if (current) input.value(current)
 
   return c.resModal(
-    new Modal(`party_banlist;${partyId}`, 'Edit party banlist').row(input),
+    new Modal('party_banlist', 'Edit party banlist').custom_id(partyId).row(input),
   )
 }
 
