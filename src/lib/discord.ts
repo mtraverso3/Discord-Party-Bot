@@ -44,3 +44,17 @@ export async function deleteMessage(
 ): Promise<void> {
   await discordFetch(token, `/channels/${channelId}/messages/${messageId}`, { method: 'DELETE' })
 }
+
+// Edits the deferred response for an interaction (uses the interaction token,
+// not the bot token — no auth header needed).
+export async function editInteractionResponse(
+  appId: string,
+  interactionToken: string,
+  body: unknown,
+): Promise<void> {
+  await fetch(`${BASE}/webhooks/${appId}/${interactionToken}/messages/@original`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}

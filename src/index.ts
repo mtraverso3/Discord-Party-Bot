@@ -4,6 +4,7 @@ import {
   handleBanlistModal, handleCreateModalRaw, handleEditModalRaw, handleParty,
 } from './commands/party'
 import { handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
+import { CREATE_MODAL_PREFIX, EDIT_MODAL_PREFIX } from './lib/modal'
 
 export { PartyState } from './durable/PartyState'
 
@@ -39,11 +40,11 @@ export default {
     // runs in waitUntil and edits the @original message via the webhook.
     const modalId = interaction.type === 5 ? interaction.data?.custom_id : null
     if (typeof modalId === 'string') {
-      if (modalId === 'party_create') {
+      if (modalId === CREATE_MODAL_PREFIX) {
         ctx.waitUntil(handleCreateModalRaw(interaction, env))
         return Response.json({ type: 5, data: { flags: 64 } })
       }
-      if (modalId.startsWith('party_edit;')) {
+      if (modalId.startsWith(`${EDIT_MODAL_PREFIX};`)) {
         ctx.waitUntil(handleEditModalRaw(interaction, env))
         return Response.json({ type: 5, data: { flags: 64 } })
       }

@@ -75,24 +75,24 @@ const SOURCE_URL = 'https://github.com/mtraverso3/Discord-Party-Bot'
 export function buildHelpEmbed(page: number) {
   if (page === 1) {
     return {
-      title: 'PartyBot — Quick Start',
+      title: 'PartyBot — Getting Started',
       color: 0x5865f2,
-      description: "Spin up an inhouse lobby in three commands.",
+      description: 'How to make and join parties.',
       fields: [
         {
-          name: '1. Create a party',
-          value: '`/party create` — opens a modal where you set name, description, cap, game, and voice channel.',
+          name: '1. Make a party',
+          value: 'Type `/party create`. A small form pops up — fill in the game, how many players, and the voice channel.',
         },
         {
-          name: '2. Save your IGN (once per game)',
-          value: '`/party ign game:<game> name:<your-IGN>`\nSaved to your profile and auto-filled whenever you join a party for that game.',
+          name: '2. Tell us your in-game name',
+          value: 'Type `/party ign`, pick a game, then type your name in that game. The bot remembers it, so other players know who you are.',
         },
         {
           name: '3. Join a party',
-          value: 'Click the green **Join** button on a party embed, or run `/party join <name or ID>`. Use `/party leave` to leave or drop from the queue. Use `/party list` to see all active parties.',
+          value: 'Click the green **Join** button on a party message. Or use `/party list` to see what\'s out there, then `/party join` to hop in.\n\nUse `/party leave` anytime to leave.',
         },
       ],
-      footer: { text: 'Page 1 / 3 · Quick Start' },
+      footer: { text: 'Page 1 / 3 · Getting Started' },
     }
   }
 

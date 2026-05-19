@@ -6,9 +6,9 @@ import {
   markDisbanded, postPartyEmbed, randomId, removeFromIndex,
   saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
-import { deleteMessage } from '../lib/discord'
+import { deleteMessage, editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
-import { buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
+import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,17 +93,16 @@ async function openCreateModal(c: CommandContext<AppEnv>) {
   return c.resModal(buildCreateModalJSON(displayName))
 }
 
-// Bypass-routed (see openEditModal note above).
+// Invoked from src/index.ts after we verify the Discord signature ourselves —
+// see lib/modal.ts for why we bypass discord-hono's modal routing here.
 export async function handleCreateModalRaw(interaction: any, env: AppBindings): Promise<void> {
-  const reply = (content: string) => editOriginal(env.DISCORD_APPLICATION_ID, interaction.token, content)
+  const reply = (content: string) =>
+    editInteractionResponse(env.DISCORD_APPLICATION_ID, interaction.token, { content })
 
   try {
     const guildId = interaction.guild_id as string
     const channelId = interaction.channel_id as string
-    const user = interaction.member?.user ?? interaction.user
-    const userId = user.id as string
-    const username = user.username as string
-    const displayName = (interaction.member?.nick ?? user.global_name ?? user.username) as string
+    const { userId, username, displayName } = extractMemberInfo(interaction)
 
     const fields = parseCreateModalSubmit(interaction)
 
@@ -199,7 +198,7 @@ async function join(
 
 async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string) {
   const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
-  if (!partyId) return c.followup({ content: "You're not in any party.", flags: 64 })
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const stub = getPartyStub(c.env, guildId, partyId)
   const result = await callParty<{ status: string; data: PartyData; promoted?: string }>(stub, 'leave', { userId })
@@ -319,17 +318,17 @@ async function openEditModal(c: CommandContext<AppEnv>) {
   return c.resModal(buildEditModalJSON(party))
 }
 
-// Bypass-routed: invoked from src/index.ts after we verify the Discord
-// signature ourselves. Bypassing discord-hono's modal routing avoids its
-// ModalContext constructor crashing on Components V2 Label components.
+// Invoked from src/index.ts after we verify the Discord signature ourselves —
+// see lib/modal.ts for why we bypass discord-hono's modal routing here.
 export async function handleEditModalRaw(interaction: any, env: AppBindings): Promise<void> {
-  const reply = (content: string) => editOriginal(env.DISCORD_APPLICATION_ID, interaction.token, content)
+  const reply = (content: string) =>
+    editInteractionResponse(env.DISCORD_APPLICATION_ID, interaction.token, { content })
 
   try {
     const customId = interaction.data.custom_id as string
-    const partyId = customId.slice('party_edit;'.length)
+    const partyId = customId.slice(`${EDIT_MODAL_PREFIX};`.length)
     const guildId = interaction.guild_id as string
-    const userId = (interaction.member?.user?.id ?? interaction.user?.id) as string
+    const { userId } = extractMemberInfo(interaction)
 
     const fields = parseEditModalSubmit(interaction)
     const stub = getPartyStub(env, guildId, partyId)
@@ -381,14 +380,6 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
     console.error('handleEditModalRaw error:', e)
     return reply('Something went wrong.')
   }
-}
-
-async function editOriginal(appId: string, token: string, content: string): Promise<void> {
-  await fetch(`https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
-  })
 }
 
 // ── /party close ──────────────────────────────────────────────────────────────

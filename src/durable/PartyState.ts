@@ -372,7 +372,6 @@ export class PartyState extends DurableObject {
     data.maxSize = maxSize
     if (body.description != null) data.description = body.description.toString().slice(0, 1000)
     if (body.voiceChannelId != null) data.voiceChannelId = body.voiceChannelId
-    if (body.isClosed != null) data.isClosed = !!body.isClosed
 
     if (gameChanged) {
       data.game = body.game
@@ -381,8 +380,7 @@ export class PartyState extends DurableObject {
       for (const q of data.queue) q.ign = ignMap[q.userId]
     }
 
-    // Drain the queue when the party is open and has room.
-    // Naturally fires after closed→open transitions and cap growth.
+    // Growing the cap on an open party opens spots — pull from the queue.
     const promoted: string[] = []
     if (!data.isClosed) {
       while (data.queue.length > 0 && data.members.length < data.maxSize) {
