@@ -1,7 +1,6 @@
 import { DiscordHono } from 'discord-hono'
 import type { AppBindings, AppEnv } from './types'
-import { handleEditModalRaw, handleParty } from './commands/party'
-import { handleBanlistModal } from './commands/party'
+import { handleBanlistModal, handleCreateModalRaw, handleEditModalRaw, handleParty } from './commands/party'
 import { handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
 
 export { PartyState } from './durable/PartyState'
@@ -13,9 +12,9 @@ const inner = new DiscordHono<AppEnv>()
   .component('party_leave', handleLeaveButton)
   .component('help_page', handleHelpPage)
   .modal('party_banlist', handleBanlistModal)
-  // party_edit is intentionally NOT registered here — discord-hono's
-  // ModalContext crashes on Components V2 Label components, so we intercept
-  // and dispatch the submit ourselves below.
+  // party_create and party_edit are intentionally NOT registered here —
+  // discord-hono's ModalContext crashes on Components V2 Label components,
+  // so we intercept and dispatch the submits ourselves below.
 
 export default {
   async fetch(req: Request, env: AppBindings, ctx: ExecutionContext): Promise<Response> {
@@ -33,13 +32,19 @@ export default {
     let interaction: any
     try { interaction = JSON.parse(body) } catch { return new Response('Bad JSON', { status: 400 }) }
 
-    // Intercept the /party edit modal submit — bypass discord-hono entirely.
-    // Ack with a deferred ephemeral now; the real work runs in waitUntil and
-    // edits the @original message via the interaction webhook.
-    if (interaction.type === 5 && typeof interaction.data?.custom_id === 'string'
-        && interaction.data.custom_id.startsWith('party_edit;')) {
-      ctx.waitUntil(handleEditModalRaw(interaction, env))
-      return Response.json({ type: 5, data: { flags: 64 } })
+    // Intercept /party create and /party edit modal submits — bypass
+    // discord-hono entirely. Ack with a deferred ephemeral now; the real work
+    // runs in waitUntil and edits the @original message via the webhook.
+    const modalId = interaction.type === 5 ? interaction.data?.custom_id : null
+    if (typeof modalId === 'string') {
+      if (modalId === 'party_create') {
+        ctx.waitUntil(handleCreateModalRaw(interaction, env))
+        return Response.json({ type: 5, data: { flags: 64 } })
+      }
+      if (modalId.startsWith('party_edit;')) {
+        ctx.waitUntil(handleEditModalRaw(interaction, env))
+        return Response.json({ type: 5, data: { flags: 64 } })
+      }
     }
 
     // Everything else goes through discord-hono. The body has already been

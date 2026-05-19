@@ -37,20 +37,7 @@ const commands = [
       {
         type: 1,
         name: 'create',
-        description: 'Create a new party',
-        options: [
-          { type: 4, name: 'cap', description: 'Max number of players', required: true, min_value: 2, max_value: 50 },
-          {
-            type: 7,
-            name: 'voice-channel',
-            description: 'Voice channel to link to this party',
-            required: true,
-            channel_types: [2],
-          },
-          { type: 3, name: 'name', description: "Party name (defaults to your name's party)", required: false },
-          { type: 3, name: 'game', description: 'Game you are playing', required: false, choices: GAMES },
-          { type: 3, name: 'description', description: 'Short description or notes', required: false },
-        ],
+        description: 'Create a new party (opens a modal)',
       },
       {
         type: 1,

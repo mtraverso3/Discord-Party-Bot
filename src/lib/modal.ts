@@ -1,17 +1,18 @@
 /**
- * Modal JSON building and submit parsing for /party edit.
+ * Modal JSON building and submit parsing for /party create and /party edit.
  *
  * Modals now accept selects in addition to text inputs (Components V2 / Labels),
  * but discord-hono's typed Modal builder and ModalContext only understand
  * action-row-wrapped Text Inputs — the constructor crashes on Labels. This
  * module is the single place that talks to the raw Discord component shapes,
- * and `src/index.ts` bypasses discord-hono's modal routing for party_edit so
+ * and `src/index.ts` bypasses discord-hono's modal routing for these modals so
  * the crash never happens.
  */
 
 import type { PartyData } from '../types'
 import { GAMES } from './games'
 
+export const CREATE_MODAL_PREFIX = 'party_create'
 export const EDIT_MODAL_PREFIX = 'party_edit'
 
 export interface EditFields {
@@ -69,6 +70,57 @@ export function parseEditModalSubmit(interaction: any): EditFields {
     capacity:    flat['capacity']    ?? '',
     game:        flat['game']        ?? '',
     isClosed:    flat['status'] === 'closed',
+  }
+}
+
+export interface CreateFields {
+  name: string
+  description: string
+  capacity: string
+  game: string
+  voiceChannelId: string
+}
+
+export function buildCreateModalJSON(displayName: string): any {
+  return {
+    custom_id: CREATE_MODAL_PREFIX,
+    title: 'Create party',
+    components: [
+      label('Name', {
+        type: 4, custom_id: 'name', style: 1, value: `${displayName}'s party`,
+        required: false, max_length: 100,
+      }),
+      label('Description', {
+        type: 4, custom_id: 'description', style: 2,
+        required: false, max_length: 1000,
+        placeholder: 'Notes, rules, anything…',
+      }),
+      label('Player cap (2–50)', {
+        type: 4, custom_id: 'capacity', style: 1, value: '10',
+        required: true, min_length: 1, max_length: 2,
+      }),
+      label('Game', {
+        type: 3, custom_id: 'game',
+        options: GAMES.map(g => ({ label: g.name, value: g.value, default: g.value === 'Other' })),
+        min_values: 1, max_values: 1,
+      }),
+      label('Voice channel', {
+        type: 8, custom_id: 'voice-channel',
+        channel_types: [2], min_values: 1, max_values: 1,
+      }),
+    ],
+  }
+}
+
+export function parseCreateModalSubmit(interaction: any): CreateFields {
+  const flat: Record<string, string> = {}
+  for (const c of interaction.data?.components ?? []) collect(c, flat)
+  return {
+    name:           flat['name']          ?? '',
+    description:    flat['description']   ?? '',
+    capacity:       flat['capacity']      ?? '',
+    game:           flat['game']          ?? '',
+    voiceChannelId: flat['voice-channel'] ?? '',
   }
 }
 

@@ -8,7 +8,7 @@ import {
 } from '../lib/party'
 import { deleteMessage } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
-import { buildEditModalJSON, parseEditModalSubmit } from '../lib/modal'
+import { buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +25,7 @@ function sub(c: CommandContext<AppEnv>): { name: string; opts: Record<string, an
 export async function handleParty(c: CommandContext<AppEnv>) {
   // Modal responses must be the immediate (non-deferred) reply.
   const peek = sub(c)
+  if (peek.name === 'create')  return await openCreateModal(c)
   if (peek.name === 'edit')    return await openEditModal(c)
   if (peek.name === 'banlist') return await openBanlistModal(c)
 
@@ -37,7 +38,6 @@ export async function handleParty(c: CommandContext<AppEnv>) {
     try {
       switch (name) {
         case 'help':    return await help(c)
-        case 'create':  return await create(c, guildId, channelId, userId, username, displayName, opts)
         case 'join':    return await join(c, guildId, userId, username, displayName, opts)
         case 'leave':   return await leave(c, guildId, userId)
         case 'info':    return await info(c, guildId, userId, opts)
@@ -71,56 +71,86 @@ async function help(c: CommandContext<AppEnv>) {
   })
 }
 
-// ── /party create ─────────────────────────────────────────────────────────────
+// ── /party create (modal) ─────────────────────────────────────────────────────
 
-async function create(
-  c: CommandContext<AppEnv>,
-  guildId: string,
-  channelId: string,
-  userId: string,
-  username: string,
-  displayName: string,
-  opts: Record<string, any>,
-) {
-  const [existingPartyId, index, profile] = await Promise.all([
+async function openCreateModal(c: CommandContext<AppEnv>) {
+  const guildId = c.interaction.guild_id!
+  const { userId, displayName } = extractMemberInfo(c.interaction)
+
+  const [existingPartyId, index] = await Promise.all([
     getUserPartyId(c.env.PARTY_KV, guildId, userId),
     getPartyIndex(c.env.PARTY_KV, guildId),
-    getUserProfile(c.env.PARTY_KV, userId),
   ])
 
   if (existingPartyId) {
-    return c.followup({ content: `You're already in party \`${existingPartyId}\`. Leave it or disband it first.`, flags: 64 })
+    return c.ephemeral().res({ content: `You're already in party \`${existingPartyId}\`. Leave it or disband it first.`, flags: 64 })
   }
   if (index.length >= 10) {
-    return c.followup({ content: 'There are already 10 active parties. Wait for one to disband.', flags: 64 })
+    return c.ephemeral().res({ content: 'There are already 10 active parties. Wait for one to disband.', flags: 64 })
   }
 
-  const game = opts['game'] ?? 'Other'
-  const name = (opts['name'] as string | undefined)?.trim() || `${displayName}'s party`
-  const partyId = randomId()
-  const stub = getPartyStub(c.env, guildId, partyId)
+  return c.resModal(buildCreateModalJSON(displayName))
+}
 
-  const party = await callParty<PartyData>(stub, 'create', {
-    id: partyId,
-    guildId,
-    name,
-    description: opts['description'] ?? '',
-    game,
-    ownerId: userId,
-    ownerUsername: username,
-    ownerName: displayName,
-    ownerIgn: profile.igns[game],
-    maxSize: opts['cap'],
-    voiceChannelId: opts['voice-channel'],
-  })
+// Bypass-routed (see openEditModal note above).
+export async function handleCreateModalRaw(interaction: any, env: AppBindings): Promise<void> {
+  const reply = (content: string) => editOriginal(env.DISCORD_APPLICATION_ID, interaction.token, content)
 
-  const msg = await postPartyEmbed(c.env.DISCORD_BOT_TOKEN, channelId, party)
-  await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
+  try {
+    const guildId = interaction.guild_id as string
+    const channelId = interaction.channel_id as string
+    const user = interaction.member?.user ?? interaction.user
+    const userId = user.id as string
+    const username = user.username as string
+    const displayName = (interaction.member?.nick ?? user.global_name ?? user.username) as string
 
-  await addToIndex(c.env.PARTY_KV, guildId, { id: partyId, name: party.name, game: party.game })
-  await setUserPartyId(c.env.PARTY_KV, guildId, userId, partyId)
+    const fields = parseCreateModalSubmit(interaction)
 
-  return c.followup({ content: `Party **${party.name}** created! (ID: \`${partyId}\`)`, flags: 64 })
+    const maxSize = Number(fields.capacity)
+    if (!Number.isInteger(maxSize) || maxSize < 2 || maxSize > 50) {
+      return reply('Player cap must be a whole number between 2 and 50.')
+    }
+    if (!fields.voiceChannelId) return reply('Please pick a voice channel.')
+
+    // Re-check eligibility — state may have changed while the modal was open.
+    const [existingPartyId, index, profile] = await Promise.all([
+      getUserPartyId(env.PARTY_KV, guildId, userId),
+      getPartyIndex(env.PARTY_KV, guildId),
+      getUserProfile(env.PARTY_KV, userId),
+    ])
+    if (existingPartyId) return reply(`You're already in party \`${existingPartyId}\`. Leave it or disband it first.`)
+    if (index.length >= 10) return reply('There are already 10 active parties. Wait for one to disband.')
+
+    const game = fields.game || 'Other'
+    const name = fields.name.trim() || `${displayName}'s party`
+    const partyId = randomId()
+    const stub = getPartyStub(env, guildId, partyId)
+
+    const party = await callParty<PartyData>(stub, 'create', {
+      id: partyId,
+      guildId,
+      name,
+      description: fields.description,
+      game,
+      ownerId: userId,
+      ownerUsername: username,
+      ownerName: displayName,
+      ownerIgn: profile.igns[game],
+      maxSize,
+      voiceChannelId: fields.voiceChannelId,
+    })
+
+    const msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, party)
+    await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
+
+    await addToIndex(env.PARTY_KV, guildId, { id: partyId, name: party.name, game: party.game })
+    await setUserPartyId(env.PARTY_KV, guildId, userId, partyId)
+
+    return reply(`Party **${party.name}** created! (ID: \`${partyId}\`)`)
+  } catch (e) {
+    console.error('handleCreateModalRaw error:', e)
+    return reply('Something went wrong.')
+  }
 }
 
 // ── /party join ───────────────────────────────────────────────────────────────

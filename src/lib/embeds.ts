@@ -81,7 +81,7 @@ export function buildHelpEmbed(page: number) {
       fields: [
         {
           name: '1. Create a party',
-          value: '`/party create cap:<n> voice-channel:#vc`\nOnly `cap` and `voice-channel` are required. Optional: `name`, `game`, `description`.',
+          value: '`/party create` — opens a modal where you set name, description, cap, game, and voice channel.',
         },
         {
           name: '2. Save your IGN (once per game)',
