@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
-  RemoveResult, SetIgnResult, DisbandResult,
+  RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
   ForceAddResult, PromoteResult, SetBanlistResult, UpdateResult,
 } from '../types'
 
@@ -57,6 +57,8 @@ export class PartyState extends DurableObject {
         case 'deny':       return Response.json(await this.deny(body))
         case 'remove':     return Response.json(await this.removeFromParty(body))
         case 'promote':    return Response.json(await this.promote(body))
+        case 'close':      return Response.json(await this.close(body))
+        case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
         case 'setbanlist': return Response.json(await this.setBanlist(body))
         case 'update':     return Response.json(await this.update(body))
@@ -254,6 +256,39 @@ export class PartyState extends DurableObject {
     data.ownerName = newOwner.displayName
     await this.save(data)
     return { status: 'promoted', data }
+  }
+
+  private async close(body: any): Promise<CloseResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+    if (data.isClosed) return { status: 'already_closed', data }
+
+    data.isClosed = true
+    await this.save(data)
+    return { status: 'closed', data }
+  }
+
+  private async open(body: any): Promise<OpenResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data, promoted: [] }
+    if (!data.isClosed) return { status: 'already_open', data, promoted: [] }
+
+    data.isClosed = false
+
+    const promoted: string[] = []
+    while (data.queue.length > 0 && data.members.length < data.maxSize) {
+      const next = data.queue.shift()!
+      data.members.push({ ...next, joinedAt: Date.now() })
+      this.assignBan(data, next.userId)
+      promoted.push(next.userId)
+    }
+
+    await this.save(data)
+    return { status: 'opened', data, promoted }
   }
 
   private async setIgn(body: any): Promise<SetIgnResult> {

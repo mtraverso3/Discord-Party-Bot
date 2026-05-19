@@ -43,7 +43,8 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'info':    return await info(c, guildId, userId, opts)
         case 'list':    return await list(c, guildId)
         case 'ign':     return await ign(c, guildId, userId, opts)
-        case 'voice':   return await changeVoice(c, guildId, userId, opts)
+        case 'close':   return await closeParty(c, guildId, userId)
+        case 'open':    return await openParty(c, guildId, userId)
         case 'adduser': return await addUser(c, guildId, userId, opts)
         case 'approve': return await approve(c, guildId, userId, opts)
         case 'deny':    return await deny(c, guildId, userId, opts)
@@ -355,7 +356,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
       description: fields.description,
       maxSize: Number(fields.capacity),
       game: fields.game,
-      isClosed: fields.isClosed,
+      voiceChannelId: fields.voiceChannelId || undefined,
       ignMap,
     }).catch(() => null)
 
@@ -390,23 +391,40 @@ async function editOriginal(appId: string, token: string, content: string): Prom
   })
 }
 
-// ── /party voice ──────────────────────────────────────────────────────────────
+// ── /party close ──────────────────────────────────────────────────────────────
 
-async function changeVoice(c: CommandContext<AppEnv>, guildId: string, userId: string, opts: Record<string, any>) {
+async function closeParty(c: CommandContext<AppEnv>, guildId: string, userId: string) {
   const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<UpdateResult>(stub, 'update', {
-    requesterId: userId,
-    voiceChannelId: opts['voice-channel'] as string,
-  }).catch(() => null)
+  const result = await callParty<{ status: string; data: PartyData }>(stub, 'close', { requesterId: userId })
 
-  if (!result) return c.followup({ content: 'Party not found.', flags: 64 })
-  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can change the voice channel.', flags: 64 })
+  if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can close the party.', flags: 64 })
+  if (result.status === 'already_closed') return c.followup({ content: 'The party is already closed.', flags: 64 })
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-  return c.followup({ content: `Voice channel set to <#${opts['voice-channel']}>.`, flags: 64 })
+  return c.followup({ content: 'Party closed. New joiners will be added to the queue.', flags: 64 })
+}
+
+// ── /party open ───────────────────────────────────────────────────────────────
+
+async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: string) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const result = await callParty<{ status: string; data: PartyData; promoted: string[] }>(stub, 'open', { requesterId: userId })
+
+  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can open the party.', flags: 64 })
+  if (result.status === 'already_open') return c.followup({ content: 'The party is already open.', flags: 64 })
+
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+
+  const promotedNote = result.promoted.length > 0
+    ? ` ${result.promoted.length} player(s) auto-promoted from queue.`
+    : ''
+  return c.followup({ content: `Party opened!${promotedNote}`, flags: 64 })
 }
 
 // ── /party adduser ────────────────────────────────────────────────────────────

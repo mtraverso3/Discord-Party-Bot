@@ -108,11 +108,11 @@ export function buildHelpEmbed(page: number) {
         },
         {
           name: 'Queue',
-          value: 'Toggle **Status: Closed** in `/party edit` to funnel joiners to the queue; switch back to **Open** to auto-promote from queue.\n`/party approve @user` — let a queued player in\n`/party deny @user` — remove a player from the queue',
+          value: '`/party close` — funnel new joiners to the queue\n`/party open` — re-open and auto-promote from queue\n`/party approve @user` — let a queued player in\n`/party deny @user` — remove a player from the queue',
         },
         {
           name: 'Adjust',
-          value: "`/party edit` — modal to change name, description, player cap, game, and open/closed status\n`/party voice voice-channel:<vc>` — change the linked voice channel\n`/party banlist` — paste a list of bans to auto-assign per member\n`/party bump` — repost the embed to the bottom of the channel",
+          value: "`/party edit` — modal to change name, description, player cap, game, and voice channel\n`/party banlist` — paste a list of bans to auto-assign per member\n`/party bump` — repost the embed to the bottom of the channel",
         },
         {
           name: 'End',
