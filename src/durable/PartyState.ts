@@ -4,6 +4,7 @@ import type {
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
   SetGameResult, ForceAddResult, PromoteResult, SetSizeResult, SetDescriptionResult, SetBanlistResult,
+  SetNameResult, SetVoiceResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -64,6 +65,8 @@ export class PartyState extends DurableObject {
         case 'setgame':    return Response.json(await this.setGame(body))
         case 'setdescription': return Response.json(await this.setDescription(body))
         case 'setbanlist': return Response.json(await this.setBanlist(body))
+        case 'setname':    return Response.json(await this.setName(body))
+        case 'setvoice':   return Response.json(await this.setVoice(body))
         case 'setmessage': return Response.json(await this.setMessage(body))
         case 'disband':    return Response.json(await this.disband(body))
         case 'forcedisband': return Response.json(await this.forceDisband())
@@ -392,6 +395,31 @@ export class PartyState extends DurableObject {
       for (const m of data.members) this.assignBan(data, m.userId)
     }
 
+    await this.save(data)
+    return { status: 'updated', data }
+  }
+
+  private async setName(body: any): Promise<SetNameResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+
+    const name = (body.name ?? '').toString().trim().slice(0, 100)
+    if (name.length === 0) return { status: 'invalid', data }
+
+    data.name = name
+    await this.save(data)
+    return { status: 'updated', data }
+  }
+
+  private async setVoice(body: any): Promise<SetVoiceResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+
+    data.voiceChannelId = body.voiceChannelId
     await this.save(data)
     return { status: 'updated', data }
   }

@@ -135,6 +135,16 @@ export type SetBanlistResult = {
   data: PartyData
 }
 
+export type SetNameResult = {
+  status: 'updated' | 'unauthorized' | 'invalid'
+  data: PartyData
+}
+
+export type SetVoiceResult = {
+  status: 'updated' | 'unauthorized'
+  data: PartyData
+}
+
 export interface UserProfile {
   igns: Record<string, string>
 }

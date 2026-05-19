@@ -24,6 +24,8 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party list`              | List all active parties                        |
 | `/party ign <game> <name>` | Save your in-game name for a game              |
 | `/party game <game>`       | Change the party's current game (owner only)   |
+| `/party rename <name>`     | Rename the party (owner only)                  |
+| `/party voice <channel>`   | Change the linked voice channel (owner only)   |
 | `/party size <cap>`        | Change the party size (owner only)             |
 | `/party description`       | Edit the party description via modal (owner)   |
 | `/party banlist`           | Assign champion bans to members in order (owner) |

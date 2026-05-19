@@ -97,6 +97,22 @@ const commands = [
       },
       {
         type: 1,
+        name: 'rename',
+        description: 'Rename your party (owner only)',
+        options: [
+          { type: 3, name: 'name', description: 'New party name', required: true, max_length: 100 },
+        ],
+      },
+      {
+        type: 1,
+        name: 'voice',
+        description: "Change your party's linked voice channel (owner only)",
+        options: [
+          { type: 7, name: 'voice-channel', description: 'New voice channel', required: true, channel_types: [2] },
+        ],
+      },
+      {
+        type: 1,
         name: 'description',
         description: "Edit your party's description (owner only)",
       },

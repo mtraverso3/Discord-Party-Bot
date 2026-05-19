@@ -47,6 +47,8 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'list':    return await list(c, guildId)
         case 'ign':     return await ign(c, guildId, userId, opts)
         case 'game':    return await changeGame(c, guildId, userId, opts)
+        case 'rename':  return await rename(c, guildId, userId, opts)
+        case 'voice':   return await setVoice(c, guildId, userId, opts)
         case 'close':   return await closeParty(c, guildId, userId)
         case 'open':    return await openParty(c, guildId, userId)
         case 'adduser': return await addUser(c, guildId, userId, opts)
@@ -302,6 +304,41 @@ async function changeGame(c: CommandContext<AppEnv>, guildId: string, userId: st
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
   return c.followup({ content: `Game changed to **${game}**.`, flags: 64 })
+}
+
+// ── /party rename ─────────────────────────────────────────────────────────────
+
+async function rename(c: CommandContext<AppEnv>, guildId: string, userId: string, opts: Record<string, any>) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const name = (opts['name'] as string).trim()
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const result = await callParty<{ status: string; data: PartyData }>(stub, 'setname', { requesterId: userId, name })
+
+  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can rename the party.', flags: 64 })
+  if (result.status === 'invalid')      return c.followup({ content: 'Name cannot be empty.', flags: 64 })
+
+  await updateIndexEntry(c.env.PARTY_KV, guildId, partyId, { name: result.data.name })
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+
+  return c.followup({ content: `Party renamed to **${result.data.name}**.`, flags: 64 })
+}
+
+// ── /party voice ──────────────────────────────────────────────────────────────
+
+async function setVoice(c: CommandContext<AppEnv>, guildId: string, userId: string, opts: Record<string, any>) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const voiceChannelId = opts['voice-channel'] as string
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const result = await callParty<{ status: string; data: PartyData }>(stub, 'setvoice', { requesterId: userId, voiceChannelId })
+
+  if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can change the voice channel.', flags: 64 })
+
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  return c.followup({ content: `Voice channel set to <#${voiceChannelId}>.`, flags: 64 })
 }
 
 // ── /party close ──────────────────────────────────────────────────────────────
