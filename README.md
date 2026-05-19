@@ -23,11 +23,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party info [party]`      | Show party embed (defaults to yours)           |
 | `/party list`              | List all active parties                        |
 | `/party ign <game> <name>` | Save your in-game name for a game              |
-| `/party game <game>`       | Change the party's current game (owner only)   |
-| `/party rename <name>`     | Rename the party (owner only)                  |
-| `/party voice <channel>`   | Change the linked voice channel (owner only)   |
-| `/party size <cap>`        | Change the party size (owner only)             |
-| `/party description`       | Edit the party description via modal (owner)   |
+| `/party edit`              | Modal to edit name, description, cap, game, voice channel (owner) |
 | `/party banlist`           | Assign champion bans to members in order (owner) |
 | `/party close`             | Close your party — new joiners queue           |
 | `/party open`              | Re-open and auto-promote queued players        |

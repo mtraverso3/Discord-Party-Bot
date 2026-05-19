@@ -104,11 +104,6 @@ export type DisbandResult = {
   data: PartyData
 }
 
-export type SetGameResult = {
-  status: 'updated' | 'unauthorized' | 'same_game'
-  data: PartyData
-}
-
 export type ForceAddResult = {
   status: 'added' | 'already_member' | 'full' | 'unauthorized'
   data: PartyData
@@ -119,30 +114,18 @@ export type PromoteResult = {
   data: PartyData
 }
 
-export type SetSizeResult = {
-  status: 'updated' | 'unauthorized' | 'too_small' | 'invalid' | 'unchanged'
-  data: PartyData
-  promoted: string[]
-}
-
-export type SetDescriptionResult = {
-  status: 'updated' | 'unauthorized'
-  data: PartyData
-}
-
 export type SetBanlistResult = {
   status: 'updated' | 'unauthorized'
   data: PartyData
 }
 
-export type SetNameResult = {
+export type UpdateResult = {
   status: 'updated' | 'unauthorized' | 'invalid'
   data: PartyData
-}
-
-export type SetVoiceResult = {
-  status: 'updated' | 'unauthorized'
-  data: PartyData
+  promoted: string[]
+  nameChanged: boolean
+  gameChanged: boolean
+  message?: string
 }
 
 export interface UserProfile {

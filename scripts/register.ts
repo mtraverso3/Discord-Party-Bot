@@ -89,32 +89,8 @@ const commands = [
       },
       {
         type: 1,
-        name: 'game',
-        description: "Change your party's current game (owner only)",
-        options: [
-          { type: 3, name: 'game', description: 'New game', required: true, choices: GAMES },
-        ],
-      },
-      {
-        type: 1,
-        name: 'rename',
-        description: 'Rename your party (owner only)',
-        options: [
-          { type: 3, name: 'name', description: 'New party name', required: true, max_length: 100 },
-        ],
-      },
-      {
-        type: 1,
-        name: 'voice',
-        description: "Change your party's linked voice channel (owner only)",
-        options: [
-          { type: 7, name: 'voice-channel', description: 'New voice channel', required: true, channel_types: [2] },
-        ],
-      },
-      {
-        type: 1,
-        name: 'description',
-        description: "Edit your party's description (owner only)",
+        name: 'edit',
+        description: 'Edit party name, description, cap, game, and voice channel in one modal (owner only)',
       },
       {
         type: 1,
@@ -161,14 +137,6 @@ const commands = [
         description: 'Remove a member from your party (owner only)',
         options: [
           { type: 6, name: 'user', description: 'User to remove from party', required: true },
-        ],
-      },
-      {
-        type: 1,
-        name: 'size',
-        description: 'Change your party size (owner only)',
-        options: [
-          { type: 4, name: 'cap', description: 'New max number of players', required: true, min_value: 2, max_value: 50 },
         ],
       },
       {

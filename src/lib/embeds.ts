@@ -112,7 +112,7 @@ export function buildHelpEmbed(page: number) {
         },
         {
           name: 'Adjust',
-          value: "`/party size cap:<n>` — change the player cap\n`/party game game:<game>` — change the party's game\n`/party bump` — repost the embed to the bottom of the channel",
+          value: "`/party edit` — modal to change name, description, player cap, game, and voice channel\n`/party banlist` — paste a list of bans to auto-assign per member\n`/party bump` — repost the embed to the bottom of the channel",
         },
         {
           name: 'End',

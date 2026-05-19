@@ -3,8 +3,7 @@ import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
-  SetGameResult, ForceAddResult, PromoteResult, SetSizeResult, SetDescriptionResult, SetBanlistResult,
-  SetNameResult, SetVoiceResult,
+  ForceAddResult, PromoteResult, SetBanlistResult, UpdateResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -58,15 +57,11 @@ export class PartyState extends DurableObject {
         case 'deny':       return Response.json(await this.deny(body))
         case 'remove':     return Response.json(await this.removeFromParty(body))
         case 'promote':    return Response.json(await this.promote(body))
-        case 'setsize':    return Response.json(await this.setSize(body))
         case 'close':      return Response.json(await this.close(body))
         case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
-        case 'setgame':    return Response.json(await this.setGame(body))
-        case 'setdescription': return Response.json(await this.setDescription(body))
         case 'setbanlist': return Response.json(await this.setBanlist(body))
-        case 'setname':    return Response.json(await this.setName(body))
-        case 'setvoice':   return Response.json(await this.setVoice(body))
+        case 'update':     return Response.json(await this.update(body))
         case 'setmessage': return Response.json(await this.setMessage(body))
         case 'disband':    return Response.json(await this.disband(body))
         case 'forcedisband': return Response.json(await this.forceDisband())
@@ -263,34 +258,6 @@ export class PartyState extends DurableObject {
     return { status: 'promoted', data }
   }
 
-  private async setSize(body: any): Promise<SetSizeResult> {
-    const data = await this.load()
-    if (!data) throw new Error('Party not found')
-
-    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data, promoted: [] }
-
-    const newSize = Number(body.maxSize)
-    if (!Number.isInteger(newSize) || newSize < 2 || newSize > 50) return { status: 'invalid', data, promoted: [] }
-    if (newSize === data.maxSize) return { status: 'unchanged', data, promoted: [] }
-    if (newSize < data.members.length) return { status: 'too_small', data, promoted: [] }
-
-    data.maxSize = newSize
-
-    // Growing the cap while open opens spots — pull from the queue
-    const promoted: string[] = []
-    if (!data.isClosed) {
-      while (data.queue.length > 0 && data.members.length < data.maxSize) {
-        const next = data.queue.shift()!
-        data.members.push({ ...next, joinedAt: Date.now() })
-        this.assignBan(data, next.userId)
-        promoted.push(next.userId)
-      }
-    }
-
-    await this.save(data)
-    return { status: 'updated', data, promoted }
-  }
-
   private async close(body: any): Promise<CloseResult> {
     const data = await this.load()
     if (!data) throw new Error('Party not found')
@@ -345,36 +312,6 @@ export class PartyState extends DurableObject {
     return { status: 'not_in', data }
   }
 
-  private async setGame(body: any): Promise<SetGameResult> {
-    const data = await this.load()
-    if (!data) throw new Error('Party not found')
-
-    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
-    if (data.game === body.game) return { status: 'same_game', data }
-
-    data.game = body.game
-    const ignMap: Record<string, string> = body.ignMap ?? {}
-    for (const m of data.members) {
-      m.ign = ignMap[m.userId]
-    }
-    for (const q of data.queue) {
-      q.ign = ignMap[q.userId]
-    }
-    await this.save(data)
-    return { status: 'updated', data }
-  }
-
-  private async setDescription(body: any): Promise<SetDescriptionResult> {
-    const data = await this.load()
-    if (!data) throw new Error('Party not found')
-
-    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
-
-    data.description = (body.description ?? '').toString().slice(0, 1000)
-    await this.save(data)
-    return { status: 'updated', data }
-  }
-
   private async setBanlist(body: any): Promise<SetBanlistResult> {
     const data = await this.load()
     if (!data) throw new Error('Party not found')
@@ -399,29 +336,55 @@ export class PartyState extends DurableObject {
     return { status: 'updated', data }
   }
 
-  private async setName(body: any): Promise<SetNameResult> {
+  private async update(body: any): Promise<UpdateResult> {
     const data = await this.load()
     if (!data) throw new Error('Party not found')
 
-    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+    if (data.ownerId !== body.requesterId) {
+      return { status: 'unauthorized', data, promoted: [], nameChanged: false, gameChanged: false }
+    }
 
     const name = (body.name ?? '').toString().trim().slice(0, 100)
-    if (name.length === 0) return { status: 'invalid', data }
+    if (name.length === 0) {
+      return { status: 'invalid', data, promoted: [], message: 'Name cannot be empty.', nameChanged: false, gameChanged: false }
+    }
+
+    const newSize = Number(body.maxSize)
+    if (!Number.isInteger(newSize) || newSize < 2 || newSize > 50) {
+      return { status: 'invalid', data, promoted: [], message: 'Player cap must be a whole number between 2 and 50.', nameChanged: false, gameChanged: false }
+    }
+    if (newSize < data.members.length) {
+      return { status: 'invalid', data, promoted: [], message: `Player cap cannot be below the current member count (${data.members.length}).`, nameChanged: false, gameChanged: false }
+    }
+
+    const nameChanged = data.name !== name
+    const gameChanged = body.game != null && data.game !== body.game
 
     data.name = name
+    data.description = (body.description ?? '').toString().slice(0, 1000)
+    data.maxSize = newSize
+    if (body.voiceChannelId) data.voiceChannelId = body.voiceChannelId
+
+    if (gameChanged) {
+      data.game = body.game
+      const ignMap: Record<string, string> = body.ignMap ?? {}
+      for (const m of data.members) m.ign = ignMap[m.userId]
+      for (const q of data.queue) q.ign = ignMap[q.userId]
+    }
+
+    // Growing the cap while open opens spots — pull from the queue
+    const promoted: string[] = []
+    if (!data.isClosed) {
+      while (data.queue.length > 0 && data.members.length < data.maxSize) {
+        const next = data.queue.shift()!
+        data.members.push({ ...next, joinedAt: Date.now() })
+        this.assignBan(data, next.userId)
+        promoted.push(next.userId)
+      }
+    }
+
     await this.save(data)
-    return { status: 'updated', data }
-  }
-
-  private async setVoice(body: any): Promise<SetVoiceResult> {
-    const data = await this.load()
-    if (!data) throw new Error('Party not found')
-
-    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
-
-    data.voiceChannelId = body.voiceChannelId
-    await this.save(data)
-    return { status: 'updated', data }
+    return { status: 'updated', data, promoted, nameChanged, gameChanged }
   }
 
   private async setMessage(body: any): Promise<PartyData> {
