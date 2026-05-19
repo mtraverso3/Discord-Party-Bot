@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
-  RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
+  RemoveResult, SetIgnResult, DisbandResult,
   ForceAddResult, PromoteResult, SetBanlistResult, UpdateResult,
 } from '../types'
 
@@ -57,8 +57,6 @@ export class PartyState extends DurableObject {
         case 'deny':       return Response.json(await this.deny(body))
         case 'remove':     return Response.json(await this.removeFromParty(body))
         case 'promote':    return Response.json(await this.promote(body))
-        case 'close':      return Response.json(await this.close(body))
-        case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
         case 'setbanlist': return Response.json(await this.setBanlist(body))
         case 'update':     return Response.json(await this.update(body))
@@ -258,39 +256,6 @@ export class PartyState extends DurableObject {
     return { status: 'promoted', data }
   }
 
-  private async close(body: any): Promise<CloseResult> {
-    const data = await this.load()
-    if (!data) throw new Error('Party not found')
-
-    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
-    if (data.isClosed) return { status: 'already_closed', data }
-
-    data.isClosed = true
-    await this.save(data)
-    return { status: 'closed', data }
-  }
-
-  private async open(body: any): Promise<OpenResult> {
-    const data = await this.load()
-    if (!data) throw new Error('Party not found')
-
-    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data, promoted: [] }
-    if (!data.isClosed) return { status: 'already_open', data, promoted: [] }
-
-    data.isClosed = false
-
-    const promoted: string[] = []
-    while (data.queue.length > 0 && data.members.length < data.maxSize) {
-      const next = data.queue.shift()!
-      data.members.push({ ...next, joinedAt: Date.now() })
-      this.assignBan(data, next.userId)
-      promoted.push(next.userId)
-    }
-
-    await this.save(data)
-    return { status: 'opened', data, promoted }
-  }
-
   private async setIgn(body: any): Promise<SetIgnResult> {
     const data = await this.load()
     if (!data) throw new Error('Party not found')
@@ -340,30 +305,39 @@ export class PartyState extends DurableObject {
     const data = await this.load()
     if (!data) throw new Error('Party not found')
 
-    if (data.ownerId !== body.requesterId) {
-      return { status: 'unauthorized', data, promoted: [], nameChanged: false, gameChanged: false }
+    const fail = (message: string, status: 'invalid' | 'unauthorized' = 'invalid'): UpdateResult => ({
+      status, data, promoted: [], nameChanged: false, gameChanged: false, message,
+    })
+
+    if (data.ownerId !== body.requesterId) return fail('', 'unauthorized')
+
+    let name = data.name
+    if (body.name != null) {
+      const trimmed = body.name.toString().trim().slice(0, 100)
+      if (trimmed.length === 0) return fail('Name cannot be empty.')
+      name = trimmed
     }
 
-    const name = (body.name ?? '').toString().trim().slice(0, 100)
-    if (name.length === 0) {
-      return { status: 'invalid', data, promoted: [], message: 'Name cannot be empty.', nameChanged: false, gameChanged: false }
-    }
-
-    const newSize = Number(body.maxSize)
-    if (!Number.isInteger(newSize) || newSize < 2 || newSize > 50) {
-      return { status: 'invalid', data, promoted: [], message: 'Player cap must be a whole number between 2 and 50.', nameChanged: false, gameChanged: false }
-    }
-    if (newSize < data.members.length) {
-      return { status: 'invalid', data, promoted: [], message: `Player cap cannot be below the current member count (${data.members.length}).`, nameChanged: false, gameChanged: false }
+    let maxSize = data.maxSize
+    if (body.maxSize != null) {
+      const n = Number(body.maxSize)
+      if (!Number.isInteger(n) || n < 2 || n > 50) {
+        return fail('Player cap must be a whole number between 2 and 50.')
+      }
+      if (n < data.members.length) {
+        return fail(`Player cap cannot be below the current member count (${data.members.length}).`)
+      }
+      maxSize = n
     }
 
     const nameChanged = data.name !== name
     const gameChanged = body.game != null && data.game !== body.game
 
     data.name = name
-    data.description = (body.description ?? '').toString().slice(0, 1000)
-    data.maxSize = newSize
-    if (body.voiceChannelId) data.voiceChannelId = body.voiceChannelId
+    data.maxSize = maxSize
+    if (body.description != null) data.description = body.description.toString().slice(0, 1000)
+    if (body.voiceChannelId != null) data.voiceChannelId = body.voiceChannelId
+    if (body.isClosed != null) data.isClosed = !!body.isClosed
 
     if (gameChanged) {
       data.game = body.game
@@ -372,7 +346,8 @@ export class PartyState extends DurableObject {
       for (const q of data.queue) q.ign = ignMap[q.userId]
     }
 
-    // Growing the cap while open opens spots — pull from the queue
+    // Drain the queue when the party is open and has room.
+    // Naturally fires after closed→open transitions and cap growth.
     const promoted: string[] = []
     if (!data.isClosed) {
       while (data.queue.length > 0 && data.members.length < data.maxSize) {

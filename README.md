@@ -23,10 +23,9 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party info [party]`      | Show party embed (defaults to yours)           |
 | `/party list`              | List all active parties                        |
 | `/party ign <game> <name>` | Save your in-game name for a game              |
-| `/party edit`              | Modal to edit name, description, cap, game, voice channel (owner) |
+| `/party edit`              | Modal: edit name, description, cap, game, open/closed status (owner) |
+| `/party voice <channel>`   | Change the linked voice channel (owner only)   |
 | `/party banlist`           | Assign champion bans to members in order (owner) |
-| `/party close`             | Close your party — new joiners queue           |
-| `/party open`              | Re-open and auto-promote queued players        |
 | `/party adduser @user`     | Directly add a user to your party (owner only) |
 | `/party approve @user`     | Approve a queued player (owner only)           |
 | `/party deny @user`        | Remove a player from the queue (owner only)    |

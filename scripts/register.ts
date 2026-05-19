@@ -90,22 +90,20 @@ const commands = [
       {
         type: 1,
         name: 'edit',
-        description: 'Edit party name, description, cap, game, and voice channel in one modal (owner only)',
+        description: 'Edit name, description, cap, game, and open/closed status in one modal (owner only)',
+      },
+      {
+        type: 1,
+        name: 'voice',
+        description: "Change your party's linked voice channel (owner only)",
+        options: [
+          { type: 7, name: 'voice-channel', description: 'New voice channel', required: true, channel_types: [2] },
+        ],
       },
       {
         type: 1,
         name: 'banlist',
         description: 'Set a banlist — members get assigned a ban in order (owner only)',
-      },
-      {
-        type: 1,
-        name: 'close',
-        description: 'Close your party — new joiners go to queue (owner only)',
-      },
-      {
-        type: 1,
-        name: 'open',
-        description: 'Re-open your closed party (owner only)',
       },
       {
         type: 1,

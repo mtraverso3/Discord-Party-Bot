@@ -83,17 +83,6 @@ export type RemoveResult = {
   promoted?: string
 }
 
-export type CloseResult = {
-  status: 'closed' | 'already_closed' | 'unauthorized'
-  data: PartyData
-}
-
-export type OpenResult = {
-  status: 'opened' | 'already_open' | 'unauthorized'
-  data: PartyData
-  promoted: string[]
-}
-
 export type SetIgnResult = {
   status: 'updated' | 'not_in'
   data: PartyData

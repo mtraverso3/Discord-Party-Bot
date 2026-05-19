@@ -19,7 +19,7 @@ export interface EditFields {
   description: string
   capacity: string
   game: string
-  voiceChannelId: string
+  isClosed: boolean
 }
 
 export function buildEditModalJSON(party: PartyData): any {
@@ -44,12 +44,13 @@ export function buildEditModalJSON(party: PartyData): any {
         options: GAMES.map(g => ({ label: g.name, value: g.value, default: g.value === party.game })),
         min_values: 1, max_values: 1,
       }),
-      label('Voice channel', {
-        type: 8, custom_id: 'voice-channel',
-        channel_types: [2], min_values: 1, max_values: 1,
-        ...(party.voiceChannelId
-          ? { default_values: [{ id: party.voiceChannelId, type: 'channel' }] }
-          : {}),
+      label('Status', {
+        type: 3, custom_id: 'status',
+        options: [
+          { label: 'Open — anyone joins directly', value: 'open', default: !party.isClosed },
+          { label: 'Closed — new joiners queue up', value: 'closed', default: party.isClosed },
+        ],
+        min_values: 1, max_values: 1,
       }),
     ],
   }
@@ -63,11 +64,11 @@ export function parseEditModalSubmit(interaction: any): EditFields {
   const flat: Record<string, string> = {}
   for (const c of interaction.data?.components ?? []) collect(c, flat)
   return {
-    name:           flat['name']           ?? '',
-    description:    flat['description']    ?? '',
-    capacity:       flat['capacity']       ?? '',
-    game:           flat['game']           ?? '',
-    voiceChannelId: flat['voice-channel']  ?? '',
+    name:        flat['name']        ?? '',
+    description: flat['description'] ?? '',
+    capacity:    flat['capacity']    ?? '',
+    game:        flat['game']        ?? '',
+    isClosed:    flat['status'] === 'closed',
   }
 }
 
