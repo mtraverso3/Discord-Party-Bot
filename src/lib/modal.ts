@@ -26,41 +26,46 @@ export function buildEditModalJSON(party: PartyData): any {
     custom_id: `${EDIT_MODAL_PREFIX};${party.id}`,
     title: 'Edit party',
     components: [
-      label('Name', {
+      row({
         type: 4,
         custom_id: 'name',
+        label: 'Name',
         style: 1,
         value: party.name,
         required: true,
         max_length: 100,
       }),
-      label('Description', {
+      row({
         type: 4,
         custom_id: 'description',
+        label: 'Description',
         style: 2,
         value: party.description || '',
         required: false,
         max_length: 1000,
       }),
-      label('Player cap (2–50)', {
+      row({
         type: 4,
         custom_id: 'capacity',
+        label: 'Player cap (2–50)',
         style: 1,
         value: String(party.maxSize),
         required: true,
         min_length: 1,
         max_length: 2,
       }),
-      label('Game', {
+      row({
         type: 3,
         custom_id: 'game',
+        placeholder: `Game (current: ${party.game})`,
         options: GAMES.map(g => ({ label: g.name, value: g.value, default: g.value === party.game })),
         min_values: 1,
         max_values: 1,
       }),
-      label('Voice channel', {
+      row({
         type: 8,
         custom_id: 'voice-channel',
+        placeholder: 'Voice channel',
         channel_types: [2],
         min_values: 1,
         max_values: 1,
@@ -72,8 +77,8 @@ export function buildEditModalJSON(party: PartyData): any {
   }
 }
 
-function label(text: string, component: any) {
-  return { type: 18, label: text, component }
+function row(component: any) {
+  return { type: 1, components: [component] }
 }
 
 export function parseEditModalSubmit(interaction: any): EditFields {
