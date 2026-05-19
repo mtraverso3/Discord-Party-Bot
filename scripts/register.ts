@@ -102,6 +102,11 @@ const commands = [
       },
       {
         type: 1,
+        name: 'banlist',
+        description: 'Set a banlist — members get assigned a ban in order (owner only)',
+      },
+      {
+        type: 1,
         name: 'close',
         description: 'Close your party — new joiners go to queue (owner only)',
       },

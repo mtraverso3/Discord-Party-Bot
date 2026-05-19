@@ -27,6 +27,9 @@ export async function handleParty(c: CommandContext<AppEnv>) {
   if (peek.name === 'description') {
     return await openDescriptionModal(c)
   }
+  if (peek.name === 'banlist') {
+    return await openBanlistModal(c)
+  }
 
   return c.ephemeral().resDefer(async (c) => {
     const { name, opts } = sub(c)
@@ -588,6 +591,62 @@ export async function handleDescriptionModal(c: ModalContext<AppEnv>) {
 
     await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
     return c.followup({ content: 'Description updated.', flags: 64 })
+  })
+}
+
+// ── /party banlist (modal) ────────────────────────────────────────────────────
+
+async function openBanlistModal(c: CommandContext<AppEnv>) {
+  const guildId = c.interaction.guild_id!
+  const { userId } = extractMemberInfo(c.interaction)
+
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  if (!partyId) {
+    return c.ephemeral().res({ content: "You're not in a party.", flags: 64 })
+  }
+
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const party = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+  if (!party) return c.ephemeral().res({ content: 'Party not found.', flags: 64 })
+  if (party.ownerId !== userId) {
+    return c.ephemeral().res({ content: 'Only the party owner can set the banlist.', flags: 64 })
+  }
+
+  const input = new TextInput('banlist', 'Banlist (one champion per line)', 'Multi')
+    .required(false)
+    .max_length(2000)
+    .placeholder('Aatrox\nAhri\nAkali\n...')
+  const current = (party.banlist ?? []).join('\n')
+  if (current) input.value(current)
+
+  return c.resModal(
+    new Modal(`party_banlist;${partyId}`, 'Edit party banlist').row(input),
+  )
+}
+
+export async function handleBanlistModal(c: ModalContext<AppEnv>) {
+  return c.ephemeral().resDefer(async (c) => {
+    const partyId = c.get('custom_id') as string | undefined
+    const guildId = c.interaction.guild_id!
+    const { userId } = extractMemberInfo(c.interaction)
+
+    if (!partyId) return c.followup({ content: 'Missing party context.', flags: 64 })
+
+    const banlist = ((c as any).get('banlist') as string | undefined) ?? ''
+    const stub = getPartyStub(c.env, guildId, partyId)
+    const result = await callParty<{ status: string; data: PartyData }>(
+      stub, 'setbanlist', { requesterId: userId, banlist },
+    ).catch(() => null)
+
+    if (!result) return c.followup({ content: 'Party not found.', flags: 64 })
+    if (result.status === 'unauthorized') {
+      return c.followup({ content: 'Only the party owner can set the banlist.', flags: 64 })
+    }
+
+    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+    const count = result.data.banlist?.length ?? 0
+    const msg = count === 0 ? 'Banlist cleared.' : `Banlist updated — ${count} entr${count === 1 ? 'y' : 'ies'}.`
+    return c.followup({ content: msg, flags: 64 })
   })
 }
 

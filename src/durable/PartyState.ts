@@ -3,7 +3,7 @@ import type {
   PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
-  SetGameResult, ForceAddResult, PromoteResult, SetSizeResult, SetDescriptionResult,
+  SetGameResult, ForceAddResult, PromoteResult, SetSizeResult, SetDescriptionResult, SetBanlistResult,
 } from '../types'
 
 export class PartyState extends DurableObject {
@@ -43,6 +43,7 @@ export class PartyState extends DurableObject {
         case 'setign':     return Response.json(await this.setIgn(body))
         case 'setgame':    return Response.json(await this.setGame(body))
         case 'setdescription': return Response.json(await this.setDescription(body))
+        case 'setbanlist': return Response.json(await this.setBanlist(body))
         case 'setmessage': return Response.json(await this.setMessage(body))
         case 'disband':    return Response.json(await this.disband(body))
         case 'forcedisband': return Response.json(await this.forceDisband())
@@ -338,6 +339,24 @@ export class PartyState extends DurableObject {
     if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
 
     data.description = (body.description ?? '').toString().slice(0, 1000)
+    await this.save(data)
+    return { status: 'updated', data }
+  }
+
+  private async setBanlist(body: any): Promise<SetBanlistResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+
+    const raw = (body.banlist ?? '').toString()
+    const entries = raw
+      .split('\n')
+      .map((line: string) => line.trim())
+      .filter((line: string) => line.length > 0)
+      .slice(0, 50)
+
+    data.banlist = entries
     await this.save(data)
     return { status: 'updated', data }
   }

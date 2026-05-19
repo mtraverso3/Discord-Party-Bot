@@ -30,6 +30,7 @@ export interface PartyData {
   createdAt: number
   members: PartyMember[]
   queue: QueueEntry[]
+  banlist?: string[]
 }
 
 export interface AppBindings extends Record<string, unknown> {
@@ -119,6 +120,11 @@ export type SetSizeResult = {
 }
 
 export type SetDescriptionResult = {
+  status: 'updated' | 'unauthorized'
+  data: PartyData
+}
+
+export type SetBanlistResult = {
   status: 'updated' | 'unauthorized'
   data: PartyData
 }
