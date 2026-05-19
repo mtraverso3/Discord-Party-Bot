@@ -14,7 +14,8 @@ export function buildPartyEmbed(party: PartyData) {
     .map((m, i) => {
       const ign = m.ign ? ` *(${m.ign})*` : ''
       const crown = m.userId === party.ownerId ? ' 👑' : ''
-      const ban = party.banlist?.[i] ? ` — 🚫 **${party.banlist[i]}**` : ''
+      const assigned = party.banlist?.assignments[m.userId]
+      const ban = assigned ? ` — 🚫 **${assigned}**` : ''
       return `\`${i + 1}.\` <@${m.userId}>${crown}${ign}${ban}`
     })
     .join('\n') || '*No members yet*'

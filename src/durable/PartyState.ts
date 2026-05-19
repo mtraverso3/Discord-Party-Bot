@@ -12,8 +12,28 @@ export class PartyState extends DurableObject {
   private async load(): Promise<PartyData | null> {
     if (this.cache !== null) return this.cache
     const stored = await this.ctx.storage.get<PartyData>('party')
+    if (stored && Array.isArray((stored as any).banlist)) {
+      // Legacy shape (string[]) — drop it; owner can re-paste.
+      delete (stored as any).banlist
+    }
     this.cache = stored ?? null
     return this.cache
+  }
+
+  private assignBan(data: PartyData, userId: string): void {
+    if (!data.banlist) return
+    if (data.banlist.assignments[userId]) return
+    const next = data.banlist.pool.shift()
+    if (next !== undefined) data.banlist.assignments[userId] = next
+  }
+
+  private freeBan(data: PartyData, userId: string): void {
+    if (!data.banlist) return
+    const ban = data.banlist.assignments[userId]
+    if (ban !== undefined) {
+      delete data.banlist.assignments[userId]
+      data.banlist.pool.push(ban)
+    }
   }
 
   private async save(data: PartyData): Promise<void> {
@@ -99,6 +119,7 @@ export class PartyState extends DurableObject {
 
     if (!data.isClosed && data.members.length < data.maxSize) {
       data.members.push(entry as PartyMember)
+      this.assignBan(data, body.userId)
       await this.save(data)
       return { status: 'joined', data }
     }
@@ -128,6 +149,7 @@ export class PartyState extends DurableObject {
       ign: body.ign,
       joinedAt: Date.now(),
     })
+    this.assignBan(data, body.userId)
     await this.save(data)
     return { status: 'added', data }
   }
@@ -142,11 +164,13 @@ export class PartyState extends DurableObject {
     const memberIdx = data.members.findIndex(m => m.userId === body.userId)
     if (memberIdx !== -1) {
       data.members.splice(memberIdx, 1)
+      this.freeBan(data, body.userId)
 
       let promoted: string | undefined
       if (!data.isClosed && data.queue.length > 0 && data.members.length < data.maxSize) {
         const next = data.queue.shift()!
         data.members.push({ ...next, joinedAt: Date.now() })
+        this.assignBan(data, next.userId)
         promoted = next.userId
       }
 
@@ -176,6 +200,7 @@ export class PartyState extends DurableObject {
 
     const [entry] = data.queue.splice(idx, 1)
     data.members.push({ ...entry!, joinedAt: Date.now() })
+    this.assignBan(data, entry!.userId)
     await this.save(data)
     return { status: 'approved', data }
   }
@@ -205,11 +230,13 @@ export class PartyState extends DurableObject {
     if (idx === -1) return { status: 'not_in', data }
 
     data.members.splice(idx, 1)
+    this.freeBan(data, body.userId)
 
     let promoted: string | undefined
     if (!data.isClosed && data.queue.length > 0 && data.members.length < data.maxSize) {
       const next = data.queue.shift()!
       data.members.push({ ...next, joinedAt: Date.now() })
+      this.assignBan(data, next.userId)
       promoted = next.userId
     }
 
@@ -252,6 +279,7 @@ export class PartyState extends DurableObject {
       while (data.queue.length > 0 && data.members.length < data.maxSize) {
         const next = data.queue.shift()!
         data.members.push({ ...next, joinedAt: Date.now() })
+        this.assignBan(data, next.userId)
         promoted.push(next.userId)
       }
     }
@@ -285,6 +313,7 @@ export class PartyState extends DurableObject {
     while (data.queue.length > 0 && data.members.length < data.maxSize) {
       const next = data.queue.shift()!
       data.members.push({ ...next, joinedAt: Date.now() })
+      this.assignBan(data, next.userId)
       promoted.push(next.userId)
     }
 
@@ -350,13 +379,19 @@ export class PartyState extends DurableObject {
     if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
 
     const raw = (body.banlist ?? '').toString()
-    const entries = raw
+    const source = raw
       .split('\n')
       .map((line: string) => line.trim())
       .filter((line: string) => line.length > 0)
       .slice(0, 50)
 
-    data.banlist = entries
+    if (source.length === 0) {
+      delete data.banlist
+    } else {
+      data.banlist = { source, pool: [...source], assignments: {} }
+      for (const m of data.members) this.assignBan(data, m.userId)
+    }
+
     await this.save(data)
     return { status: 'updated', data }
   }

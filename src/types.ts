@@ -30,7 +30,13 @@ export interface PartyData {
   createdAt: number
   members: PartyMember[]
   queue: QueueEntry[]
-  banlist?: string[]
+  banlist?: BanList
+}
+
+export interface BanList {
+  source: string[]                       // original list as the owner pasted it
+  pool: string[]                         // unassigned bans, FIFO
+  assignments: Record<string, string>    // userId -> assigned ban
 }
 
 export interface AppBindings extends Record<string, unknown> {

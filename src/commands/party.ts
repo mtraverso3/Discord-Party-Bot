@@ -616,7 +616,7 @@ async function openBanlistModal(c: CommandContext<AppEnv>) {
     .required(false)
     .max_length(2000)
     .placeholder('Aatrox\nAhri\nAkali\n...')
-  const current = (party.banlist ?? []).join('\n')
+  const current = (party.banlist?.source ?? []).join('\n')
   if (current) input.value(current)
 
   return c.resModal(
@@ -644,7 +644,7 @@ export async function handleBanlistModal(c: ModalContext<AppEnv>) {
     }
 
     await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-    const count = result.data.banlist?.length ?? 0
+    const count = result.data.banlist?.source.length ?? 0
     const msg = count === 0 ? 'Banlist cleared.' : `Banlist updated — ${count} entr${count === 1 ? 'y' : 'ies'}.`
     return c.followup({ content: msg, flags: 64 })
   })
