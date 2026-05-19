@@ -1,5 +1,5 @@
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
-import type { AppEnv, PartyData, UpdateResult } from '../types'
+import type { AppBindings, AppEnv, PartyData, UpdateResult } from '../types'
 import {
   addToIndex, callParty, extractMemberInfo, extractResolvedUser, findParty,
   getPartyIndex, getPartyStub, getUserPartyId, getUserProfile, isGuildAdmin,
@@ -289,26 +289,30 @@ async function openEditModal(c: CommandContext<AppEnv>) {
   return c.resModal(buildEditModalJSON(party))
 }
 
-export async function handleEditModal(c: ModalContext<AppEnv>) {
-  return c.ephemeral().resDefer(async (c) => {
-    const partyId = c.get('custom_id') as string | undefined
-    const guildId = c.interaction.guild_id!
-    const { userId } = extractMemberInfo(c.interaction)
+// Bypass-routed: invoked from src/index.ts after we verify the Discord
+// signature ourselves. Bypassing discord-hono's modal routing avoids its
+// ModalContext constructor crashing on Components V2 Label components.
+export async function handleEditModalRaw(interaction: any, env: AppBindings): Promise<void> {
+  const reply = (content: string) => editOriginal(env.DISCORD_APPLICATION_ID, interaction.token, content)
 
-    if (!partyId) return c.followup({ content: 'Missing party context.', flags: 64 })
+  try {
+    const customId = interaction.data.custom_id as string
+    const partyId = customId.slice('party_edit;'.length)
+    const guildId = interaction.guild_id as string
+    const userId = (interaction.member?.user?.id ?? interaction.user?.id) as string
 
-    const fields = parseEditModalSubmit(c.interaction)
-    const stub = getPartyStub(c.env, guildId, partyId)
+    const fields = parseEditModalSubmit(interaction)
+    const stub = getPartyStub(env, guildId, partyId)
 
     // If the game changed, fetch every member's & queued user's profile so the DO
     // can refresh IGNs for the new game in a single atomic write.
     const current = await callParty<PartyData | null>(stub, 'get').catch(() => null)
-    if (!current) return c.followup({ content: 'Party not found.', flags: 64 })
+    if (!current) return reply('Party not found.')
 
     let ignMap: Record<string, string> | undefined
     if (fields.game && current.game !== fields.game) {
       const ids = [...current.members.map(m => m.userId), ...current.queue.map(q => q.userId)]
-      const profiles = await Promise.all(ids.map(uid => getUserProfile(c.env.PARTY_KV, uid)))
+      const profiles = await Promise.all(ids.map(uid => getUserProfile(env.PARTY_KV, uid)))
       ignMap = {}
       ids.forEach((uid, i) => {
         const ign = profiles[i]!.igns[fields.game]
@@ -326,23 +330,34 @@ export async function handleEditModal(c: ModalContext<AppEnv>) {
       ignMap,
     }).catch(() => null)
 
-    if (!result) return c.followup({ content: 'Party not found.', flags: 64 })
-    if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can edit the party.', flags: 64 })
-    if (result.status === 'invalid')      return c.followup({ content: result.message ?? 'Invalid input.', flags: 64 })
+    if (!result) return reply('Party not found.')
+    if (result.status === 'unauthorized') return reply('Only the party owner can edit the party.')
+    if (result.status === 'invalid')      return reply(result.message ?? 'Invalid input.')
 
     const indexPatch: { name?: string; game?: string } = {}
     if (result.nameChanged) indexPatch.name = result.data.name
     if (result.gameChanged) indexPatch.game = result.data.game
     if (indexPatch.name || indexPatch.game) {
-      await updateIndexEntry(c.env.PARTY_KV, guildId, partyId, indexPatch)
+      await updateIndexEntry(env.PARTY_KV, guildId, partyId, indexPatch)
     }
 
-    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+    await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
 
     const promotedNote = result.promoted.length > 0
       ? ` ${result.promoted.length} player(s) auto-promoted from queue.`
       : ''
-    return c.followup({ content: `Party updated.${promotedNote}`, flags: 64 })
+    return reply(`Party updated.${promotedNote}`)
+  } catch (e) {
+    console.error('handleEditModalRaw error:', e)
+    return reply('Something went wrong.')
+  }
+}
+
+async function editOriginal(appId: string, token: string, content: string): Promise<void> {
+  await fetch(`https://discord.com/api/v10/webhooks/${appId}/${token}/messages/@original`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
   })
 }
 
