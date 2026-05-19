@@ -1,4 +1,4 @@
-import type { CommandContext } from 'discord-hono'
+import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppEnv, PartyData } from '../types'
 import {
   addToIndex, callParty, extractMemberInfo, extractResolvedUser, findParty,
@@ -22,6 +22,12 @@ function sub(c: CommandContext<AppEnv>): { name: string; opts: Record<string, an
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function handleParty(c: CommandContext<AppEnv>) {
+  // Modal responses must be the immediate (non-deferred) reply.
+  const peek = sub(c)
+  if (peek.name === 'description') {
+    return await openDescriptionModal(c)
+  }
+
   return c.ephemeral().resDefer(async (c) => {
     const { name, opts } = sub(c)
     const guildId = c.interaction.guild_id!
@@ -530,6 +536,59 @@ async function clearAll(c: CommandContext<AppEnv>, guildId: string) {
   await c.env.PARTY_KV.put(`guild:${guildId}:parties`, JSON.stringify([]))
 
   return c.followup({ content: `Cleared ${cleared} ${cleared === 1 ? 'party' : 'parties'}.`, flags: 64 })
+}
+
+// ── /party description (modal) ────────────────────────────────────────────────
+
+async function openDescriptionModal(c: CommandContext<AppEnv>) {
+  const guildId = c.interaction.guild_id!
+  const { userId } = extractMemberInfo(c.interaction)
+
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  if (!partyId) {
+    return c.ephemeral().res({ content: "You're not in a party.", flags: 64 })
+  }
+
+  const stub = getPartyStub(c.env, guildId, partyId)
+  const party = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+  if (!party) return c.ephemeral().res({ content: 'Party not found.', flags: 64 })
+  if (party.ownerId !== userId) {
+    return c.ephemeral().res({ content: 'Only the party owner can edit the description.', flags: 64 })
+  }
+
+  const input = new TextInput('description', 'Description', 'Multi')
+    .required(false)
+    .max_length(1000)
+    .placeholder('What is this party about? Notes, rules, etc.')
+  if (party.description) input.value(party.description)
+
+  return c.resModal(
+    new Modal(`party_description;${partyId}`, 'Edit party description').row(input),
+  )
+}
+
+export async function handleDescriptionModal(c: ModalContext<AppEnv>) {
+  return c.ephemeral().resDefer(async (c) => {
+    const partyId = c.get('custom_id') as string | undefined
+    const guildId = c.interaction.guild_id!
+    const { userId } = extractMemberInfo(c.interaction)
+
+    if (!partyId) return c.followup({ content: 'Missing party context.', flags: 64 })
+
+    const description = ((c as any).get('description') as string | undefined) ?? ''
+    const stub = getPartyStub(c.env, guildId, partyId)
+    const result = await callParty<{ status: string; data: PartyData }>(
+      stub, 'setdescription', { requesterId: userId, description },
+    ).catch(() => null)
+
+    if (!result) return c.followup({ content: 'Party not found.', flags: 64 })
+    if (result.status === 'unauthorized') {
+      return c.followup({ content: 'Only the party owner can edit the description.', flags: 64 })
+    }
+
+    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+    return c.followup({ content: 'Description updated.', flags: 64 })
+  })
 }
 
 // ── /party disband ────────────────────────────────────────────────────────────

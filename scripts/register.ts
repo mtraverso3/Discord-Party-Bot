@@ -97,6 +97,11 @@ const commands = [
       },
       {
         type: 1,
+        name: 'description',
+        description: "Edit your party's description (owner only)",
+      },
+      {
+        type: 1,
         name: 'close',
         description: 'Close your party — new joiners go to queue (owner only)',
       },

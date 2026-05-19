@@ -25,6 +25,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party ign <game> <name>` | Save your in-game name for a game              |
 | `/party game <game>`       | Change the party's current game (owner only)   |
 | `/party size <cap>`        | Change the party size (owner only)             |
+| `/party description`       | Edit the party description via modal (owner)   |
 | `/party close`             | Close your party — new joiners queue           |
 | `/party open`              | Re-open and auto-promote queued players        |
 | `/party adduser @user`     | Directly add a user to your party (owner only) |
