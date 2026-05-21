@@ -1,10 +1,13 @@
 import { DurableObject } from 'cloudflare:workers'
 import type {
-  PartyData, PartyMember, QueueEntry,
+  AppBindings, PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
   ForceAddResult, PromoteResult, SetBanlistResult, UpdateResult,
 } from '../types'
+import { markDisbanded, removeFromIndex, setUserPartyId } from '../lib/party'
+
+const INACTIVITY_MS = 12 * 60 * 60 * 1000  // 12 hours
 
 export class PartyState extends DurableObject {
   private cache: PartyData | null = null
@@ -15,6 +18,12 @@ export class PartyState extends DurableObject {
     if (stored && Array.isArray((stored as any).banlist)) {
       // Legacy shape (string[]) — drop it; owner can re-paste.
       delete (stored as any).banlist
+    }
+    if (stored && stored.lastActivityAt == null) {
+      // Backfill: parties created before auto-disband shipped. Use createdAt
+      // as the baseline and schedule the cleanup alarm now.
+      stored.lastActivityAt = stored.createdAt
+      await this.ctx.storage.setAlarm(stored.lastActivityAt + INACTIVITY_MS)
     }
     this.cache = stored ?? null
     return this.cache
@@ -37,8 +46,35 @@ export class PartyState extends DurableObject {
   }
 
   private async save(data: PartyData): Promise<void> {
+    data.lastActivityAt = Date.now()
     this.cache = data
     await this.ctx.storage.put('party', data)
+    await this.ctx.storage.setAlarm(data.lastActivityAt + INACTIVITY_MS)
+  }
+
+  override async alarm(): Promise<void> {
+    const data = await this.load()
+    if (!data) return  // party already gone
+
+    const last = data.lastActivityAt ?? data.createdAt
+    if (Date.now() - last < INACTIVITY_MS) {
+      // Activity arrived after the alarm was queued — reschedule to the new deadline.
+      await this.ctx.storage.setAlarm(last + INACTIVITY_MS)
+      return
+    }
+
+    // Idle long enough — auto-disband.
+    const env = this.env as AppBindings
+    const finalData = { ...data }
+    await this.ctx.storage.deleteAll()
+    this.cache = null
+
+    await Promise.all([
+      ...finalData.members.map(m => setUserPartyId(env.PARTY_KV, finalData.guildId, m.userId, null)),
+      ...finalData.queue.map(q => setUserPartyId(env.PARTY_KV, finalData.guildId, q.userId, null)),
+      removeFromIndex(env.PARTY_KV, finalData.guildId, finalData.id),
+      markDisbanded(env.DISCORD_BOT_TOKEN, finalData, 'inactive for 12 hours').catch(() => {}),
+    ])
   }
 
   override async fetch(request: Request): Promise<Response> {

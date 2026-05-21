@@ -116,7 +116,7 @@ export function buildHelpEmbed(page: number) {
         },
         {
           name: 'End',
-          value: '`/party disband` — end the party',
+          value: '`/party disband` — end the party\n*Parties auto-disband after 12 hours of inactivity.*',
         },
       ],
       footer: { text: 'Page 2 / 3 · Owner Controls' },
@@ -163,10 +163,10 @@ export function buildHelpComponents(page: number) {
   }]
 }
 
-export function buildDisbandedEmbed(party: PartyData) {
+export function buildDisbandedEmbed(party: PartyData, reason?: string) {
   return {
     title: `~~${party.name}~~`,
-    description: 'This party has been disbanded.',
+    description: reason ? `This party has been disbanded — ${reason}.` : 'This party has been disbanded.',
     color: 0x36393f,
     footer: { text: `${party.game} · DISBANDED` },
     timestamp: new Date().toISOString(),

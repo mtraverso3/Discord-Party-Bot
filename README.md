@@ -11,6 +11,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 - Join/Leave buttons directly on the embed
 - Queue system: close a party to funnel joiners to queue, approve/deny individually or re-open to auto-promote
 - Per-user IGN profiles stored globally (set once, auto-filled on join/create)
+- Parties auto-disband after 12 hours of inactivity
 
 ## Commands
 

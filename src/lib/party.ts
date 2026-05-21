@@ -124,10 +124,10 @@ export async function postPartyEmbed(
   })
 }
 
-export async function markDisbanded(token: string, party: PartyData): Promise<void> {
+export async function markDisbanded(token: string, party: PartyData, reason?: string): Promise<void> {
   if (!party.embedMessageId || !party.embedChannelId) return
   await editMessage(token, party.embedChannelId, party.embedMessageId, {
-    embeds: [buildDisbandedEmbed(party)],
+    embeds: [buildDisbandedEmbed(party, reason)],
     components: [],
   })
 }

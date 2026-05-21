@@ -28,6 +28,7 @@ export interface PartyData {
   embedMessageId?: string
   embedChannelId?: string
   createdAt: number
+  lastActivityAt?: number
   members: PartyMember[]
   queue: QueueEntry[]
   banlist?: BanList
