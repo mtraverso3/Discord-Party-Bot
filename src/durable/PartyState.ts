@@ -7,7 +7,19 @@ import type {
 } from '../types'
 import { markDisbanded, removeFromIndex, setUserPartyId } from '../lib/party'
 
-const INACTIVITY_MS = 12 * 60 * 60 * 1000  // 12 hours
+// Tiered inactivity timeouts — solo/abandoned parties get cleaned up sooner so
+// they don't sit on the 10-party guild cap. A party that's clearly in use
+// (full, or queue waiting) gets the full 12-hour rope.
+const HOUR = 60 * 60 * 1000
+const INACTIVITY_SOLO_MS    = 2 * HOUR
+const INACTIVITY_PARTIAL_MS = 6 * HOUR
+const INACTIVITY_FULL_MS    = 12 * HOUR
+
+function inactivityMs(party: PartyData): number {
+  if (party.members.length >= party.maxSize || party.queue.length > 0) return INACTIVITY_FULL_MS
+  if (party.members.length > 1) return INACTIVITY_PARTIAL_MS
+  return INACTIVITY_SOLO_MS
+}
 
 export class PartyState extends DurableObject {
   private cache: PartyData | null = null
@@ -23,7 +35,7 @@ export class PartyState extends DurableObject {
       // Backfill: parties created before auto-disband shipped. Use createdAt
       // as the baseline and schedule the cleanup alarm now.
       stored.lastActivityAt = stored.createdAt
-      await this.ctx.storage.setAlarm(stored.lastActivityAt + INACTIVITY_MS)
+      await this.ctx.storage.setAlarm(stored.lastActivityAt + inactivityMs(stored))
     }
     this.cache = stored ?? null
     return this.cache
@@ -49,7 +61,7 @@ export class PartyState extends DurableObject {
     data.lastActivityAt = Date.now()
     this.cache = data
     await this.ctx.storage.put('party', data)
-    await this.ctx.storage.setAlarm(data.lastActivityAt + INACTIVITY_MS)
+    await this.ctx.storage.setAlarm(data.lastActivityAt + inactivityMs(data))
   }
 
   override async alarm(): Promise<void> {
@@ -57,9 +69,10 @@ export class PartyState extends DurableObject {
     if (!data) return  // party already gone
 
     const last = data.lastActivityAt ?? data.createdAt
-    if (Date.now() - last < INACTIVITY_MS) {
+    const threshold = inactivityMs(data)
+    if (Date.now() - last < threshold) {
       // Activity arrived after the alarm was queued — reschedule to the new deadline.
-      await this.ctx.storage.setAlarm(last + INACTIVITY_MS)
+      await this.ctx.storage.setAlarm(last + threshold)
       return
     }
 
@@ -69,11 +82,12 @@ export class PartyState extends DurableObject {
     await this.ctx.storage.deleteAll()
     this.cache = null
 
+    const reason = `inactive for ${Math.round(threshold / HOUR)}h`
     await Promise.all([
       ...finalData.members.map(m => setUserPartyId(env.PARTY_KV, finalData.guildId, m.userId, null)),
       ...finalData.queue.map(q => setUserPartyId(env.PARTY_KV, finalData.guildId, q.userId, null)),
       removeFromIndex(env.PARTY_KV, finalData.guildId, finalData.id),
-      markDisbanded(env.DISCORD_BOT_TOKEN, finalData, 'inactive for 12 hours').catch(() => {}),
+      markDisbanded(env.DISCORD_BOT_TOKEN, finalData, reason).catch(() => {}),
     ])
   }
 
