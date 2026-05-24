@@ -146,6 +146,11 @@ const commands = [
       },
       {
         type: 1,
+        name: 'link',
+        description: 'Get a code to link your League client to this party via the PartyBot desktop app',
+      },
+      {
+        type: 1,
         name: 'clear',
         description: 'Clear all active parties in this server (admin only)',
         default_member_permissions: '8',

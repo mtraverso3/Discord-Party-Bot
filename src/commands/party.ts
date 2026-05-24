@@ -9,6 +9,7 @@ import {
 import { deleteMessage, editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
+import { generateLinkCode, writeLinkCode } from '../lcu'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'disband': return await disband(c, guildId, userId)
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
+        case 'link':    return await link(c, guildId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
       }
     } catch (e) {
@@ -557,6 +559,21 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
   await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
 
   return c.followup({ content: 'Party bumped!', flags: 64 })
+}
+
+// ── /party link ───────────────────────────────────────────────────────────────
+
+async function link(c: CommandContext<AppEnv>, guildId: string, userId: string) {
+  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+
+  const code = generateLinkCode()
+  await writeLinkCode(c.env.PARTY_KV, code, { partyId, guildId, discordUserId: userId })
+
+  return c.followup({
+    content: `Your link code: \`${code}\` — enter this in the PartyBot desktop app. Expires in 10 minutes.`,
+    flags: 64,
+  })
 }
 
 // ── /party clear (admin) ──────────────────────────────────────────────────────
