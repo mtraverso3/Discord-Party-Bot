@@ -46,6 +46,9 @@ export interface AppBindings extends Record<string, unknown> {
   DISCORD_PUBLIC_KEY: string
   DISCORD_BOT_TOKEN: string
   DISCORD_APPLICATION_ID: string
+  // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
+  CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
+  CF_ACCESS_AUD?: string    // Application AUD tag from the Access app
 }
 
 export type AppEnv = { Bindings: AppBindings }

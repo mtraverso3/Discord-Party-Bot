@@ -63,3 +63,16 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
    npm run deploy
    ```
 7. Set the deployed Worker URL as your Discord app's **Interactions Endpoint URL**
+
+## Admin UI (optional)
+
+`/admin` serves a private per-guild web UI for editing parties, members, queue, and banlist — protected by Cloudflare Zero Trust (Access).
+
+1. In Cloudflare Zero Trust, create an Access Application covering `<your-domain>/admin*` with a policy allowing your email.
+2. Set the team subdomain and Application AUD on the Worker:
+   ```
+   wrangler secret put CF_ACCESS_TEAM   # e.g. mtraverso  (from <team>.cloudflareaccess.com)
+   wrangler secret put CF_ACCESS_AUD    # Application AUD tag from the Access app
+   ```
+3. Without those vars set, `/admin` returns 503. The Worker also verifies the Access JWT in-process as defense in depth, so traffic that bypasses Access is rejected.
+4. Visit `https://<your-domain>/admin?guild=<guild-id>`.

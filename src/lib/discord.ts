@@ -58,3 +58,22 @@ export async function editInteractionResponse(
     body: JSON.stringify(body),
   })
 }
+
+export async function getGuildMember(
+  token: string,
+  guildId: string,
+  userId: string,
+): Promise<{ user: { id: string; username: string; global_name?: string }; nick?: string }> {
+  const res = await discordFetch(token, `/guilds/${guildId}/members/${userId}`)
+  if (!res.ok) throw new Error(`getGuildMember failed: ${res.status}`)
+  return res.json<any>()
+}
+
+export async function getGuildChannels(
+  token: string,
+  guildId: string,
+): Promise<Array<{ id: string; name: string; type: number }>> {
+  const res = await discordFetch(token, `/guilds/${guildId}/channels`)
+  if (!res.ok) throw new Error(`getGuildChannels failed: ${res.status}`)
+  return res.json<any>()
+}

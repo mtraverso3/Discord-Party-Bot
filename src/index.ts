@@ -5,6 +5,7 @@ import {
 } from './commands/party'
 import { handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
 import { CREATE_MODAL_PREFIX, EDIT_MODAL_PREFIX } from './lib/modal'
+import { handleAdmin } from './admin'
 
 export { PartyState } from './durable/PartyState'
 
@@ -21,6 +22,11 @@ const inner = new DiscordHono<AppEnv>()
 
 export default {
   async fetch(req: Request, env: AppBindings, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(req.url)
+    if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+      return handleAdmin(req, env)
+    }
+
     if (req.method !== 'POST') return inner.fetch(req, env as any, ctx)
 
     const body = await req.text()
