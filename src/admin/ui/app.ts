@@ -384,6 +384,22 @@ async function refreshParties() {
   } catch (e) { toast(e.message, 'err') }
 }
 
+// Most mutation endpoints return the updated party — patch it into the local
+// cache and re-render from there instead of re-fetching every party (one DO
+// round-trip each).
+function applyPartyUpdate(p) {
+  if (!p || !p.id) return refreshParties()
+  const i = lastParties.findIndex(x => x.id === p.id)
+  if (i === -1) lastParties.push(p)
+  else lastParties[i] = p
+  renderPartyList()
+}
+
+function removePartyLocal(id) {
+  lastParties = lastParties.filter(p => p.id !== id)
+  renderPartyList()
+}
+
 function startAutoRefresh() {
   stopAutoRefresh()
   autoTimer = setInterval(() => {
@@ -462,7 +478,7 @@ function toggleCreateForm(box) {
     const ownerId = ownerPicker.getId()
     if (!ownerId) return toast('Pick an owner from the list or paste a user ID.', 'err')
     try {
-      await api('/parties', { method: 'POST', body: JSON.stringify({
+      applyPartyUpdate(await api('/parties', { method: 'POST', body: JSON.stringify({
         ownerId,
         name: f.name.value,
         game: f.game.value,
@@ -470,10 +486,9 @@ function toggleCreateForm(box) {
         channelId: f.channel.value,
         voiceChannelId: f.voice.value || undefined,
         description: f.desc.value,
-      }) })
+      }) }))
       toast('Party created')
       box.replaceChildren()
-      refreshParties()
     } catch (err) { toast(err.message, 'err') }
   })
 
@@ -498,11 +513,11 @@ function memberLine(p, m) {
     el('a', { class: 'tiny', href: '#/users', onclick: () => { sessionStorage.setItem('pb-user-lookup', m.userId) } }, 'profile'),
     m.userId !== p.ownerId ? el('button', { class: 'tiny secondary', onclick: async () => {
       if (!confirm('Promote ' + m.displayName + ' to owner of ' + p.name + '?')) return
-      try { await api('/parties/' + p.id + '/members/' + m.userId + '/promote', { method: 'POST' }); toast('Promoted'); refreshParties() }
+      try { applyPartyUpdate(await api('/parties/' + p.id + '/members/' + m.userId + '/promote', { method: 'POST' })); toast('Promoted') }
       catch (e) { toast(e.message, 'err') }
     } }, 'Promote') : null,
     m.userId !== p.ownerId ? el('button', { class: 'tiny danger', onclick: async () => {
-      try { await api('/parties/' + p.id + '/members/' + m.userId, { method: 'DELETE' }); toast('Removed'); refreshParties() }
+      try { applyPartyUpdate(await api('/parties/' + p.id + '/members/' + m.userId, { method: 'DELETE' })); toast('Removed') }
       catch (e) { toast(e.message, 'err') }
     } }, 'Remove') : el('span', { class: 'muted' }, 'owner'),
   )
@@ -511,10 +526,9 @@ function memberLine(p, m) {
 function queueLine(p, q, idx) {
   const move = async (direction) => {
     try {
-      await api('/parties/' + p.id + '/queue/' + q.userId + '/move', {
+      applyPartyUpdate(await api('/parties/' + p.id + '/queue/' + q.userId + '/move', {
         method: 'POST', body: JSON.stringify({ direction }),
-      })
-      refreshParties()
+      }))
     } catch (e) { toast(e.message, 'err') }
   }
   return el('div', { class: 'row' },
@@ -527,11 +541,11 @@ function queueLine(p, q, idx) {
     el('button', { class: 'tiny secondary', disabled: idx === 0 ? 'disabled' : null, onclick: () => move('up') }, '↑'),
     el('button', { class: 'tiny secondary', disabled: idx === p.queue.length - 1 ? 'disabled' : null, onclick: () => move('down') }, '↓'),
     el('button', { class: 'tiny', onclick: async () => {
-      try { await api('/parties/' + p.id + '/members/' + q.userId + '/approve', { method: 'POST' }); toast('Approved'); refreshParties() }
+      try { applyPartyUpdate(await api('/parties/' + p.id + '/members/' + q.userId + '/approve', { method: 'POST' })); toast('Approved') }
       catch (e) { toast(e.message, 'err') }
     } }, 'Approve'),
     el('button', { class: 'tiny secondary', onclick: async () => {
-      try { await api('/parties/' + p.id + '/queue/' + q.userId, { method: 'DELETE' }); toast('Denied'); refreshParties() }
+      try { applyPartyUpdate(await api('/parties/' + p.id + '/queue/' + q.userId, { method: 'DELETE' })); toast('Denied') }
       catch (e) { toast(e.message, 'err') }
     } }, 'Deny'),
   )
@@ -578,7 +592,7 @@ function renderParty(p, isOpen = false) {
   const saveSettings = async () => {
     const fd = new FormData(settingsForm)
     try {
-      await api('/parties/' + p.id, {
+      applyPartyUpdate(await api('/parties/' + p.id, {
         method: 'PATCH',
         body: JSON.stringify({
           name: fd.get('name'),
@@ -587,8 +601,8 @@ function renderParty(p, isOpen = false) {
           game: fd.get('game'),
           voiceChannelId: fd.get('voice'),
         }),
-      })
-      toast('Saved'); refreshParties()
+      }))
+      toast('Saved')
     } catch (err) { toast(err.message, 'err') }
   }
 
@@ -596,18 +610,18 @@ function renderParty(p, isOpen = false) {
     el('button', { type: 'button', onclick: saveSettings }, 'Save'),
     el('button', { type: 'button', class: 'secondary', onclick: async () => {
       try {
-        await api('/parties/' + p.id + (p.isClosed ? '/open' : '/close'), { method: 'POST' })
-        toast(p.isClosed ? 'Opened' : 'Closed'); refreshParties()
+        applyPartyUpdate(await api('/parties/' + p.id + (p.isClosed ? '/open' : '/close'), { method: 'POST' }))
+        toast(p.isClosed ? 'Opened' : 'Closed')
       } catch (err) { toast(err.message, 'err') }
     } }, p.isClosed ? 'Open party' : 'Close party'),
     el('button', { type: 'button', class: 'secondary', onclick: async () => {
-      try { await api('/parties/' + p.id + '/bump', { method: 'POST', body: JSON.stringify({}) }); toast('Bumped'); refreshParties() }
+      try { applyPartyUpdate(await api('/parties/' + p.id + '/bump', { method: 'POST', body: JSON.stringify({}) })); toast('Bumped') }
       catch (err) { toast(err.message, 'err') }
     } }, 'Bump embed'),
     el('span', { class: 'grow' }),
     el('button', { type: 'button', class: 'danger', onclick: async () => {
       if (!confirm('Disband "' + p.name + '"?')) return
-      try { await api('/parties/' + p.id, { method: 'DELETE' }); toast('Disbanded'); refreshParties() }
+      try { await api('/parties/' + p.id, { method: 'DELETE' }); removePartyLocal(p.id); toast('Disbanded') }
       catch (err) { toast(err.message, 'err') }
     } }, 'Disband'),
   )
@@ -621,7 +635,7 @@ function renderParty(p, isOpen = false) {
     e.preventDefault()
     const userId = addPicker.getId()
     if (!userId) return toast('Pick a member from the list or paste a user ID.', 'err')
-    try { await api('/parties/' + p.id + '/members', { method: 'POST', body: JSON.stringify({ userId }) }); toast('Added'); addPicker.clear(); refreshParties() }
+    try { applyPartyUpdate(await api('/parties/' + p.id + '/members', { method: 'POST', body: JSON.stringify({ userId }) })); toast('Added'); addPicker.clear() }
     catch (err) { toast(err.message, 'err') }
   })
 
@@ -629,11 +643,11 @@ function renderParty(p, isOpen = false) {
   const banArea = el('textarea', { name: 'banlist', class: 'bans', placeholder: 'one champion per line' }, banText)
   const banActions = el('div', { class: 'toolbar' },
     el('button', { type: 'button', onclick: async () => {
-      try { await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: banArea.value }) }); toast('Banlist saved'); refreshParties() }
+      try { applyPartyUpdate(await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: banArea.value }) })); toast('Banlist saved') }
       catch (err) { toast(err.message, 'err') }
     } }, 'Save banlist'),
     el('button', { type: 'button', class: 'secondary', onclick: async () => {
-      try { await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: '' }) }); toast('Cleared'); refreshParties() }
+      try { applyPartyUpdate(await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: '' }) })); toast('Cleared') }
       catch (err) { toast(err.message, 'err') }
     } }, 'Clear'),
   )
