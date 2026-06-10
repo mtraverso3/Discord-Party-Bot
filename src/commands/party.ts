@@ -142,7 +142,17 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
       voiceChannelId: fields.voiceChannelId,
     })
 
-    const msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, party)
+    // If the embed can't be posted (e.g. missing channel permissions), tear the
+    // party back down — otherwise it lingers as an unlisted DO whose cleanup
+    // alarm later wipes the owner's user→party mapping.
+    let msg: { id: string }
+    try {
+      msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, party)
+    } catch (e) {
+      console.error('postPartyEmbed failed:', e)
+      await callParty(stub, 'forcedisband', {}).catch(() => {})
+      return reply("Couldn't post the party message in this channel — check the bot's permissions here.")
+    }
     await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
 
     await addToIndex(env.PARTY_KV, guildId, { id: partyId, name: party.name, game: party.game })
