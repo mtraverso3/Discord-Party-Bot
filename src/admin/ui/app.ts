@@ -36,6 +36,16 @@ function toast(msg, kind = 'ok') {
   toastTimer = setTimeout(() => { toastEl.hidden = true }, kind === 'err' ? 5000 : 2500)
 }
 
+let expiredShown = false
+function showSessionExpired() {
+  if (expiredShown) return
+  expiredShown = true
+  document.body.prepend(el('div', { id: 'expired' },
+    'Your Cloudflare Access session has expired.',
+    el('button', { type: 'button', onclick: () => location.reload() }, 'Reload to sign in'),
+  ))
+}
+
 async function api(path, opts = {}) {
   const sep = path.includes('?') ? '&' : '?'
   const url = '/admin/api' + path + (guildId ? sep + 'guild=' + encodeURIComponent(guildId) : '')
@@ -44,6 +54,18 @@ async function api(path, opts = {}) {
     ...opts,
   })
   const ct = res.headers.get('content-type') || ''
+
+  // An expired Access session shows up as a redirect to the team login page,
+  // or as a non-JSON 401/403 (the Worker's own JWT check, or Access itself).
+  const authFailed =
+    (res.redirected && res.url.includes('cloudflareaccess.com')) ||
+    ((res.status === 401 || res.status === 403) && !ct.includes('json')) ||
+    (res.ok && ct.includes('html'))
+  if (authFailed) {
+    showSessionExpired()
+    throw new Error('Session expired — reload to sign in again.')
+  }
+
   if (!res.ok) {
     const err = ct.includes('json') ? await res.json().catch(() => ({})) : {}
     throw new Error(err.error || res.statusText || 'request failed')
