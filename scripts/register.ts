@@ -154,8 +154,9 @@ const commands = [
       {
         type: 1,
         name: 'clear',
+        // NOTE: Discord ignores default_member_permissions on subcommands —
+        // admin gating happens at runtime via isGuildAdmin().
         description: 'Clear all active parties in this server (admin only)',
-        default_member_permissions: '8',
       },
     ],
   },
