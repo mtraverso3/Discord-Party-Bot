@@ -10,7 +10,16 @@ export const ADMIN_CSS = `
     --bad: #b91c1c;     --bad-bg: #fee2e2;
     --chip-bg: rgba(0, 0, 0, 0.05);
     --row-hover: rgba(0, 0, 0, 0.03);
-    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+  /* Light mode: a soft gray canvas so the white cards/inputs separate cleanly.
+     Pico's default light theme makes body and cards both pure white, which
+     left everything blending together. Also firm up borders a touch. */
+  [data-theme=light] {
+    --pico-background-color: #f1f3f6;
+    --pico-card-background-color: #ffffff;
+    --pico-card-sectioning-background-color: #ffffff;
+    --pico-muted-border-color: #d9dee4;
   }
   [data-theme=dark] {
     --ok: #4ade80;      --ok-bg: rgba(34, 197, 94, 0.16);
@@ -21,7 +30,7 @@ export const ADMIN_CSS = `
     --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
 
-  body { padding: 0.9rem 1rem 3.5rem; }
+  body { padding: 0.9rem 1rem 3.5rem; background: var(--pico-background-color); }
   main.container { max-width: 920px; }
   header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   header h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.01em; }
