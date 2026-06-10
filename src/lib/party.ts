@@ -134,8 +134,23 @@ export async function markDisbanded(token: string, party: PartyData, reason?: st
 
 // ── Misc ─────────────────────────────────────────────────────────────────────
 
+const ID_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
 export function randomId(): string {
-  return Math.random().toString(36).slice(2, 8).toUpperCase()
+  const buf = new Uint8Array(6)
+  crypto.getRandomValues(buf)
+  let out = ''
+  for (const b of buf) out += ID_ALPHABET[b % ID_ALPHABET.length]
+  return out
+}
+
+/** Generate a party ID that doesn't collide with any party in the guild index. */
+export function uniquePartyId(index: PartyIndexEntry[]): string {
+  for (let i = 0; i < 10; i++) {
+    const id = randomId()
+    if (!index.some(e => e.id === id)) return id
+  }
+  throw new Error('Could not generate a unique party ID')
 }
 
 export function extractMemberInfo(interaction: any): {

@@ -3,8 +3,8 @@ import type { AppBindings, AppEnv, PartyData, UpdateResult } from '../types'
 import {
   addToIndex, callParty, extractMemberInfo, extractResolvedUser, findParty,
   getPartyIndex, getPartyStub, getUserPartyId, getUserProfile, isGuildAdmin,
-  markDisbanded, postPartyEmbed, randomId, removeFromIndex,
-  saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
+  markDisbanded, postPartyEmbed, removeFromIndex,
+  saveUserIgn, setUserPartyId, trySyncEmbed, uniquePartyId, updateIndexEntry,
 } from '../lib/party'
 import { deleteMessage, editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
@@ -125,7 +125,7 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
 
     const game = fields.game || 'Other'
     const name = fields.name.trim() || `${displayName}'s party`
-    const partyId = randomId()
+    const partyId = uniquePartyId(index)
     const stub = getPartyStub(env, guildId, partyId)
 
     const party = await callParty<PartyData>(stub, 'create', {
