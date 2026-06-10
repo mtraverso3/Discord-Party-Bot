@@ -1,5 +1,5 @@
 import type { AppBindings, PartyData, PartyIndexEntry, UserProfile } from '../types'
-import { editMessage, postMessage } from './discord'
+import { deleteMessage, editMessage, postMessage } from './discord'
 import { buildDisbandedEmbed, buildPartyComponents, buildPartyEmbed } from './embeds'
 
 // ── KV helpers ──────────────────────────────────────────────────────────────
@@ -133,6 +133,73 @@ export async function markDisbanded(token: string, party: PartyData, reason?: st
     embeds: [buildDisbandedEmbed(party, reason)],
     components: [],
   })
+}
+
+// ── Party lifecycle (shared by slash commands and the admin API) ─────────────
+
+export interface CreatePartyOpts {
+  guildId: string
+  channelId: string  // text channel the embed is posted in
+  owner: { id: string; username: string; displayName: string; ign?: string }
+  name: string
+  description: string
+  game: string
+  maxSize: number
+  voiceChannelId?: string
+}
+
+export async function createPartyAndEmbed(
+  env: AppBindings,
+  opts: CreatePartyOpts,
+): Promise<{ ok: true; party: PartyData } | { ok: false; error: string }> {
+  const index = await getPartyIndex(env.PARTY_KV, opts.guildId)
+  const partyId = uniquePartyId(index)
+  const stub = getPartyStub(env, opts.guildId, partyId)
+
+  const party = await callParty<PartyData>(stub, 'create', {
+    id: partyId,
+    guildId: opts.guildId,
+    name: opts.name,
+    description: opts.description,
+    game: opts.game,
+    ownerId: opts.owner.id,
+    ownerUsername: opts.owner.username,
+    ownerName: opts.owner.displayName,
+    ownerIgn: opts.owner.ign,
+    maxSize: opts.maxSize,
+    voiceChannelId: opts.voiceChannelId,
+  })
+
+  // If the embed can't be posted (e.g. missing channel permissions), tear the
+  // party back down — otherwise it lingers as an unlisted DO whose cleanup
+  // alarm later wipes the owner's user→party mapping.
+  let msg: { id: string }
+  try {
+    msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, opts.channelId, party)
+  } catch (e) {
+    console.error('postPartyEmbed failed:', e)
+    await callParty(stub, 'forcedisband', {}).catch(() => {})
+    return { ok: false, error: "Couldn't post the party message in that channel — check the bot's permissions there." }
+  }
+  const final = await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId: opts.channelId })
+
+  await addToIndex(env.PARTY_KV, opts.guildId, { id: partyId, name: party.name, game: party.game })
+  await setUserPartyId(env.PARTY_KV, opts.guildId, opts.owner.id, partyId)
+  return { ok: true, party: final }
+}
+
+/** Delete the old embed (if any) and post a fresh one in the given channel. */
+export async function repostPartyEmbed(
+  env: AppBindings,
+  stub: DurableObjectStub,
+  party: PartyData,
+  channelId: string,
+): Promise<void> {
+  if (party.embedMessageId && party.embedChannelId) {
+    try { await deleteMessage(env.DISCORD_BOT_TOKEN, party.embedChannelId, party.embedMessageId) } catch { /* already gone */ }
+  }
+  const msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, party)
+  await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
 }
 
 // ── Misc ─────────────────────────────────────────────────────────────────────
