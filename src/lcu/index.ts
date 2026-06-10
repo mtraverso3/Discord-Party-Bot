@@ -76,7 +76,10 @@ export async function handleLcu(req: Request, env: AppBindings, url: URL): Promi
     } catch {
       return json({ error: 'Invalid JSON body.' }, 400)
     }
-    if (typeof body.summonerId !== 'number' || typeof body.puuid !== 'string') {
+    if (
+      typeof body.summonerId !== 'number' || !Number.isFinite(body.summonerId) ||
+      typeof body.puuid !== 'string' || body.puuid.length === 0 || body.puuid.length > 128
+    ) {
       return json({ error: 'Body must include numeric summonerId and string puuid.' }, 400)
     }
     const rec: SummonerRecord = { summonerId: body.summonerId, puuid: body.puuid }
