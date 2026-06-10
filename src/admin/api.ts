@@ -4,6 +4,7 @@ import {
   markDisbanded, removeFromIndex, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
 import { getGuildSettings, sanitizeSettings, saveGuildSettings } from '../lib/settings'
+import { appendAudit, getAudit } from '../lib/audit'
 import { getGuildChannels, getGuildMember } from '../lib/discord'
 
 function json(body: unknown, status = 200): Response {
@@ -35,8 +36,9 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     ? await req.json<any>().catch(() => ({}))
     : {}
 
-  try {
+  const route = async (): Promise<Response> => {
     if (path === '/me' && method === 'GET') return json({ email })
+    if (path === '/log' && method === 'GET') return json(await getAudit(env.PARTY_KV, guildId!))
     if (path === '/parties' && method === 'GET') return await listParties(env, guildId!)
     if (path === '/channels' && method === 'GET') return await listVoiceChannels(env, guildId!)
     if (path === '/clear' && method === 'POST') return await clearAllParties(env, guildId!)
@@ -71,6 +73,17 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     }
 
     return json({ error: 'Not found' }, 404)
+  }
+
+  try {
+    const res = await route()
+    // Central audit trail: every successful mutation, attributed to the
+    // Access-authenticated admin.
+    if (guildId && method !== 'GET' && res.status < 400) {
+      await appendAudit(env.PARTY_KV, guildId, { ts: Date.now(), email, method, path })
+        .catch(e => console.warn('audit append failed:', e))
+    }
+    return res
   } catch (e) {
     console.error('admin api error:', e)
     return json({ error: (e as Error).message ?? 'internal error' }, 500)
