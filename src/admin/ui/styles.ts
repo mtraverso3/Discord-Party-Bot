@@ -97,6 +97,16 @@ export const ADMIN_CSS = `
   .activity span[title] { cursor: help; border-bottom: 1px dotted var(--pico-muted-border-color); }
   .warn { color: #92400e; background: #fef3c7; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.8em; font-weight: 600; }
 
+  /* User picker (search-by-name autocomplete) */
+  .upick { position: relative; }
+  .upick-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; margin-top: 0.15rem; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); background: var(--pico-card-background-color); box-shadow: var(--pico-card-box-shadow); max-height: 14rem; overflow-y: auto; }
+  .upick-item { display: flex; gap: 0.5rem; align-items: baseline; width: 100%; text-align: left; background: none; border: none; border-radius: 0; margin: 0; padding: 0.4rem 0.7rem; color: inherit; font-size: 0.9em; cursor: pointer; }
+  .upick-item:hover { background: var(--pico-card-sectioning-background-color); }
+
+  /* Session-expired banner */
+  #expired { position: fixed; top: 0; left: 0; right: 0; z-index: 100; display: flex; gap: 1rem; align-items: center; justify-content: center; padding: 0.6rem 1rem; background: #fee2e2; color: #991b1b; font-size: 0.92em; }
+  #expired button { margin: 0; padding: 0.2rem 0.8rem; font-size: 0.9em; }
+
   /* Users tab */
   .ign-row { display: flex; gap: 0.5rem; align-items: center; padding: 0.25rem 0; }
   .ign-row label { flex: 0 0 9rem; margin: 0; }

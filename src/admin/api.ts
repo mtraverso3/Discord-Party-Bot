@@ -8,7 +8,7 @@ import { GAMES } from '../lib/games'
 import { gameAllowed } from '../lib/settings'
 import { getGuildSettings, sanitizeSettings, saveGuildSettings } from '../lib/settings'
 import { appendAudit, getAudit } from '../lib/audit'
-import { getBotGuilds, getGuildChannels, getGuildMember, getUserVoiceChannel } from '../lib/discord'
+import { getBotGuilds, getGuildChannels, getGuildMember, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -47,6 +47,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path === '/parties' && method === 'GET') return await listParties(env, guildId!)
     if (path === '/parties' && method === 'POST') return await createOne(env, guildId!, body)
     if (path === '/channels' && method === 'GET') return await listChannels(env, guildId!, url.searchParams.get('kind'))
+    if (path === '/members' && method === 'GET') return await searchMembers(env, guildId!, url.searchParams.get('q'))
     if (path === '/clear' && method === 'POST') return await clearAllParties(env, guildId!)
     if (path === '/settings' && method === 'GET') return json(await getGuildSettings(env.PARTY_KV, guildId!))
     if (path === '/settings' && method === 'PATCH') return await patchSettings(env, guildId!, body)
@@ -147,6 +148,17 @@ async function listChannels(env: AppBindings, guildId: string, kind: string | nu
   const type = kind === 'text' ? 0 : 2  // default voice, for back-compat
   const channels = await getGuildChannels(env.DISCORD_BOT_TOKEN, guildId).catch(() => [])
   return json(channels.filter(c => c.type === type).map(c => ({ id: c.id, name: c.name })))
+}
+
+async function searchMembers(env: AppBindings, guildId: string, q: string | null): Promise<Response> {
+  const query = (q ?? '').trim()
+  if (query.length < 2) return json([])
+  const members = await searchGuildMembers(env.DISCORD_BOT_TOKEN, guildId, query).catch(() => [])
+  return json(members.map(m => ({
+    id: m.user.id,
+    username: m.user.username,
+    displayName: m.nick ?? m.user.global_name ?? m.user.username,
+  })))
 }
 
 async function getOne(env: AppBindings, guildId: string, partyId: string): Promise<Response> {

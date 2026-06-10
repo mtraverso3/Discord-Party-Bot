@@ -67,6 +67,57 @@ function el(tag, attrs = {}, ...kids) {
   return e
 }
 
+function isSnowflake(s) {
+  if (!s || s.length < 15 || s.length > 21) return false
+  for (const ch of s) if (ch < '0' || ch > '9') return false
+  return true
+}
+
+// Input that searches guild members by name (debounced) and also accepts a
+// pasted user ID. getId() returns the chosen/pasted ID or '' if neither.
+function userPicker(placeholder, onPick) {
+  const input = el('input', { type: 'text', placeholder, autocomplete: 'off' })
+  const list = el('div', { class: 'upick-list', hidden: true })
+  const node = el('div', { class: 'upick' }, input, list)
+  let chosen = null
+  let timer = null
+
+  const close = () => { list.hidden = true; list.replaceChildren() }
+  input.addEventListener('input', () => {
+    chosen = null
+    clearTimeout(timer)
+    const q = input.value.trim()
+    if (q.length < 2 || isSnowflake(q)) return close()
+    timer = setTimeout(async () => {
+      let results = []
+      try { results = await api('/members?q=' + encodeURIComponent(q)) } catch (e) { /* keep closed */ }
+      if (input.value.trim() !== q) return  // stale response
+      if (results.length === 0) return close()
+      list.replaceChildren(...results.map(u =>
+        el('button', { type: 'button', class: 'upick-item', onclick: () => {
+          chosen = u
+          input.value = u.displayName + ' (' + u.id + ')'
+          close()
+          if (onPick) onPick(u)
+        } }, el('strong', {}, u.displayName), el('span', { class: 'muted' }, '@' + u.username), el('span', { class: 'uid' }, u.id))))
+      list.hidden = false
+    }, 300)
+  })
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') close() })
+
+  return {
+    node,
+    input,
+    getId: () => {
+      if (chosen) return chosen.id
+      const v = input.value.trim()
+      return isSnowflake(v) ? v : ''
+    },
+    setValue: v => { chosen = null; input.value = v },
+    clear: () => { chosen = null; input.value = ''; close() },
+  }
+}
+
 const HOUR_MS = 60 * 60 * 1000
 function inactivityMs(p) {
   if (p.members.length >= p.maxSize || p.queue.length > 0) return 12 * HOUR_MS
@@ -379,8 +430,8 @@ function toggleCreateForm(box) {
   const s = settings || { defaultCap: 10, allowedGames: [] }
   const allowed = GAMES.filter(g => s.allowedGames.length === 0 || s.allowedGames.includes(g))
 
+  const ownerPicker = userPicker('Search member by name, or paste an ID')
   const f = {
-    owner: el('input', { name: 'ownerId', placeholder: 'Discord user ID of the owner', required: true }),
     name: el('input', { name: 'name', placeholder: 'Defaults to "<owner>\\'s party"', maxlength: 100 }),
     game: el('select', { name: 'game' }, ...allowed.map(g =>
       el('option', { value: g, selected: g === 'Other' ? 'selected' : null }, g))),
@@ -394,7 +445,7 @@ function toggleCreateForm(box) {
   }
 
   const form = el('form', { class: 'grid-2' },
-    el('label', {}, 'Owner', f.owner),
+    el('label', {}, 'Owner', ownerPicker.node),
     el('label', {}, 'Name', f.name),
     el('label', {}, 'Game', f.game),
     el('label', {}, 'Player cap', f.cap),
@@ -408,9 +459,11 @@ function toggleCreateForm(box) {
   )
   form.addEventListener('submit', async e => {
     e.preventDefault()
+    const ownerId = ownerPicker.getId()
+    if (!ownerId) return toast('Pick an owner from the list or paste a user ID.', 'err')
     try {
       await api('/parties', { method: 'POST', body: JSON.stringify({
-        ownerId: f.owner.value.trim(),
+        ownerId,
         name: f.name.value,
         game: f.game.value,
         maxSize: Number(f.cap.value),
@@ -559,16 +612,16 @@ function renderParty(p, isOpen = false) {
     } }, 'Disband'),
   )
 
-  const addInput = el('input', { name: 'userId', placeholder: 'Discord user ID', required: true })
+  const addPicker = userPicker('Search member by name, or paste an ID')
   const addForm = el('form', { class: 'toolbar' },
-    el('div', { class: 'grow' }, addInput),
+    el('div', { class: 'grow' }, addPicker.node),
     el('button', { type: 'submit' }, 'Add'),
   )
   addForm.addEventListener('submit', async e => {
     e.preventDefault()
-    const userId = addInput.value.trim()
-    if (!userId) return
-    try { await api('/parties/' + p.id + '/members', { method: 'POST', body: JSON.stringify({ userId }) }); toast('Added'); refreshParties() }
+    const userId = addPicker.getId()
+    if (!userId) return toast('Pick a member from the list or paste a user ID.', 'err')
+    try { await api('/parties/' + p.id + '/members', { method: 'POST', body: JSON.stringify({ userId }) }); toast('Added'); addPicker.clear(); refreshParties() }
     catch (err) { toast(err.message, 'err') }
   })
 
@@ -639,35 +692,28 @@ async function viewUsers(view) {
     try { lastParties = await api('/parties') } catch (e) { /* lookup still works */ }
   }
 
-  const known = new Map()
-  for (const p of lastParties) {
-    for (const m of p.members) known.set(m.userId, m.displayName)
-    for (const q of p.queue) known.set(q.userId, q.displayName)
-  }
-  const datalist = el('datalist', { id: 'known-users' },
-    [...known.entries()].map(([id, name]) => el('option', { value: id }, name)))
-
-  const input = el('input', { type: 'text', placeholder: 'Discord user ID', list: 'known-users', autocomplete: 'off' })
   const result = el('div', { id: 'uresult' })
+  const picker = userPicker('Search member by name, or paste an ID', u => lookupUser(u.id, result))
   const form = el('form', { class: 'toolbar' },
-    el('div', { class: 'grow' }, input),
+    el('div', { class: 'grow' }, picker.node),
     el('button', { type: 'submit' }, 'Look up'),
   )
   form.addEventListener('submit', e => {
     e.preventDefault()
-    const id = input.value.trim()
+    const id = picker.getId()
     if (id) lookupUser(id, result)
+    else toast('Pick a member from the list or paste a user ID.', 'err')
   })
 
   view.replaceChildren(
     el('p', { class: 'muted' }, 'Look up a member to inspect their IGN profile and party state.'),
-    form, datalist, result,
+    form, result,
   )
 
   const pending = sessionStorage.getItem('pb-user-lookup')
   if (pending) {
     sessionStorage.removeItem('pb-user-lookup')
-    input.value = pending
+    picker.setValue(pending)
     lookupUser(pending, result)
   }
 }

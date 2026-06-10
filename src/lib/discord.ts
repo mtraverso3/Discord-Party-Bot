@@ -69,6 +69,20 @@ export async function getGuildMember(
   return res.json<any>()
 }
 
+export async function searchGuildMembers(
+  token: string,
+  guildId: string,
+  query: string,
+  limit = 10,
+): Promise<Array<{ user: { id: string; username: string; global_name?: string }; nick?: string }>> {
+  const res = await discordFetch(
+    token,
+    `/guilds/${guildId}/members/search?query=${encodeURIComponent(query)}&limit=${limit}`,
+  )
+  if (!res.ok) throw new Error(`searchGuildMembers failed: ${res.status}`)
+  return res.json<any>()
+}
+
 // Single page of up to 200 guilds — plenty for a bot at this scale.
 export async function getBotGuilds(
   token: string,
