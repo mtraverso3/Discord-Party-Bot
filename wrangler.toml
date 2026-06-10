@@ -17,7 +17,7 @@ new_sqlite_classes = ["PartyState"]
 
 [[kv_namespaces]]
 binding = "PARTY_KV"
-id = "placeholder_replace_with_real_id"
+id = "32fff28077814cbcac824ebd05c0ce66"
 
 [observability.logs]
 enabled = true
