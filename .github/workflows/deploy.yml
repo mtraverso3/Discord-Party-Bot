@@ -1,0 +1,53 @@
+name: Deploy
+
+# Manual deploys only — trigger from the Actions tab ("Run workflow").
+# Optionally re-registers the Discord slash commands in the same run.
+#
+# Required repository secrets:
+#   CLOUDFLARE_API_TOKEN    — API token with the "Edit Cloudflare Workers" template
+#   CLOUDFLARE_ACCOUNT_ID   — from the Workers overview page sidebar
+# Required only when "Re-register slash commands" is checked:
+#   DISCORD_APPLICATION_ID  — Discord dev portal → General Information
+#   DISCORD_BOT_TOKEN       — Discord dev portal → Bot (reset to obtain)
+#
+# Worker runtime secrets (DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN,
+# DISCORD_APPLICATION_ID, CF_ACCESS_TEAM, CF_ACCESS_AUD) live on the Worker
+# itself and persist across deploys — they are not needed here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      register:
+        description: Re-register Discord slash commands (global)
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and test before deploying
+        run: npx tsc --noEmit && npm test
+
+      - name: Deploy to Cloudflare Workers
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Re-register Discord slash commands
+        if: inputs.register
+        run: npm run register
+        env:
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
