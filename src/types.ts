@@ -118,6 +118,11 @@ export type PromoteResult = {
   data: PartyData
 }
 
+export type MoveQueueResult = {
+  status: 'moved' | 'noop' | 'not_queued' | 'unauthorized'
+  data: PartyData
+}
+
 export type SetBanlistResult = {
   status: 'updated' | 'unauthorized'
   data: PartyData

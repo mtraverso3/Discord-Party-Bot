@@ -69,10 +69,14 @@ export async function getUserProfile(kv: KVNamespace, userId: string): Promise<U
   return raw ? JSON.parse(raw) as UserProfile : { igns: {} }
 }
 
+export async function saveUserProfile(kv: KVNamespace, userId: string, profile: UserProfile): Promise<void> {
+  await kv.put(`profile:${userId}`, JSON.stringify(profile))
+}
+
 export async function saveUserIgn(kv: KVNamespace, userId: string, game: string, ign: string): Promise<void> {
   const profile = await getUserProfile(kv, userId)
   profile.igns[game] = ign
-  await kv.put(`profile:${userId}`, JSON.stringify(profile))
+  await saveUserProfile(kv, userId, profile)
 }
 
 // ── Durable Object routing ───────────────────────────────────────────────────

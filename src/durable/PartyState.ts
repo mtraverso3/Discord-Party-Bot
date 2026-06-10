@@ -3,7 +3,7 @@ import type {
   AppBindings, PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
-  ForceAddResult, PromoteResult, SetBanlistResult, UpdateResult,
+  ForceAddResult, MoveQueueResult, PromoteResult, SetBanlistResult, UpdateResult,
 } from '../types'
 import { markDisbanded, removeFromIndex, setUserPartyId } from '../lib/party'
 
@@ -107,6 +107,7 @@ export class PartyState extends DurableObject {
         case 'leave':      return Response.json(await this.leave(body))
         case 'approve':    return Response.json(await this.approve(body))
         case 'deny':       return Response.json(await this.deny(body))
+        case 'movequeue':  return Response.json(await this.moveQueue(body))
         case 'remove':     return Response.json(await this.removeFromParty(body))
         case 'promote':    return Response.json(await this.promote(body))
         case 'close':      return Response.json(await this.close(body))
@@ -267,6 +268,24 @@ export class PartyState extends DurableObject {
     data.queue.splice(idx, 1)
     await this.save(data)
     return { status: 'denied', data }
+  }
+
+  private async moveQueue(body: any): Promise<MoveQueueResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    if (data.ownerId !== body.requesterId) return { status: 'unauthorized', data }
+
+    const idx = data.queue.findIndex(q => q.userId === body.userId)
+    if (idx === -1) return { status: 'not_queued', data }
+
+    const to = body.direction === 'up' ? idx - 1 : idx + 1
+    if (to < 0 || to >= data.queue.length) return { status: 'noop', data }
+
+    const [entry] = data.queue.splice(idx, 1)
+    data.queue.splice(to, 0, entry!)
+    await this.save(data)
+    return { status: 'moved', data }
   }
 
   private async removeFromParty(body: any): Promise<RemoveResult> {
