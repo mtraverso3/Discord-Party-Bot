@@ -93,8 +93,8 @@ export async function callParty<T>(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
-    const err = await res.json<{ error: string }>()
-    throw new Error(err.error ?? 'Unknown DO error')
+    const err = await res.json<{ error: string }>().catch(() => null)
+    throw new Error(err?.error ?? `DO request failed (${res.status})`)
   }
   return res.json<T>()
 }
