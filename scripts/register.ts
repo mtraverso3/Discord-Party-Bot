@@ -28,6 +28,8 @@ const commands = [
   {
     name: 'party',
     description: 'Party management for inhouse games',
+    dm_permission: false,
+    contexts: [0], // guild only
     options: [
       {
         type: 1,

@@ -24,6 +24,10 @@ function sub(c: CommandContext<AppEnv>): { name: string; opts: Record<string, an
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function handleParty(c: CommandContext<AppEnv>) {
+  if (!c.interaction.guild_id) {
+    return c.ephemeral().res({ content: 'PartyBot only works inside a server.', flags: 64 })
+  }
+
   // Modal responses must be the immediate (non-deferred) reply.
   const peek = sub(c)
   if (peek.name === 'create')  return await openCreateModal(c)
