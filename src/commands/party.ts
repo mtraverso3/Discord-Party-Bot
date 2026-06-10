@@ -9,6 +9,7 @@ import {
 import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
+import { gameAllowed, getGuildSettings } from '../lib/settings'
 import { generateLinkCode, writeLinkCode } from '../lcu'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,19 +85,20 @@ async function openCreateModal(c: CommandContext<AppEnv>) {
   const guildId = c.interaction.guild_id!
   const { userId, displayName } = extractMemberInfo(c.interaction)
 
-  const [existingPartyId, index] = await Promise.all([
+  const [existingPartyId, index, settings] = await Promise.all([
     getUserPartyId(c.env.PARTY_KV, guildId, userId),
     getPartyIndex(c.env.PARTY_KV, guildId),
+    getGuildSettings(c.env.PARTY_KV, guildId),
   ])
 
   if (existingPartyId) {
     return c.ephemeral().res({ content: `You're already in party \`${existingPartyId}\`. Leave it or disband it first.`, flags: 64 })
   }
-  if (index.length >= 10) {
-    return c.ephemeral().res({ content: 'There are already 10 active parties. Wait for one to disband.', flags: 64 })
+  if (index.length >= settings.maxParties) {
+    return c.ephemeral().res({ content: `There are already ${settings.maxParties} active parties. Wait for one to disband.`, flags: 64 })
   }
 
-  return c.resModal(buildCreateModalJSON(displayName))
+  return c.resModal(buildCreateModalJSON(displayName, settings))
 }
 
 // Invoked from src/index.ts after we verify the Discord signature ourselves —
@@ -119,15 +121,17 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     if (!fields.voiceChannelId) return reply('Please pick a voice channel.')
 
     // Re-check eligibility — state may have changed while the modal was open.
-    const [existingPartyId, index, profile] = await Promise.all([
+    const [existingPartyId, index, profile, settings] = await Promise.all([
       getUserPartyId(env.PARTY_KV, guildId, userId),
       getPartyIndex(env.PARTY_KV, guildId),
       getUserProfile(env.PARTY_KV, userId),
+      getGuildSettings(env.PARTY_KV, guildId),
     ])
     if (existingPartyId) return reply(`You're already in party \`${existingPartyId}\`. Leave it or disband it first.`)
-    if (index.length >= 10) return reply('There are already 10 active parties. Wait for one to disband.')
+    if (index.length >= settings.maxParties) return reply(`There are already ${settings.maxParties} active parties. Wait for one to disband.`)
 
     const game = fields.game || 'Other'
+    if (!gameAllowed(settings, game)) return reply(`**${game}** is not enabled on this server.`)
     const name = fields.name.trim() || `${displayName}'s party`
 
     const result = await createPartyAndEmbed(env, {
@@ -305,13 +309,16 @@ async function openEditModal(c: CommandContext<AppEnv>) {
   }
 
   const stub = getPartyStub(c.env, guildId, partyId)
-  const party = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+  const [party, settings] = await Promise.all([
+    callParty<PartyData | null>(stub, 'get').catch(() => null),
+    getGuildSettings(c.env.PARTY_KV, guildId),
+  ])
   if (!party) return c.ephemeral().res({ content: 'Party not found.', flags: 64 })
   if (party.ownerId !== userId) {
     return c.ephemeral().res({ content: 'Only the party owner can edit the party.', flags: 64 })
   }
 
-  return c.resModal(buildEditModalJSON(party))
+  return c.resModal(buildEditModalJSON(party, settings))
 }
 
 // Invoked from src/index.ts after we verify the Discord signature ourselves —
@@ -336,6 +343,8 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
 
     let ignMap: Record<string, string> | undefined
     if (fields.game && current.game !== fields.game) {
+      const settings = await getGuildSettings(env.PARTY_KV, guildId)
+      if (!gameAllowed(settings, fields.game)) return reply(`**${fields.game}** is not enabled on this server.`)
       const ids = [...current.members.map(m => m.userId), ...current.queue.map(q => q.userId)]
       const profiles = await Promise.all(ids.map(uid => getUserProfile(env.PARTY_KV, uid)))
       ignMap = {}

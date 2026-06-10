@@ -3,6 +3,7 @@ import {
   callParty, getPartyIndex, getPartyStub, getUserPartyId, getUserProfile,
   markDisbanded, removeFromIndex, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
+import { getGuildSettings, sanitizeSettings, saveGuildSettings } from '../lib/settings'
 import { getGuildChannels, getGuildMember } from '../lib/discord'
 
 function json(body: unknown, status = 200): Response {
@@ -39,6 +40,8 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path === '/parties' && method === 'GET') return await listParties(env, guildId!)
     if (path === '/channels' && method === 'GET') return await listVoiceChannels(env, guildId!)
     if (path === '/clear' && method === 'POST') return await clearAllParties(env, guildId!)
+    if (path === '/settings' && method === 'GET') return json(await getGuildSettings(env.PARTY_KV, guildId!))
+    if (path === '/settings' && method === 'PATCH') return await patchSettings(env, guildId!, body)
 
     const m = path.match(/^\/parties\/([^/]+)(\/.*)?$/)
     if (m) {
@@ -75,6 +78,23 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
+
+async function patchSettings(env: AppBindings, guildId: string, body: any): Promise<Response> {
+  const current = await getGuildSettings(env.PARTY_KV, guildId)
+
+  if (body.maxParties != null) {
+    const n = Number(body.maxParties)
+    if (!Number.isInteger(n) || n < 1 || n > 50) return json({ error: 'maxParties must be 1–50' }, 400)
+  }
+  if (body.defaultCap != null) {
+    const n = Number(body.defaultCap)
+    if (!Number.isInteger(n) || n < 2 || n > 50) return json({ error: 'defaultCap must be 2–50' }, 400)
+  }
+
+  const settings = sanitizeSettings({ ...current, ...body })
+  await saveGuildSettings(env.PARTY_KV, guildId, settings)
+  return json(settings)
+}
 
 async function listParties(env: AppBindings, guildId: string): Promise<Response> {
   const index = await getPartyIndex(env.PARTY_KV, guildId)

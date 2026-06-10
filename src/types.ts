@@ -135,3 +135,9 @@ export type UpdateResult = {
 export interface UserProfile {
   igns: Record<string, string>
 }
+
+export interface GuildSettings {
+  maxParties: number      // max concurrent parties per guild
+  defaultCap: number      // pre-filled player cap when creating a party
+  allowedGames: string[]  // subset of GAMES values; empty = all allowed
+}

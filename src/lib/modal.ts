@@ -9,8 +9,9 @@
  * the crash never happens.
  */
 
-import type { PartyData } from '../types'
+import type { GuildSettings, PartyData } from '../types'
 import { GAMES } from './games'
+import { gameAllowed } from './settings'
 
 export const CREATE_MODAL_PREFIX = 'party_create'
 export const EDIT_MODAL_PREFIX = 'party_edit'
@@ -23,7 +24,13 @@ export interface EditFields {
   voiceChannelId: string
 }
 
-export function buildEditModalJSON(party: PartyData): any {
+/** Game options limited to the guild's allowlist; `current` is always kept. */
+function gameOptions(settings: GuildSettings, current: string) {
+  const games = GAMES.filter(g => g.value === current || gameAllowed(settings, g.value))
+  return games.map(g => ({ label: g.name, value: g.value, default: g.value === current }))
+}
+
+export function buildEditModalJSON(party: PartyData, settings: GuildSettings): any {
   return {
     custom_id: `${EDIT_MODAL_PREFIX};${party.id}`,
     title: 'Edit party',
@@ -42,7 +49,7 @@ export function buildEditModalJSON(party: PartyData): any {
       }),
       label('Game', {
         type: 3, custom_id: 'game',
-        options: GAMES.map(g => ({ label: g.name, value: g.value, default: g.value === party.game })),
+        options: gameOptions(settings, party.game),
         min_values: 1, max_values: 1,
       }),
       label('Voice channel', {
@@ -80,7 +87,9 @@ export interface CreateFields {
   voiceChannelId: string
 }
 
-export function buildCreateModalJSON(displayName: string): any {
+export function buildCreateModalJSON(displayName: string, settings: GuildSettings): any {
+  const allowed = GAMES.filter(g => gameAllowed(settings, g.value))
+  const defaultGame = allowed.some(g => g.value === 'Other') ? 'Other' : allowed[0]?.value
   return {
     custom_id: CREATE_MODAL_PREFIX,
     title: 'Create party',
@@ -95,12 +104,12 @@ export function buildCreateModalJSON(displayName: string): any {
         placeholder: 'Notes, rules, anything…',
       }),
       label('Player cap (2–50)', {
-        type: 4, custom_id: 'capacity', style: 1, value: '10',
+        type: 4, custom_id: 'capacity', style: 1, value: String(settings.defaultCap),
         required: true, min_length: 1, max_length: 2,
       }),
       label('Game', {
         type: 3, custom_id: 'game',
-        options: GAMES.map(g => ({ label: g.name, value: g.value, default: g.value === 'Other' })),
+        options: allowed.map(g => ({ label: g.name, value: g.value, default: g.value === defaultGame })),
         min_values: 1, max_values: 1,
       }),
       label('Voice channel', {
