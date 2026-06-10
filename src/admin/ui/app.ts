@@ -585,12 +585,37 @@ function renderParty(p, isOpen = false) {
     } }, 'Clear'),
   )
 
+  const voiceBox = el('span', { class: 'muted' })
+  const voiceBtn = el('button', { class: 'tiny secondary', onclick: async () => {
+    voiceBtn.setAttribute('aria-busy', 'true')
+    try {
+      const v = await api('/parties/' + p.id + '/voice')
+      const nameOf = id => {
+        const m = p.members.find(x => x.userId === id)
+        return m ? m.displayName : id
+      }
+      const inLinked = v.states.filter(s => v.voiceChannelId && s.channelId === v.voiceChannelId)
+      const elsewhere = v.states.filter(s => s.channelId && s.channelId !== v.voiceChannelId)
+      const offline = v.states.filter(s => !s.channelId)
+      const parts = []
+      if (v.voiceChannelId) {
+        parts.push('🔊 ' + inLinked.length + '/' + v.states.length + ' in linked VC' +
+          (inLinked.length ? ': ' + inLinked.map(s => nameOf(s.userId)).join(', ') : ''))
+      }
+      if (elsewhere.length) parts.push('elsewhere: ' + elsewhere.map(s => nameOf(s.userId)).join(', '))
+      if (offline.length) parts.push('not in voice: ' + offline.map(s => nameOf(s.userId)).join(', '))
+      voiceBox.textContent = parts.join(' · ') || 'No members in voice.'
+    } catch (e) { toast(e.message, 'err') }
+    voiceBtn.removeAttribute('aria-busy')
+  } }, 'Check voice')
+
   const body = el('div', { class: 'body' },
     el('div', { class: 'muted activity' },
       el('span', { title: fmtAbs(last) }, 'Last activity: ' + lastLabel),
       el('span', {}, ' · '),
       el('span', { title: fmtAbs(deadline) }, 'Auto-disband: ' + dueLabel),
     ),
+    el('div', { class: 'toolbar', style: 'margin: 0 0 0.6rem' }, voiceBtn, voiceBox),
     el('h5', {}, 'Settings'),
     settingsForm,
     settingsActions,
