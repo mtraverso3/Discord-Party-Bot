@@ -86,3 +86,16 @@ export async function getGuildChannels(
   if (!res.ok) throw new Error(`getGuildChannels failed: ${res.status}`)
   return res.json<any>()
 }
+
+/** The voice channel a user is currently in, or null if not in voice. */
+export async function getUserVoiceChannel(
+  token: string,
+  guildId: string,
+  userId: string,
+): Promise<string | null> {
+  const res = await discordFetch(token, `/guilds/${guildId}/voice-states/${userId}`)
+  if (res.status === 404) return null  // not connected to voice
+  if (!res.ok) throw new Error(`getUserVoiceChannel failed: ${res.status}`)
+  const state = await res.json<{ channel_id?: string | null }>()
+  return state.channel_id ?? null
+}

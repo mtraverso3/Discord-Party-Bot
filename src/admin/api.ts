@@ -8,7 +8,7 @@ import { GAMES } from '../lib/games'
 import { gameAllowed } from '../lib/settings'
 import { getGuildSettings, sanitizeSettings, saveGuildSettings } from '../lib/settings'
 import { appendAudit, getAudit } from '../lib/audit'
-import { getBotGuilds, getGuildChannels, getGuildMember } from '../lib/discord'
+import { getBotGuilds, getGuildChannels, getGuildMember, getUserVoiceChannel } from '../lib/discord'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -63,6 +63,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
       if (sub === '/close' && method === 'POST') return await closeOne(env, G, partyId)
       if (sub === '/open'  && method === 'POST') return await openOne(env, G, partyId)
       if (sub === '/bump'  && method === 'POST') return await bumpOne(env, G, partyId, body)
+      if (sub === '/voice' && method === 'GET')  return await voiceStatus(env, G, partyId)
       if (sub === '/banlist' && method === 'PATCH') return await setBanlist(env, G, partyId, body)
       if (sub === '/members' && method === 'POST') return await addMember(env, G, partyId, body)
 
@@ -238,6 +239,18 @@ async function bumpOne(env: AppBindings, guildId: string, partyId: string, body:
   if (!channelId) return json({ error: 'No channel known for this party — pass channelId' }, 400)
   await repostPartyEmbed(env, stub, party, channelId)
   return json(await callParty<PartyData | null>(stub, 'get'))
+}
+
+async function voiceStatus(env: AppBindings, guildId: string, partyId: string): Promise<Response> {
+  const { party } = await asOwner(env, guildId, partyId)
+  if (!party) return json({ error: 'Party not found' }, 404)
+
+  const states = await Promise.all(party.members.map(async m => ({
+    userId: m.userId,
+    channelId: await getUserVoiceChannel(env.DISCORD_BOT_TOKEN, guildId, m.userId).catch(() => null),
+  })))
+
+  return json({ voiceChannelId: party.voiceChannelId ?? null, states })
 }
 
 async function getUser(env: AppBindings, guildId: string, userId: string): Promise<Response> {
