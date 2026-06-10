@@ -688,7 +688,7 @@ async function disband(c: CommandContext<AppEnv>, guildId: string, userId: strin
     ...result.data.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
     ...result.data.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
     removeFromIndex(c.env.PARTY_KV, guildId, partyId),
-    markDisbanded(c.env.DISCORD_BOT_TOKEN, result.data),
+    markDisbanded(c.env.DISCORD_BOT_TOKEN, result.data).catch(() => {}),
   ])
 
   return c.followup({ content: `**${result.data.name}** has been disbanded.`, flags: 64 })
