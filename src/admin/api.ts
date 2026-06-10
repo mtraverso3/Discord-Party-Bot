@@ -5,7 +5,7 @@ import {
 } from '../lib/party'
 import { getGuildSettings, sanitizeSettings, saveGuildSettings } from '../lib/settings'
 import { appendAudit, getAudit } from '../lib/audit'
-import { getGuildChannels, getGuildMember } from '../lib/discord'
+import { getBotGuilds, getGuildChannels, getGuildMember } from '../lib/discord'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -26,7 +26,8 @@ async function asOwner(env: AppBindings, guildId: string, partyId: string) {
 
 export async function handleAdminApi(req: Request, env: AppBindings, url: URL, email?: string): Promise<Response> {
   const guildId = url.searchParams.get('guild')
-  if (!guildId && !url.pathname.endsWith('/me')) {
+  const guildless = url.pathname.endsWith('/me') || url.pathname.endsWith('/guilds')
+  if (!guildId && !guildless) {
     return json({ error: 'guild query param required' }, 400)
   }
 
@@ -38,9 +39,10 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
 
   const route = async (): Promise<Response> => {
     if (path === '/me' && method === 'GET') return json({ email })
+    if (path === '/guilds' && method === 'GET') return await listGuilds(env)
     if (path === '/log' && method === 'GET') return json(await getAudit(env.PARTY_KV, guildId!))
     if (path === '/parties' && method === 'GET') return await listParties(env, guildId!)
-    if (path === '/channels' && method === 'GET') return await listVoiceChannels(env, guildId!)
+    if (path === '/channels' && method === 'GET') return await listChannels(env, guildId!, url.searchParams.get('kind'))
     if (path === '/clear' && method === 'POST') return await clearAllParties(env, guildId!)
     if (path === '/settings' && method === 'GET') return json(await getGuildSettings(env.PARTY_KV, guildId!))
     if (path === '/settings' && method === 'PATCH') return await patchSettings(env, guildId!, body)
@@ -118,9 +120,15 @@ async function listParties(env: AppBindings, guildId: string): Promise<Response>
   return json(parties.filter(Boolean))
 }
 
-async function listVoiceChannels(env: AppBindings, guildId: string): Promise<Response> {
+async function listGuilds(env: AppBindings): Promise<Response> {
+  const guilds = await getBotGuilds(env.DISCORD_BOT_TOKEN).catch(() => [])
+  return json(guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon })))
+}
+
+async function listChannels(env: AppBindings, guildId: string, kind: string | null): Promise<Response> {
+  const type = kind === 'text' ? 0 : 2  // default voice, for back-compat
   const channels = await getGuildChannels(env.DISCORD_BOT_TOKEN, guildId).catch(() => [])
-  return json(channels.filter(c => c.type === 2).map(c => ({ id: c.id, name: c.name })))
+  return json(channels.filter(c => c.type === type).map(c => ({ id: c.id, name: c.name })))
 }
 
 async function getOne(env: AppBindings, guildId: string, partyId: string): Promise<Response> {

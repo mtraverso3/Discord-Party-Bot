@@ -69,6 +69,15 @@ export async function getGuildMember(
   return res.json<any>()
 }
 
+// Single page of up to 200 guilds — plenty for a bot at this scale.
+export async function getBotGuilds(
+  token: string,
+): Promise<Array<{ id: string; name: string; icon: string | null }>> {
+  const res = await discordFetch(token, '/users/@me/guilds')
+  if (!res.ok) throw new Error(`getBotGuilds failed: ${res.status}`)
+  return res.json<any>()
+}
+
 export async function getGuildChannels(
   token: string,
   guildId: string,
