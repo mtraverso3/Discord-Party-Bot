@@ -143,7 +143,8 @@ async function disbandOne(env: AppBindings, guildId: string, partyId: string): P
     ...party.members.map(m => setUserPartyId(env.PARTY_KV, guildId, m.userId, null)),
     ...party.queue.map(q => setUserPartyId(env.PARTY_KV, guildId, q.userId, null)),
     removeFromIndex(env.PARTY_KV, guildId, partyId),
-    markDisbanded(env.DISCORD_BOT_TOKEN, party, 'disbanded by admin').catch(() => {}),
+    markDisbanded(env.DISCORD_BOT_TOKEN, party, 'disbanded by admin')
+      .catch(e => console.warn(`markDisbanded failed for party ${partyId}:`, e)),
   ])
   return json({ status: 'disbanded' })
 }
@@ -160,7 +161,8 @@ async function clearAllParties(env: AppBindings, guildId: string): Promise<Respo
     await Promise.all([
       ...party.members.map(m => setUserPartyId(env.PARTY_KV, guildId, m.userId, null)),
       ...party.queue.map(q => setUserPartyId(env.PARTY_KV, guildId, q.userId, null)),
-      markDisbanded(env.DISCORD_BOT_TOKEN, party, 'cleared by admin').catch(() => {}),
+      markDisbanded(env.DISCORD_BOT_TOKEN, party, 'cleared by admin')
+        .catch(e => console.warn(`markDisbanded failed for party ${entry.id}:`, e)),
     ])
   }))
   await env.PARTY_KV.put(`guild:${guildId}:parties`, JSON.stringify([]))

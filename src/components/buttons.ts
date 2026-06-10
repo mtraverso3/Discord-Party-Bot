@@ -56,7 +56,8 @@ export async function handleJoinButton(c: ComponentContext<AppEnv>) {
         ? `You joined **${result.data.name}**!`
         : `**${result.data.name}** is ${result.data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${result.data.queue.length}.`
       return c.followup({ content: msg, flags: 64 })
-    } catch {
+    } catch (e) {
+      console.error(`party button error (party ${partyId}):`, e)
       return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
     }
   })
@@ -102,7 +103,8 @@ export async function handleQueueButton(c: ComponentContext<AppEnv>) {
         ? `A spot was open — you joined **${result.data.name}** directly!`
         : `You're in the queue for **${result.data.name}** at position ${pos}.`
       return c.followup({ content: msg, flags: 64 })
-    } catch {
+    } catch (e) {
+      console.error(`party button error (party ${partyId}):`, e)
       return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
     }
   })
@@ -145,7 +147,8 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
         ? `You left **${result.data.name}**.`
         : `You left the queue for **${result.data.name}**.`
       return c.followup({ content: msg, flags: 64 })
-    } catch {
+    } catch (e) {
+      console.error(`party button error (party ${partyId}):`, e)
       return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
     }
   })

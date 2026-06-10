@@ -611,7 +611,8 @@ async function clearAll(c: CommandContext<AppEnv>, guildId: string) {
     await Promise.all([
       ...party.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
       ...party.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
-      markDisbanded(c.env.DISCORD_BOT_TOKEN, party).catch(() => {}),
+      markDisbanded(c.env.DISCORD_BOT_TOKEN, party)
+        .catch(e => console.warn(`markDisbanded failed for party ${entry.id}:`, e)),
     ])
   }))
 
@@ -692,7 +693,8 @@ async function disband(c: CommandContext<AppEnv>, guildId: string, userId: strin
     ...result.data.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
     ...result.data.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
     removeFromIndex(c.env.PARTY_KV, guildId, partyId),
-    markDisbanded(c.env.DISCORD_BOT_TOKEN, result.data).catch(() => {}),
+    markDisbanded(c.env.DISCORD_BOT_TOKEN, result.data)
+      .catch(e => console.warn(`markDisbanded failed for party ${partyId}:`, e)),
   ])
 
   return c.followup({ content: `**${result.data.name}** has been disbanded.`, flags: 64 })
