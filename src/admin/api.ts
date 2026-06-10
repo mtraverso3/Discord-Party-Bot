@@ -1,6 +1,6 @@
 import type { AppBindings, PartyData, UpdateResult } from '../types'
 import {
-  callParty, getPartyIndex, getPartyStub, getUserProfile,
+  callParty, getPartyIndex, getPartyStub, getUserPartyId, getUserProfile,
   markDisbanded, removeFromIndex, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
 import { getGuildChannels, getGuildMember } from '../lib/discord'
@@ -202,6 +202,11 @@ async function addMember(env: AppBindings, guildId: string, partyId: string, bod
 
   const { stub, party } = await asOwner(env, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
+
+  const existingPartyId = await getUserPartyId(env.PARTY_KV, guildId, targetId)
+  if (existingPartyId && existingPartyId !== partyId) {
+    return json({ error: `User is already in party ${existingPartyId}` }, 400)
+  }
 
   const member = await getGuildMember(env.DISCORD_BOT_TOKEN, guildId, targetId).catch(() => null)
   if (!member?.user) return json({ error: 'User not in this guild' }, 404)
