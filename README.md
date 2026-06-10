@@ -66,7 +66,14 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 
 ## Admin UI (optional)
 
-`/admin` serves a private per-guild web UI for editing parties, members, queue, and banlist — protected by Cloudflare Zero Trust (Access).
+`/admin` serves a private web app for managing the bot — protected by Cloudflare Zero Trust (Access). It's a single inline asset served by the Worker: no build step, no framework.
+
+- **Guild picker** — lists the servers the bot is in; remembers your last one
+- **Dashboard** — party/member/queue stats, per-game breakdown, upcoming auto-disbands
+- **Parties** — everything the owner commands can do (edit, close/open, members, queue, banlist, disband) plus search/sort, auto-refresh, queue reordering, embed bumping, and creating parties on a member's behalf
+- **Users** — inspect and edit any member's per-game IGN profile, and repair stale user→party mappings
+- **Audit log** — the last 200 admin actions with the acting admin's email
+- **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games
 
 1. In Cloudflare Zero Trust, create an Access Application covering `<your-domain>/admin*` with a policy allowing your email.
 2. Set the team subdomain and Application AUD on the Worker:
