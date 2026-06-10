@@ -11,6 +11,9 @@ export const ADMIN_CSS = `
     --chip-bg: rgba(0, 0, 0, 0.05);
     --row-hover: rgba(0, 0, 0, 0.03);
     --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    /* Our own foreground color. Pico redefines --pico-color to white inside
+       <button>, so transparent/ghost buttons can't use it for text. */
+    --fg: #1f2933;
   }
   /* Light mode: a soft gray canvas so the white cards/inputs separate cleanly.
      Pico's default light theme makes body and cards both pure white, which
@@ -20,6 +23,7 @@ export const ADMIN_CSS = `
     --pico-card-background-color: #ffffff;
     --pico-card-sectioning-background-color: #ffffff;
     --pico-muted-border-color: #d9dee4;
+    --fg: #1f2933;
   }
   [data-theme=dark] {
     --ok: #4ade80;      --ok-bg: rgba(34, 197, 94, 0.16);
@@ -28,6 +32,7 @@ export const ADMIN_CSS = `
     --chip-bg: rgba(255, 255, 255, 0.08);
     --row-hover: rgba(255, 255, 255, 0.04);
     --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --fg: #e4e7ec;
   }
 
   body { padding: 0.9rem 1rem 3.5rem; background: var(--pico-background-color); }
@@ -46,7 +51,7 @@ export const ADMIN_CSS = `
   button.tiny { font-size: 0.8em; padding: 0.25rem 0.7rem; margin: 0; line-height: 1.3; border-radius: 0.4rem; width: auto; }
   button.ghost, button.ghost-danger {
     background: transparent; border: 1px solid var(--pico-muted-border-color);
-    color: var(--pico-color); box-shadow: none;
+    color: var(--fg); box-shadow: none;
   }
   button.ghost:hover { border-color: var(--pico-primary); color: var(--pico-primary); background: transparent; }
   button.ghost-danger { color: var(--bad); }
@@ -127,8 +132,8 @@ export const ADMIN_CSS = `
   /* ── In-card section switcher ── */
   .seg { display: inline-flex; gap: 0.15rem; background: var(--chip-bg); border-radius: 0.5rem; padding: 0.18rem; margin-bottom: 0.7rem; }
   .seg-btn { background: transparent; border: none; box-shadow: none; color: var(--pico-muted-color); font-size: 0.82em; font-weight: 500; padding: 0.25rem 0.8rem; border-radius: 0.38rem; margin: 0; width: auto; line-height: 1.4; cursor: pointer; }
-  .seg-btn:hover { color: var(--pico-color); background: transparent; }
-  .seg-btn.active { background: var(--pico-card-background-color); color: var(--pico-color); box-shadow: var(--card-shadow); font-weight: 600; }
+  .seg-btn:hover { color: var(--fg); background: transparent; }
+  .seg-btn.active { background: var(--pico-card-background-color); color: var(--fg); box-shadow: var(--card-shadow); font-weight: 600; }
 
   /* ── People rows ── */
   .row { display: flex; gap: 0.6rem; align-items: center; padding: 0.4rem 0.4rem; border-radius: 0.5rem; flex-wrap: wrap; }
