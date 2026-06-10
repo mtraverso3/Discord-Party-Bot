@@ -83,11 +83,13 @@ export class PartyState extends DurableObject {
     this.cache = null
 
     const reason = `inactive for ${Math.round(threshold / HOUR)}h`
+    console.log(`Auto-disbanding party ${finalData.id} in guild ${finalData.guildId} — ${reason}`)
     await Promise.all([
       ...finalData.members.map(m => setUserPartyId(env.PARTY_KV, finalData.guildId, m.userId, null)),
       ...finalData.queue.map(q => setUserPartyId(env.PARTY_KV, finalData.guildId, q.userId, null)),
       removeFromIndex(env.PARTY_KV, finalData.guildId, finalData.id),
-      markDisbanded(env.DISCORD_BOT_TOKEN, finalData, reason).catch(() => {}),
+      markDisbanded(env.DISCORD_BOT_TOKEN, finalData, reason)
+        .catch(e => console.warn(`markDisbanded failed for party ${finalData.id}:`, e)),
     ])
   }
 

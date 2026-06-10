@@ -110,7 +110,10 @@ export async function syncEmbed(token: string, party: PartyData): Promise<void> 
 }
 
 export async function trySyncEmbed(token: string, party: PartyData): Promise<void> {
-  try { await syncEmbed(token, party) } catch { /* message may have been deleted */ }
+  try { await syncEmbed(token, party) } catch (e) {
+    // Usually the message was deleted manually; log so persistent failures show up.
+    console.warn(`syncEmbed failed for party ${party.id} in guild ${party.guildId}:`, e)
+  }
 }
 
 export async function postPartyEmbed(

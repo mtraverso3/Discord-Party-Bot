@@ -39,6 +39,8 @@ export default {
 
     if (!sig || !ts) return new Response('Missing signature', { status: 401 })
     if (!(await verifyDiscordSignature(env.DISCORD_PUBLIC_KEY, sig, ts, body))) {
+      // Helps diagnose a misconfigured DISCORD_PUBLIC_KEY vs. random scanner traffic.
+      console.warn('Rejected interaction with invalid signature')
       return new Response('Invalid signature', { status: 401 })
     }
 
