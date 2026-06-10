@@ -140,6 +140,35 @@ function userPicker(placeholder, onPick) {
   }
 }
 
+// Promise-based replacement for window.confirm using a styled <dialog>.
+function confirmDialog(message, confirmLabel) {
+  return new Promise(resolve => {
+    let done = false
+    const finish = v => { if (done) return; done = true; dlg.close(); resolve(v) }
+    const dlg = el('dialog', { class: 'confirm' },
+      el('p', {}, message),
+      el('div', { class: 'dlg-actions' },
+        el('button', { type: 'button', class: 'ghost', onclick: () => finish(false) }, 'Cancel'),
+        el('button', { type: 'button', class: 'danger', onclick: () => finish(true) }, confirmLabel || 'Confirm'),
+      ),
+    )
+    dlg.addEventListener('close', () => { dlg.remove(); if (!done) { done = true; resolve(false) } })
+    dlg.addEventListener('click', e => { if (e.target === dlg) finish(false) })
+    document.body.append(dlg)
+    dlg.showModal()
+  })
+}
+
+function hueOf(s) {
+  let h = 0
+  for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360
+  return h
+}
+function avatar(name) {
+  const n = name || '?'
+  return el('span', { class: 'av', style: 'background: hsl(' + hueOf(n) + ', 48%, 46%)' }, n.slice(0, 1).toUpperCase())
+}
+
 const HOUR_MS = 60 * 60 * 1000
 function inactivityMs(p) {
   if (p.members.length >= p.maxSize || p.queue.length > 0) return 12 * HOUR_MS
@@ -385,13 +414,13 @@ async function viewParties(view) {
     el('div', { class: 'grow' }, search),
     sortSel,
     el('label', { style: 'display:flex;align-items:center;gap:0.3rem' }, autoBox, 'Auto'),
-    el('button', { class: 'secondary tiny', onclick: refreshParties }, 'Refresh'),
+    el('button', { class: 'tiny ghost', onclick: refreshParties }, 'Refresh'),
     el('button', { class: 'tiny', onclick: () => toggleCreateForm(createBox) }, 'New party'),
-    el('button', { class: 'danger tiny', onclick: async () => {
-      if (!confirm('Disband ALL parties in this guild? This cannot be undone.')) return
+    el('button', { class: 'tiny ghost-danger', onclick: async () => {
+      if (!(await confirmDialog('Disband ALL parties in this guild? This cannot be undone.', 'Disband all'))) return
       try { await api('/clear', { method: 'POST' }); toast('Cleared'); refreshParties() }
       catch (e) { toast(e.message, 'err') }
-    } }, 'Clear all'),
+    } }, 'Clear all…'),
   )
 
   view.replaceChildren(toolbar, createBox, el('div', { id: 'plist' }))
@@ -517,31 +546,37 @@ function toggleCreateForm(box) {
   box.replaceChildren(el('article', {}, el('h5', {}, 'New party'), form))
 }
 
-function statusPill(p) {
-  if (p.isClosed) return el('span', { class: 'pill pill-closed' }, '🔒 closed')
-  if (p.members.length >= p.maxSize) return el('span', { class: 'pill pill-full' }, '🟡 full')
-  return el('span', { class: 'pill pill-open' }, '🟢 open')
+function statusBadge(p) {
+  const s = p.isClosed ? ['closed', 'Closed']
+    : p.members.length >= p.maxSize ? ['full', 'Full']
+    : ['open', 'Open']
+  return el('span', { class: 'status st-' + s[0] }, el('span', { class: 'dot' }), s[1])
 }
 
 function memberLine(p, m) {
   return el('div', { class: 'row' },
+    avatar(m.displayName),
     el('div', { class: 'who' },
-      m.userId === p.ownerId ? el('span', { class: 'crown' }, '👑') : null,
-      el('strong', {}, m.displayName),
-      m.ign ? ' (' + m.ign + ')' : null,
-      ' ',
-      el('span', { class: 'uid' }, m.userId),
+      el('div', {},
+        el('strong', {}, m.displayName),
+        m.userId === p.ownerId ? el('span', { class: 'crown', title: 'Party owner' }, ' 👑') : null,
+        m.ign ? el('span', { class: 'muted' }, '  ' + m.ign) : null,
+      ),
+      el('div', { class: 'uid' }, m.userId),
     ),
-    el('a', { class: 'tiny', href: '#/users', onclick: () => { sessionStorage.setItem('pb-user-lookup', m.userId) } }, 'profile'),
-    m.userId !== p.ownerId ? el('button', { class: 'tiny secondary', onclick: async () => {
-      if (!confirm('Promote ' + m.displayName + ' to owner of ' + p.name + '?')) return
+    el('button', { class: 'tiny ghost', onclick: () => {
+      sessionStorage.setItem('pb-user-lookup', m.userId)
+      location.hash = '#/users'
+    } }, 'Profile'),
+    m.userId !== p.ownerId ? el('button', { class: 'tiny ghost', onclick: async () => {
+      if (!(await confirmDialog('Promote ' + m.displayName + ' to owner of "' + p.name + '"?', 'Promote'))) return
       try { applyPartyUpdate(await api('/parties/' + p.id + '/members/' + m.userId + '/promote', { method: 'POST' })); toast('Promoted') }
       catch (e) { toast(e.message, 'err') }
     } }, 'Promote') : null,
-    m.userId !== p.ownerId ? el('button', { class: 'tiny danger', onclick: async () => {
+    m.userId !== p.ownerId ? el('button', { class: 'tiny ghost-danger', onclick: async () => {
       try { applyPartyUpdate(await api('/parties/' + p.id + '/members/' + m.userId, { method: 'DELETE' })); toast('Removed') }
       catch (e) { toast(e.message, 'err') }
-    } }, 'Remove') : el('span', { class: 'muted' }, 'owner'),
+    } }, 'Remove') : el('span', { class: 'chip' }, 'owner'),
   )
 }
 
@@ -554,104 +589,35 @@ function queueLine(p, q, idx) {
     } catch (e) { toast(e.message, 'err') }
   }
   return el('div', { class: 'row' },
+    el('span', { class: 'qpos' }, String(idx + 1)),
+    avatar(q.displayName),
     el('div', { class: 'who' },
-      el('strong', {}, q.displayName),
-      q.ign ? ' (' + q.ign + ')' : null,
-      ' ',
-      el('span', { class: 'uid' }, q.userId),
+      el('div', {},
+        el('strong', {}, q.displayName),
+        q.ign ? el('span', { class: 'muted' }, '  ' + q.ign) : null,
+      ),
+      el('div', { class: 'uid' }, q.userId),
     ),
-    el('button', { class: 'tiny secondary', disabled: idx === 0 ? 'disabled' : null, onclick: () => move('up') }, '↑'),
-    el('button', { class: 'tiny secondary', disabled: idx === p.queue.length - 1 ? 'disabled' : null, onclick: () => move('down') }, '↓'),
+    el('button', { class: 'tiny ghost', title: 'Move up', disabled: idx === 0 ? 'disabled' : null, onclick: () => move('up') }, '↑'),
+    el('button', { class: 'tiny ghost', title: 'Move down', disabled: idx === p.queue.length - 1 ? 'disabled' : null, onclick: () => move('down') }, '↓'),
     el('button', { class: 'tiny', onclick: async () => {
       try { applyPartyUpdate(await api('/parties/' + p.id + '/members/' + q.userId + '/approve', { method: 'POST' })); toast('Approved') }
       catch (e) { toast(e.message, 'err') }
     } }, 'Approve'),
-    el('button', { class: 'tiny secondary', onclick: async () => {
+    el('button', { class: 'tiny ghost-danger', onclick: async () => {
       try { applyPartyUpdate(await api('/parties/' + p.id + '/queue/' + q.userId, { method: 'DELETE' })); toast('Denied') }
       catch (e) { toast(e.message, 'err') }
     } }, 'Deny'),
   )
 }
 
-function renderParty(p, isOpen = false) {
-  const last = p.lastActivityAt ?? p.createdAt
-  const deadline = deadlineOf(p)
-  const now = Date.now()
-  const lastLabel = last <= now ? relTime(now - last) + ' ago' : 'just now'
-  const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
-  const summary = el('summary', {}, el('div', { class: 'summary-row' },
-    el('span', { class: 'name' }, p.name),
-    el('span', { class: 'meta' }, p.game + ' · ' + p.members.length + '/' + p.maxSize + (p.queue.length ? ' · ' + p.queue.length + ' queued' : '')),
-    statusPill(p),
-    el('span', { class: 'meta', title: 'Auto-disband ' + fmtAbs(deadline) }, '⏱ ' + dueLabel),
-    el('span', { class: 'uid muted' }, p.id),
-  ))
+// ── Party card sections ──────────────────────────────────────────────────────
 
-  const vcs = voiceChannels || []
-  const settingsForm = el('form', { class: 'grid-2' },
-    el('label', {}, 'Name', el('input', { name: 'name', value: p.name, required: true, maxlength: 100 })),
-    el('label', {}, 'Player cap',
-      el('input', { type: 'number', name: 'cap', value: p.maxSize, min: 2, max: 50, required: true })),
-    el('label', {}, 'Game',
-      el('select', { name: 'game' },
-        ...GAMES.map(g => el('option', { value: g, selected: g === p.game ? 'selected' : null }, g))
-      )
-    ),
-    el('label', {}, 'Voice channel',
-      el('select', { name: 'voice' },
-        ...vcs.map(c => el('option', { value: c.id, selected: c.id === p.voiceChannelId ? 'selected' : null }, '#' + c.name)),
-        ...(p.voiceChannelId && !vcs.find(c => c.id === p.voiceChannelId)
-          ? [el('option', { value: p.voiceChannelId, selected: 'selected' }, '(unknown: ' + p.voiceChannelId + ')')]
-          : []),
-      )
-    ),
-    el('label', { class: 'span-2' }, 'Description',
-      el('textarea', { name: 'description' }, p.description || '')
-    ),
-  )
-  settingsForm.addEventListener('submit', e => e.preventDefault())
-
-  const saveSettings = async () => {
-    const fd = new FormData(settingsForm)
-    try {
-      applyPartyUpdate(await api('/parties/' + p.id, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          name: fd.get('name'),
-          description: fd.get('description'),
-          maxSize: Number(fd.get('cap')),
-          game: fd.get('game'),
-          voiceChannelId: fd.get('voice'),
-        }),
-      }))
-      toast('Saved')
-    } catch (err) { toast(err.message, 'err') }
-  }
-
-  const settingsActions = el('div', { class: 'toolbar' },
-    el('button', { type: 'button', onclick: saveSettings }, 'Save'),
-    el('button', { type: 'button', class: 'secondary', onclick: async () => {
-      try {
-        applyPartyUpdate(await api('/parties/' + p.id + (p.isClosed ? '/open' : '/close'), { method: 'POST' }))
-        toast(p.isClosed ? 'Opened' : 'Closed')
-      } catch (err) { toast(err.message, 'err') }
-    } }, p.isClosed ? 'Open party' : 'Close party'),
-    el('button', { type: 'button', class: 'secondary', onclick: async () => {
-      try { applyPartyUpdate(await api('/parties/' + p.id + '/bump', { method: 'POST', body: JSON.stringify({}) })); toast('Bumped') }
-      catch (err) { toast(err.message, 'err') }
-    } }, 'Bump embed'),
-    el('span', { class: 'grow' }),
-    el('button', { type: 'button', class: 'danger', onclick: async () => {
-      if (!confirm('Disband "' + p.name + '"?')) return
-      try { await api('/parties/' + p.id, { method: 'DELETE' }); removePartyLocal(p.id); toast('Disbanded') }
-      catch (err) { toast(err.message, 'err') }
-    } }, 'Disband'),
-  )
-
-  const addPicker = userPicker('Search member by name, or paste an ID')
-  const addForm = el('form', { class: 'toolbar' },
+function buildPeopleSection(p) {
+  const addPicker = userPicker('Add a member — search by name or paste an ID')
+  const addForm = el('form', { class: 'toolbar addbar' },
     el('div', { class: 'grow' }, addPicker.node),
-    el('button', { type: 'submit' }, 'Add'),
+    el('button', { type: 'submit', class: 'tiny' }, 'Add'),
   )
   addForm.addEventListener('submit', async e => {
     e.preventDefault()
@@ -661,21 +627,8 @@ function renderParty(p, isOpen = false) {
     catch (err) { toast(err.message, 'err') }
   })
 
-  const banText = (p.banlist && p.banlist.source) ? p.banlist.source.join('\\n') : ''
-  const banArea = el('textarea', { name: 'banlist', class: 'bans', placeholder: 'one champion per line' }, banText)
-  const banActions = el('div', { class: 'toolbar' },
-    el('button', { type: 'button', onclick: async () => {
-      try { applyPartyUpdate(await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: banArea.value }) })); toast('Banlist saved') }
-      catch (err) { toast(err.message, 'err') }
-    } }, 'Save banlist'),
-    el('button', { type: 'button', class: 'secondary', onclick: async () => {
-      try { applyPartyUpdate(await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: '' }) })); toast('Cleared') }
-      catch (err) { toast(err.message, 'err') }
-    } }, 'Clear'),
-  )
-
   const voiceBox = el('span', { class: 'muted' })
-  const voiceBtn = el('button', { class: 'tiny secondary', onclick: async () => {
+  const voiceBtn = el('button', { class: 'tiny ghost', onclick: async () => {
     voiceBtn.setAttribute('aria-busy', 'true')
     try {
       const v = await api('/parties/' + p.id + '/voice')
@@ -698,26 +651,155 @@ function renderParty(p, isOpen = false) {
     voiceBtn.removeAttribute('aria-busy')
   } }, 'Check voice')
 
-  const body = el('div', { class: 'body' },
+  return el('div', {},
+    ...p.members.map(m => memberLine(p, m)),
+    p.queue.length > 0 ? el('div', { class: 'subhead' }, 'Queue — ' + p.queue.length + ' waiting') : null,
+    ...p.queue.map((q, i) => queueLine(p, q, i)),
+    addForm,
+    el('div', { class: 'toolbar voicebar' }, voiceBtn, voiceBox),
+  )
+}
+
+function buildSettingsSection(p) {
+  const last = p.lastActivityAt ?? p.createdAt
+  const deadline = deadlineOf(p)
+  const now = Date.now()
+  const lastLabel = last <= now ? relTime(now - last) + ' ago' : 'just now'
+  const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
+
+  const vcs = voiceChannels || []
+  const form = el('form', { class: 'grid-2' },
+    el('label', {}, 'Name', el('input', { name: 'name', value: p.name, required: true, maxlength: 100 })),
+    el('label', {}, 'Player cap',
+      el('input', { type: 'number', name: 'cap', value: p.maxSize, min: 2, max: 50, required: true })),
+    el('label', {}, 'Game',
+      el('select', { name: 'game' },
+        ...GAMES.map(g => el('option', { value: g, selected: g === p.game ? 'selected' : null }, g))
+      )
+    ),
+    el('label', {}, 'Voice channel',
+      el('select', { name: 'voice' },
+        ...vcs.map(c => el('option', { value: c.id, selected: c.id === p.voiceChannelId ? 'selected' : null }, '#' + c.name)),
+        ...(p.voiceChannelId && !vcs.find(c => c.id === p.voiceChannelId)
+          ? [el('option', { value: p.voiceChannelId, selected: 'selected' }, '(unknown: ' + p.voiceChannelId + ')')]
+          : []),
+      )
+    ),
+    el('label', { class: 'span-2' }, 'Description',
+      el('textarea', { name: 'description' }, p.description || '')
+    ),
+  )
+  form.addEventListener('submit', e => e.preventDefault())
+
+  const save = async () => {
+    const fd = new FormData(form)
+    try {
+      applyPartyUpdate(await api('/parties/' + p.id, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: fd.get('name'),
+          description: fd.get('description'),
+          maxSize: Number(fd.get('cap')),
+          game: fd.get('game'),
+          voiceChannelId: fd.get('voice'),
+        }),
+      }))
+      toast('Saved')
+    } catch (err) { toast(err.message, 'err') }
+  }
+
+  return el('div', {},
     el('div', { class: 'muted activity' },
       el('span', { title: fmtAbs(last) }, 'Last activity: ' + lastLabel),
       el('span', {}, ' · '),
       el('span', { title: fmtAbs(deadline) }, 'Auto-disband: ' + dueLabel),
     ),
-    el('div', { class: 'toolbar', style: 'margin: 0 0 0.6rem' }, voiceBtn, voiceBox),
-    el('h5', {}, 'Settings'),
-    settingsForm,
-    settingsActions,
-    el('h5', {}, 'Members (' + p.members.length + '/' + p.maxSize + ')'),
-    ...p.members.map(m => memberLine(p, m)),
-    p.queue.length > 0 ? el('h5', {}, 'Queue (' + p.queue.length + ')') : null,
-    ...p.queue.map((q, i) => queueLine(p, q, i)),
-    el('h5', {}, 'Add member'),
-    addForm,
-    el('h5', {}, 'Banlist'),
-    banArea,
-    banActions,
+    form,
+    el('div', { class: 'toolbar' },
+      el('button', { type: 'button', class: 'tiny', onclick: save }, 'Save changes'),
+      el('button', { type: 'button', class: 'tiny ghost', onclick: async () => {
+        try {
+          applyPartyUpdate(await api('/parties/' + p.id + (p.isClosed ? '/open' : '/close'), { method: 'POST' }))
+          toast(p.isClosed ? 'Opened' : 'Closed')
+        } catch (err) { toast(err.message, 'err') }
+      } }, p.isClosed ? 'Open party' : 'Close party'),
+      el('button', { type: 'button', class: 'tiny ghost', onclick: async () => {
+        try { applyPartyUpdate(await api('/parties/' + p.id + '/bump', { method: 'POST', body: JSON.stringify({}) })); toast('Bumped') }
+        catch (err) { toast(err.message, 'err') }
+      } }, 'Bump embed'),
+      el('span', { class: 'grow' }),
+      el('button', { type: 'button', class: 'tiny ghost-danger', onclick: async () => {
+        if (!(await confirmDialog('Disband "' + p.name + '"? Members will be released and the embed marked disbanded.', 'Disband'))) return
+        try { await api('/parties/' + p.id, { method: 'DELETE' }); removePartyLocal(p.id); toast('Disbanded') }
+        catch (err) { toast(err.message, 'err') }
+      } }, 'Disband…'),
+    ),
   )
+}
+
+function buildBanlistSection(p) {
+  const banText = (p.banlist && p.banlist.source) ? p.banlist.source.join('\\n') : ''
+  const banArea = el('textarea', { name: 'banlist', class: 'bans', placeholder: 'One champion per line — assigned to members in order' }, banText)
+  return el('div', {},
+    el('p', { class: 'muted', style: 'margin: 0 0 0.4rem' }, 'Members are assigned one ban each, in paste order. Freed bans recycle to the next joiner.'),
+    banArea,
+    el('div', { class: 'toolbar' },
+      el('button', { type: 'button', class: 'tiny', onclick: async () => {
+        try { applyPartyUpdate(await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: banArea.value }) })); toast('Banlist saved') }
+        catch (err) { toast(err.message, 'err') }
+      } }, 'Save banlist'),
+      el('button', { type: 'button', class: 'tiny ghost', onclick: async () => {
+        try { applyPartyUpdate(await api('/parties/' + p.id + '/banlist', { method: 'PATCH', body: JSON.stringify({ banlist: '' }) })); toast('Cleared') }
+        catch (err) { toast(err.message, 'err') }
+      } }, 'Clear'),
+    ),
+  )
+}
+
+// Remembers which section of each card is selected across re-renders.
+const cardSection = new Map()
+
+function renderParty(p, isOpen = false) {
+  const deadline = deadlineOf(p)
+  const now = Date.now()
+  const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
+
+  const summary = el('summary', {}, el('div', { class: 'summary-row' },
+    statusBadge(p),
+    el('span', { class: 'name' }, p.name),
+    el('span', { class: 'chip' }, p.game),
+    el('span', { class: 'chip' }, p.members.length + '/' + p.maxSize),
+    p.queue.length ? el('span', { class: 'chip chip-warn' }, p.queue.length + ' queued') : null,
+    el('span', { class: 'grow' }),
+    el('span', { class: 'meta', title: 'Auto-disband ' + fmtAbs(deadline) }, '⏱ ' + dueLabel),
+    el('span', { class: 'uid' }, p.id),
+  ))
+
+  const sections = {
+    people: buildPeopleSection(p),
+    settings: buildSettingsSection(p),
+    banlist: buildBanlistSection(p),
+  }
+  const segBtns = {}
+  const sectionBox = el('div')
+  const showSection = id => {
+    cardSection.set(p.id, id)
+    for (const k of Object.keys(segBtns)) segBtns[k].classList.toggle('active', k === id)
+    sectionBox.replaceChildren(sections[id])
+  }
+  const tabs = [
+    ['people', 'People (' + (p.members.length + p.queue.length) + ')'],
+    ['settings', 'Settings'],
+    ['banlist', 'Banlist' + (p.banlist ? ' (' + p.banlist.source.length + ')' : '')],
+  ]
+  const seg = el('div', { class: 'seg' }, tabs.map(([id, label]) => {
+    const b = el('button', { type: 'button', class: 'seg-btn', onclick: () => showSection(id) }, label)
+    segBtns[id] = b
+    return b
+  }))
+
+  const body = el('div', { class: 'body' }, seg, sectionBox)
+  showSection(cardSection.get(p.id) || 'people')
 
   return el('details', { class: 'party', 'data-party-id': p.id, open: isOpen ? 'open' : null }, summary, body)
 }
@@ -761,8 +843,12 @@ async function lookupUser(userId, box) {
   catch (e) { box.replaceChildren(el('article', {}, 'Error: ' + e.message)); return }
 
   const head = u.member
-    ? el('div', {}, el('strong', {}, u.member.displayName), ' ', el('span', { class: 'muted' }, '@' + u.member.username))
-    : el('div', { class: 'warn' }, 'Not a member of this guild')
+    ? el('div', { class: 'uhead' },
+        avatar(u.member.displayName),
+        el('div', {},
+          el('strong', {}, u.member.displayName), ' ',
+          el('span', { class: 'muted' }, '@' + u.member.username)))
+    : el('div', {}, el('span', { class: 'warn' }, 'Not a member of this guild'))
 
   let partyInfo
   if (!u.partyId) {
