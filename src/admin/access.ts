@@ -52,6 +52,7 @@ export async function verifyAccessJwt(jwt: string, team: string, aud: string): P
     const audOk = Array.isArray(payload.aud) ? payload.aud.includes(aud) : payload.aud === aud
     if (!audOk) return { ok: false }
     if (payload.exp && payload.exp * 1000 < Date.now()) return { ok: false }
+    if (payload.nbf && payload.nbf * 1000 > Date.now() + 60_000) return { ok: false }
     if (payload.iss !== `https://${team}.cloudflareaccess.com`) return { ok: false }
 
     const keys = await getJwks(team)
