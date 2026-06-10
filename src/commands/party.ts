@@ -1,12 +1,12 @@
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv, PartyData, UpdateResult } from '../types'
 import {
-  addToIndex, callParty, extractMemberInfo, extractResolvedUser, findParty,
+  callParty, createPartyAndEmbed, extractMemberInfo, extractResolvedUser, findParty,
   getPartyIndex, getPartyStub, getUserPartyId, getUserProfile, isGuildAdmin,
-  markDisbanded, postPartyEmbed, removeFromIndex,
-  saveUserIgn, setUserPartyId, trySyncEmbed, uniquePartyId, updateIndexEntry,
+  markDisbanded, removeFromIndex, repostPartyEmbed,
+  saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
-import { deleteMessage, editInteractionResponse } from '../lib/discord'
+import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
 import { generateLinkCode, writeLinkCode } from '../lcu'
@@ -129,40 +129,20 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
 
     const game = fields.game || 'Other'
     const name = fields.name.trim() || `${displayName}'s party`
-    const partyId = uniquePartyId(index)
-    const stub = getPartyStub(env, guildId, partyId)
 
-    const party = await callParty<PartyData>(stub, 'create', {
-      id: partyId,
+    const result = await createPartyAndEmbed(env, {
       guildId,
+      channelId,
+      owner: { id: userId, username, displayName, ign: profile.igns[game] },
       name,
       description: fields.description,
       game,
-      ownerId: userId,
-      ownerUsername: username,
-      ownerName: displayName,
-      ownerIgn: profile.igns[game],
       maxSize,
       voiceChannelId: fields.voiceChannelId,
     })
+    if (!result.ok) return reply(result.error)
 
-    // If the embed can't be posted (e.g. missing channel permissions), tear the
-    // party back down — otherwise it lingers as an unlisted DO whose cleanup
-    // alarm later wipes the owner's user→party mapping.
-    let msg: { id: string }
-    try {
-      msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, party)
-    } catch (e) {
-      console.error('postPartyEmbed failed:', e)
-      await callParty(stub, 'forcedisband', {}).catch(() => {})
-      return reply("Couldn't post the party message in this channel — check the bot's permissions here.")
-    }
-    await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
-
-    await addToIndex(env.PARTY_KV, guildId, { id: partyId, name: party.name, game: party.game })
-    await setUserPartyId(env.PARTY_KV, guildId, userId, partyId)
-
-    return reply(`Party **${party.name}** created! (ID: \`${partyId}\`)`)
+    return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)`)
   } catch (e) {
     console.error('handleCreateModalRaw error:', e)
     return reply('Something went wrong.')
@@ -565,12 +545,7 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
   if (!party) return c.followup({ content: 'Party not found.', flags: 64 })
   if (party.ownerId !== userId) return c.followup({ content: 'Only the party owner can bump the party.', flags: 64 })
 
-  if (party.embedMessageId && party.embedChannelId) {
-    try { await deleteMessage(c.env.DISCORD_BOT_TOKEN, party.embedChannelId, party.embedMessageId) } catch { /* already gone */ }
-  }
-
-  const msg = await postPartyEmbed(c.env.DISCORD_BOT_TOKEN, channelId, party)
-  await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
+  await repostPartyEmbed(c.env, stub, party, channelId)
 
   return c.followup({ content: 'Party bumped!', flags: 64 })
 }
