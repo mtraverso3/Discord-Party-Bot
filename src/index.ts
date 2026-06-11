@@ -3,7 +3,7 @@ import type { AppBindings, AppEnv } from './types'
 import {
   handleBanlistModal, handleCreateModalRaw, handleEditModalRaw, handleParty,
 } from './commands/party'
-import { handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
+import { handleAwayButton, handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
 import { CREATE_MODAL_PREFIX, EDIT_MODAL_PREFIX } from './lib/modal'
 import { handleAdmin } from './admin'
 import { handleClientApi } from './client-api'
@@ -15,6 +15,7 @@ const inner = new DiscordHono<AppEnv>()
   .component('party_join', handleJoinButton)
   .component('party_queue', handleQueueButton)
   .component('party_leave', handleLeaveButton)
+  .component('party_away', handleAwayButton)
   .component('help_page', handleHelpPage)
   .modal('party_banlist', handleBanlistModal)
   // party_create and party_edit are intentionally NOT registered here —
