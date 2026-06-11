@@ -14,15 +14,18 @@ export function buildPartyEmbed(party: PartyData) {
     .map((m, i) => {
       const ign = m.ign ? ` *(${m.ign})*` : ''
       const crown = m.userId === party.ownerId ? ' 👑' : ''
+      const away = m.away ? ' 💤' : ''
       const assigned = party.banlist?.assignments[m.userId]
       const ban = assigned ? ` — 🚫 **${assigned}**` : ''
-      return `\`${i + 1}.\` <@${m.userId}>${crown}${ign}${ban}`
+      return `\`${i + 1}.\` <@${m.userId}>${crown}${away}${ign}${ban}`
     })
     .join('\n') || '*No members yet*'
 
+  const awayCount = party.members.filter(m => m.away).length
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
     {
-      name: `Members — ${party.members.length}/${party.maxSize}`,
+      name: `Members — ${party.members.length}/${party.maxSize}`
+        + (awayCount > 0 ? ` · 💤 ${awayCount} away` : ''),
       value: memberLines,
     },
   ]
@@ -62,8 +65,10 @@ export function buildPartyComponents(party: PartyData) {
     : { type: 2, style: 3, label: 'Join', custom_id: `party_join;${party.id}` }
 
   const leaveButton = { type: 2, style: 4, label: 'Leave', custom_id: `party_leave;${party.id}` }
+  // Members toggle a 💤 marker next to their name (brb / back).
+  const awayButton = { type: 2, style: 2, label: '💤 BRB', custom_id: `party_away;${party.id}` }
 
-  return [{ type: 1, components: [joinButton, leaveButton] }]
+  return [{ type: 1, components: [joinButton, leaveButton, awayButton] }]
 }
 
 // ── Help pages ──────────────────────────────────────────────────────────────
@@ -89,7 +94,7 @@ export function buildHelpEmbed(page: number) {
         },
         {
           name: '3. Join a party',
-          value: 'Click the green **Join** button on a party message. Or use `/party list` to see what\'s out there, then `/party join` to hop in.\n\nUse `/party leave` anytime to leave.',
+          value: 'Click the green **Join** button on a party message. Or use `/party list` to see what\'s out there, then `/party join` to hop in.\n\nUse `/party leave` anytime to leave. Stepping away for a bit? Click **💤 BRB** to mark yourself away — click it again when you\'re back.',
         },
       ],
       footer: { text: 'Page 1 / 3 · Getting Started' },

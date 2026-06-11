@@ -228,6 +228,30 @@ describe('setign', () => {
   })
 })
 
+describe('toggleaway', () => {
+  it('toggles the away marker on and off for members', async () => {
+    const { stub } = await makeParty()
+    await call(stub, 'join', user('a'))
+
+    const on = await call(stub, 'toggleaway', { userId: 'a' })
+    expect(on.status).toBe('toggled')
+    expect(on.away).toBe(true)
+    expect(on.data.members.find((m: any) => m.userId === 'a').away).toBe(true)
+
+    const off = await call(stub, 'toggleaway', { userId: 'a' })
+    expect(off.status).toBe('toggled')
+    expect(off.away).toBe(false)
+    expect(off.data.members.find((m: any) => m.userId === 'a').away).toBeUndefined()
+  })
+
+  it('rejects non-members (including queued users)', async () => {
+    const { stub } = await makeParty({ maxSize: 1 })
+    await call(stub, 'join', user('q'))  // party full → queued
+    expect((await call(stub, 'toggleaway', { userId: 'q' })).status).toBe('not_in')
+    expect((await call(stub, 'toggleaway', { userId: 'stranger' })).status).toBe('not_in')
+  })
+})
+
 describe('disband', () => {
   it('only the owner can disband; forcedisband on empty storage reports gone', async () => {
     const { stub } = await makeParty()

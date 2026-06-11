@@ -3,7 +3,7 @@ import type {
   AppBindings, PartyData, PartyMember, QueueEntry,
   JoinResult, LeaveResult, ApproveResult, DenyResult,
   RemoveResult, CloseResult, OpenResult, SetIgnResult, DisbandResult,
-  ForceAddResult, MoveQueueResult, PromoteResult, SetBanlistResult, UpdateResult,
+  ForceAddResult, MoveQueueResult, PromoteResult, SetBanlistResult, ToggleAwayResult, UpdateResult,
 } from '../types'
 import { markDisbanded, removeFromIndex, setUserPartyId } from '../lib/party'
 
@@ -113,6 +113,7 @@ export class PartyState extends DurableObject {
         case 'close':      return Response.json(await this.close(body))
         case 'open':       return Response.json(await this.open(body))
         case 'setign':     return Response.json(await this.setIgn(body))
+        case 'toggleaway': return Response.json(await this.toggleAway(body))
         case 'setbanlist': return Response.json(await this.setBanlist(body))
         case 'update':     return Response.json(await this.update(body))
         case 'setmessage': return Response.json(await this.setMessage(body))
@@ -381,6 +382,19 @@ export class PartyState extends DurableObject {
     }
 
     return { status: 'not_in', data }
+  }
+
+  private async toggleAway(body: any): Promise<ToggleAwayResult> {
+    const data = await this.load()
+    if (!data) throw new Error('Party not found')
+
+    const member = data.members.find(m => m.userId === body.userId)
+    if (!member) return { status: 'not_in', data, away: false }
+
+    if (member.away) delete member.away
+    else member.away = true
+    await this.save(data)
+    return { status: 'toggled', data, away: !!member.away }
   }
 
   private async setBanlist(body: any): Promise<SetBanlistResult> {

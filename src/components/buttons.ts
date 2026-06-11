@@ -1,5 +1,5 @@
 import type { ComponentContext } from 'discord-hono'
-import type { AppEnv, PartyData } from '../types'
+import type { AppEnv, PartyData, ToggleAwayResult } from '../types'
 import {
   callParty, extractMemberInfo, findPartyById, getPartyStub,
   getUserPartyId, getUserProfile, setUserPartyId, trySyncEmbed,
@@ -102,6 +102,36 @@ export async function handleQueueButton(c: ComponentContext<AppEnv>) {
       const msg = result.status === 'joined'
         ? `A spot was open — you joined **${result.data.name}** directly!`
         : `You're in the queue for **${result.data.name}** at position ${pos}.`
+      return c.followup({ content: msg, flags: 64 })
+    } catch (e) {
+      console.error(`party button error (party ${partyId}):`, e)
+      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+    }
+  })
+}
+
+// ── BRB button (party_away;<partyId>) ─────────────────────────────────────────
+
+export async function handleAwayButton(c: ComponentContext<AppEnv>) {
+  return c.ephemeral().resDefer(async (c) => {
+    const partyId = (c.interaction.data as any).custom_id as string
+    const guildId = c.interaction.guild_id!
+    const { userId } = extractMemberInfo(c.interaction)
+
+    try {
+      const stub = getPartyStub(c.env, guildId, partyId)
+      const result = await callParty<ToggleAwayResult>(stub, 'toggleaway', { userId }).catch(() => null)
+
+      if (!result) return c.followup({ content: 'This party no longer exists.', flags: 64 })
+      if (result.status === 'not_in') {
+        return c.followup({ content: 'Only party members can set a BRB marker — join first.', flags: 64 })
+      }
+
+      await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+
+      const msg = result.away
+        ? "You're marked as away 💤 — click **💤 BRB** again when you're back."
+        : "Welcome back! Your away marker is cleared."
       return c.followup({ content: msg, flags: 64 })
     } catch (e) {
       console.error(`party button error (party ${partyId}):`, e)

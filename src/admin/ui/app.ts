@@ -560,6 +560,7 @@ function memberLine(p, m) {
       el('div', {},
         el('strong', {}, m.displayName),
         m.userId === p.ownerId ? el('span', { class: 'crown', title: 'Party owner' }, ' 👑') : null,
+        m.away ? el('span', { title: 'Marked as away (BRB)' }, ' 💤') : null,
         m.ign ? el('span', { class: 'muted' }, '  ' + m.ign) : null,
       ),
       el('div', { class: 'uid' }, m.userId),

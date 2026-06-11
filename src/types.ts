@@ -3,6 +3,7 @@ export interface PartyMember {
   username: string
   displayName: string
   ign?: string
+  away?: boolean  // "brb" marker, toggled by the member from the embed
   joinedAt: number
 }
 
@@ -101,6 +102,12 @@ export type OpenResult = {
 export type SetIgnResult = {
   status: 'updated' | 'not_in'
   data: PartyData
+}
+
+export type ToggleAwayResult = {
+  status: 'toggled' | 'not_in'
+  data: PartyData
+  away: boolean
 }
 
 export type DisbandResult = {
