@@ -192,11 +192,11 @@ function renderParty(): HTMLElement[] {
   // Invite controls.
   if (session!.canInvite) {
     const select = el('select', {
+      class: 'grow',
       onchange: (e: Event) => { selectedMode = (e.target as HTMLSelectElement).value as LobbyMode },
     }, LOBBY_MODES.map(m => el('option', { value: m.value, selected: m.value === selectedMode }, m.label)))
 
     const inviteBtn = el('button', {
-      class: 'block',
       disabled: !lcu.connected || inviteBusy,
       onclick: async () => {
         inviteBusy = true
@@ -221,7 +221,7 @@ function renderParty(): HTMLElement[] {
       el('p', { class: 'sub' }, lcu.connected
         ? 'Creates the lobby on your client and invites every member by their IGN.'
         : 'Start the League client to create a lobby.'),
-      el('div', { class: 'row' }, el('span', { class: 'grow' }, select), inviteBtn),
+      el('div', { class: 'row' }, select, inviteBtn),
     ))
   }
 
@@ -289,6 +289,7 @@ async function start(): Promise<void> {
   link = await pb.linkState()
   await refreshLcu()
   await refreshSession()
+  await refreshLobby()
   render(true)
   setInterval(() => { void refreshLcu() }, 3000)
   setInterval(() => { void refreshSession() }, 5000)
