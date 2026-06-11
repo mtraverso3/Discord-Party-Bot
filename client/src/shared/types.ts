@@ -71,6 +71,7 @@ export interface InviteOutcome {
 export interface InviteResult {
   ok: boolean
   error?: string
+  createdNew?: boolean  // false when invites went to the leader's existing lobby
   outcomes: InviteOutcome[]
 }
 

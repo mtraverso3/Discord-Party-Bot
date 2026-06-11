@@ -197,6 +197,8 @@ function renderParty(): HTMLElement[] {
     }, LOBBY_MODES.map(m => el('option', { value: m.value, selected: m.value === selectedMode }, m.label)))
 
     const inviteBtn = el('button', {
+      // Full-width when it's alone in the row (no mode picker needed).
+      class: lobby.exists ? 'block' : null,
       disabled: !lcu.connected || inviteBusy,
       onclick: async () => {
         inviteBusy = true
@@ -208,20 +210,22 @@ function renderParty(): HTMLElement[] {
         } else {
           const sent = res.outcomes.filter(o => o.status === 'invited').length
           const skipped = res.outcomes.filter(o => o.status === 'no-ign' || o.status === 'not-found')
-          toast(`Lobby created — ${sent} invite${sent === 1 ? '' : 's'} sent` +
+          toast(`${res.createdNew ? 'Lobby created' : 'Invited to your lobby'} — ${sent} invite${sent === 1 ? '' : 's'} sent` +
             (skipped.length ? `, ${skipped.length} skipped (no/invalid IGN)` : ''))
         }
         void refreshLobby()
         render(true)
       },
-    }, inviteBusy ? 'Inviting…' : 'Create lobby & invite all')
+    }, inviteBusy ? 'Inviting…' : (lobby.exists ? 'Invite all to this lobby' : 'Create lobby & invite all'))
 
     out.push(el('div', { class: 'card' },
       el('h2', {}, 'League lobby'),
-      el('p', { class: 'sub' }, lcu.connected
-        ? 'Creates the lobby on your client and invites every member by their IGN.'
-        : 'Start the League client to create a lobby.'),
-      el('div', { class: 'row' }, select, inviteBtn),
+      el('p', { class: 'sub' },
+        !lcu.connected ? 'Start the League client to create a lobby.'
+        : lobby.exists ? 'Invites every member into the lobby you are in now.'
+        : 'Creates the lobby on your client and invites every member by their IGN.'),
+      // The mode picker only matters when a lobby has to be created.
+      el('div', { class: 'row' }, lobby.exists ? null : select, inviteBtn),
     ))
   }
 
