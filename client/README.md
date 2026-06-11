@@ -13,8 +13,9 @@ the League of Legends client to:
 
 ## Using it
 
-1. Download `PartyBot-<version>.exe` from the repo's releases and double-click
-   it — no install, no admin rights, no certificates.
+1. Download `PartyBot-<version>-win.zip` from the repo's releases, unzip it
+   anywhere, and run `PartyBot.exe` — no install, no admin rights, no
+   certificates.
 2. Run `/party link` in Discord and enter the 8-character code in the app.
    This is one-time: the link persists across restarts and parties (90 days of
    inactivity before it expires).
@@ -25,7 +26,9 @@ Invites can be sent by the party owner, or by members a server admin has
 added to the **Desktop client inviters** list in the bot's admin UI.
 
 > Windows SmartScreen may warn on first run because the executable is not
-> code-signed. Choose "More info → Run anyway".
+> code-signed. Choose "More info → Run anyway". (The app deliberately ships
+> as a zip rather than a self-extracting exe — unsigned NSIS self-extractors
+> are routinely false-flagged as trojans by Windows Defender.)
 
 ## Development
 
@@ -34,7 +37,7 @@ npm install
 npm start          # build + launch with Electron
 npm test           # unit tests for the matching logic
 npm run typecheck
-npm run dist       # portable Windows exe in release/
+npm run dist       # Windows zip in release/
 ```
 
 Point the app at a different Worker with the `PARTYBOT_URL` environment

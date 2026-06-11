@@ -5,9 +5,11 @@ directories:
 files:
   - dist/**
   - package.json
+# Ship a plain zip of the app folder rather than the `portable` target: the
+# portable exe is an NSIS self-extracting stub, which Windows Defender
+# routinely flags as a trojan when unsigned.
 win:
   target:
-    - target: portable
+    - target: zip
       arch: [x64]
-portable:
-  artifactName: PartyBot-${version}.exe
+artifactName: PartyBot-${version}-win.${ext}

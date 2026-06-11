@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "start": "npm run build && electron .",
-    "dist": "npm run build && electron-builder --win portable"
+    "dist": "npm run build && electron-builder --win zip"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

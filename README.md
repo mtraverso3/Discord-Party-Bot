@@ -89,4 +89,4 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 
 A portable Windows app (`client/`) for party leaders running League of Legends. It links to your Discord identity once via `/party link`, then lets the party owner (or admin-allowlisted members) create a League lobby and invite every party member by their IGN in one click — members don't install anything. It also cross-references the live League lobby against the party roster and flags anyone in the lobby who isn't in the party.
 
-Built as a single portable `.exe` (Electron) by the **Desktop client** GitHub Actions workflow — run it manually or push a `client-v*` tag to publish a release. See [client/README.md](client/README.md).
+Built as an unzip-and-run Windows app (Electron) by the **Desktop client** GitHub Actions workflow — run it manually or push a `client-v*` tag to publish a release. See [client/README.md](client/README.md).
