@@ -98,6 +98,10 @@ export const ADMIN_CSS = `
   .st-closed { color: var(--bad);  background: var(--bad-bg); }
   .chip { display: inline-block; padding: 0.08rem 0.55rem; border-radius: 999px; font-size: 0.75em; font-weight: 500; background: var(--chip-bg); color: var(--pico-muted-color); white-space: nowrap; }
   .chip-warn { background: var(--warn-bg); color: var(--warn); }
+  .chip .chip-x { all: unset; cursor: pointer; margin-left: 0.35rem; font-weight: 700; color: var(--pico-muted-color); }
+  .chip .chip-x:hover { color: var(--bad); }
+  .inviter-list { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.6rem; }
+  .inviter-list .chip { font-size: 0.85em; padding: 0.25rem 0.7rem; }
   .warn { color: var(--warn); background: var(--warn-bg); padding: 0.1rem 0.55rem; border-radius: 999px; font-size: 0.8em; font-weight: 600; }
 
   /* ── Party cards ── */

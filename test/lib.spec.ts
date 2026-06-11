@@ -29,9 +29,16 @@ describe('settings', () => {
   })
 
   it('round-trips through KV', async () => {
-    const s = { maxParties: 5, defaultCap: 4, allowedGames: ['Other'] }
+    const s = { maxParties: 5, defaultCap: 4, allowedGames: ['Other'], clientInviters: ['123456789012345678'] }
     await saveGuildSettings(env.PARTY_KV, 'g1', s)
     expect(await getGuildSettings(env.PARTY_KV, 'g1')).toEqual(s)
+  })
+
+  it('sanitizes client inviters to unique valid Discord IDs', () => {
+    const s = sanitizeSettings({ clientInviters: ['123456789012345678', '123456789012345678', 'not-an-id', 42, '12'] })
+    expect(s.clientInviters).toEqual(['123456789012345678'])
+    expect(sanitizeSettings({}).clientInviters).toEqual([])
+    expect(sanitizeSettings({ clientInviters: 'nope' }).clientInviters).toEqual([])
   })
 })
 

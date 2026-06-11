@@ -6,7 +6,7 @@ import {
 import { handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
 import { CREATE_MODAL_PREFIX, EDIT_MODAL_PREFIX } from './lib/modal'
 import { handleAdmin } from './admin'
-import { handleLcu } from './lcu'
+import { handleClientApi } from './client-api'
 
 export { PartyState } from './durable/PartyState'
 
@@ -27,8 +27,8 @@ export default {
     if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
       return handleAdmin(req, env)
     }
-    if (url.pathname.startsWith('/lcu/')) {
-      return handleLcu(req, env, url)
+    if (url.pathname.startsWith('/client/')) {
+      return handleClientApi(req, env, url)
     }
 
     if (req.method !== 'POST') return inner.fetch(req, env as any, ctx)
