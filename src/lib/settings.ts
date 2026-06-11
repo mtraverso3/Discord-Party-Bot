@@ -4,8 +4,12 @@ import { GAMES } from './games'
 export const SETTINGS_DEFAULTS: GuildSettings = {
   maxParties: 10,
   defaultCap: 10,
-  allowedGames: [],  // empty = all games allowed
+  allowedGames: [],    // empty = all games allowed
+  clientInviters: [],  // party owners can always invite; these users can too
 }
+
+const DISCORD_ID_RE = /^\d{5,25}$/
+const MAX_CLIENT_INVITERS = 50
 
 const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
@@ -21,6 +25,11 @@ export function sanitizeSettings(raw: any): GuildSettings {
     defaultCap: clampInt(raw?.defaultCap, 2, 50, SETTINGS_DEFAULTS.defaultCap),
     allowedGames: Array.isArray(raw?.allowedGames)
       ? raw.allowedGames.filter((g: unknown): g is string => typeof g === 'string' && VALID_GAMES.has(g))
+      : [],
+    clientInviters: Array.isArray(raw?.clientInviters)
+      ? [...new Set<string>(raw.clientInviters.filter(
+          (id: unknown): id is string => typeof id === 'string' && DISCORD_ID_RE.test(id),
+        ))].slice(0, MAX_CLIENT_INVITERS)
       : [],
   }
 }

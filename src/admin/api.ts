@@ -124,6 +124,9 @@ async function patchSettings(env: AppBindings, guildId: string, body: any): Prom
     const n = Number(body.defaultCap)
     if (!Number.isInteger(n) || n < 2 || n > 50) return json({ error: 'defaultCap must be 2–50' }, 400)
   }
+  if (body.clientInviters != null && !Array.isArray(body.clientInviters)) {
+    return json({ error: 'clientInviters must be an array of user IDs' }, 400)
+  }
 
   const settings = sanitizeSettings({ ...current, ...body })
   await saveGuildSettings(env.PARTY_KV, guildId, settings)

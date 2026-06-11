@@ -10,7 +10,7 @@ import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
 import { gameAllowed, getGuildSettings } from '../lib/settings'
-import { generateLinkCode, writeLinkCode } from '../lcu'
+import { generateLinkCode, writeLinkCode } from '../client-api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -562,14 +562,13 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
 // ── /party link ───────────────────────────────────────────────────────────────
 
 async function link(c: CommandContext<AppEnv>, guildId: string, userId: string) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
-  if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
+  const { displayName } = extractMemberInfo(c.interaction)
 
   const code = generateLinkCode()
-  await writeLinkCode(c.env.PARTY_KV, code, { partyId, guildId, discordUserId: userId })
+  await writeLinkCode(c.env.PARTY_KV, code, { guildId, discordUserId: userId, displayName })
 
   return c.followup({
-    content: `Your link code: \`${code}\` — enter this in the PartyBot desktop app. Expires in 10 minutes.`,
+    content: `Your link code: \`${code}\` — enter it in the PartyBot desktop app to link your account. The code expires in 10 minutes; the link itself stays active.`,
     flags: 64,
   })
 }

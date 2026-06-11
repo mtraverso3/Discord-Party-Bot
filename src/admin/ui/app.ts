@@ -956,6 +956,40 @@ async function viewSettings(view) {
       el('input', { type: 'checkbox', value: g, checked: s.allowedGames.includes(g) ? 'checked' : null }),
       g))
 
+  // Desktop client inviter allowlist: list of user IDs, displayed with names
+  // when we can resolve them, edited via the member search picker.
+  let inviters = (s.clientInviters || []).slice()
+  const inviterNames = {}
+  const inviterList = el('div', { class: 'inviter-list' })
+  const renderInviters = () => {
+    inviterList.replaceChildren(
+      inviters.length === 0 ? el('span', { class: 'muted' }, 'No extra inviters — only party owners can invite.') : null,
+      ...inviters.map(id =>
+        el('span', { class: 'chip' },
+          inviterNames[id] || id,
+          el('button', { type: 'button', class: 'chip-x', title: 'Remove', onclick: () => {
+            inviters = inviters.filter(x => x !== id)
+            renderInviters()
+          } }, '\\u00d7'),
+        )),
+    )
+  }
+  renderInviters()
+  inviters.forEach(async id => {
+    try {
+      const u = await api('/users/' + id)
+      if (u && u.member && u.member.displayName) { inviterNames[id] = u.member.displayName; renderInviters() }
+    } catch (e) { /* show raw ID */ }
+  })
+  const inviterPicker = userPicker('Add a member who may lobby-invite from the desktop client', u => {
+    if (!inviters.includes(u.id)) {
+      inviters.push(u.id)
+      inviterNames[u.id] = u.displayName
+      renderInviters()
+    }
+    inviterPicker.clear()
+  })
+
   const form = el('form', {},
     el('div', { class: 'grid-2' },
       el('label', {}, 'Max concurrent parties (1–50)', maxParties),
@@ -964,6 +998,10 @@ async function viewSettings(view) {
     el('h5', {}, 'Allowed games'),
     el('p', { class: 'muted' }, 'Leave all unchecked to allow every game.'),
     el('div', { class: 'grid-2' }, gameBoxes),
+    el('h5', {}, 'Desktop client inviters'),
+    el('p', { class: 'muted' }, 'Party owners can always send League lobby invites from the desktop client. Members listed here can too.'),
+    inviterList,
+    inviterPicker.node,
     el('div', { class: 'toolbar' }, el('button', { type: 'submit' }, 'Save settings')),
   )
   form.addEventListener('submit', async e => {
@@ -977,6 +1015,7 @@ async function viewSettings(view) {
         maxParties: Number(maxParties.value),
         defaultCap: Number(defaultCap.value),
         allowedGames,
+        clientInviters: inviters,
       }) })
       toast('Settings saved')
     } catch (err) { toast(err.message, 'err') }
