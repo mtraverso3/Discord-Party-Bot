@@ -1,0 +1,245 @@
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { join } from 'node:path'
+import { discoverLcu, lcuRequest, type LcuCreds } from './lcu'
+import { clearLink, fetchSession, linkState, linkWithCode } from './bot'
+import { crossReference, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
+import type {
+  InviteOutcome, InviteResult, LcuStatus, LobbyMode, LobbyView, Session, SessionResult, SummonerInfo,
+} from '../shared/types'
+
+// ── LCU connection state ─────────────────────────────────────────────────────
+
+let creds: LcuCreds | null = null
+let summoner: SummonerInfo | null = null
+
+// Riot ID lookups are stable for the lifetime of a client connection.
+const ignCache = new Map<string, { puuid: string; summonerId: number } | null>()
+const puuidNameCache = new Map<string, { gameName: string; tagLine: string }>()
+
+async function pollLcu(): Promise<void> {
+  if (!creds) {
+    const found = await discoverLcu()
+    if (!found) return
+    creds = found
+    ignCache.clear()
+    puuidNameCache.clear()
+  }
+  try {
+    const res = await lcuRequest(creds, 'GET', '/lol-summoner/v1/current-summoner')
+    if (res.status === 200 && res.body?.puuid) {
+      summoner = {
+        summonerId: res.body.summonerId,
+        puuid: res.body.puuid,
+        gameName: res.body.gameName || res.body.displayName || 'Summoner',
+        tagLine: res.body.tagLine || '',
+      }
+      return
+    }
+  } catch { /* client gone */ }
+  creds = null
+  summoner = null
+}
+
+setInterval(() => { void pollLcu() }, 3000)
+void pollLcu()
+
+// ── Session cache (main is authoritative; renderer only renders) ────────────
+
+let lastSession: Session | null = null
+
+// ── Riot ID resolution via the local client ─────────────────────────────────
+
+async function resolveIgn(ign: string): Promise<{ puuid: string; summonerId: number } | null> {
+  if (!creds) return null
+  const key = ign.toLowerCase().replace(/\s+/g, ' ').trim()
+  if (ignCache.has(key)) return ignCache.get(key)!
+
+  const parsed = parseRiotId(ign)
+  let result: { puuid: string; summonerId: number } | null = null
+  if (parsed) {
+    // Tagline-less IGNs default to the local player's tagline (same region).
+    const tag = parsed.tag ?? summoner?.tagLine ?? ''
+    try {
+      const alias = await lcuRequest(
+        creds, 'GET',
+        `/lol-summoner/v1/alias/lookup?gameName=${encodeURIComponent(parsed.name)}&tagLine=${encodeURIComponent(tag)}`,
+      )
+      const puuid: string | undefined = alias.body?.puuid
+      if (alias.status === 200 && puuid) {
+        const summ = await lcuRequest(creds, 'GET', `/lol-summoner/v2/summoners/puuid/${puuid}`)
+        if (summ.status === 200 && summ.body?.summonerId) {
+          result = { puuid, summonerId: summ.body.summonerId }
+        }
+      }
+    } catch { /* lookup failed; treat as unresolved */ }
+  }
+  ignCache.set(key, result)
+  return result
+}
+
+async function riotIdForPuuid(puuid: string): Promise<{ gameName: string; tagLine: string }> {
+  const cached = puuidNameCache.get(puuid)
+  if (cached) return cached
+  let out = { gameName: 'Unknown', tagLine: '' }
+  if (creds) {
+    try {
+      const res = await lcuRequest(creds, 'GET', `/lol-summoner/v2/summoners/puuid/${puuid}`)
+      if (res.status === 200 && res.body?.gameName) {
+        out = { gameName: res.body.gameName, tagLine: res.body.tagLine ?? '' }
+      }
+    } catch { /* leave as Unknown */ }
+  }
+  puuidNameCache.set(puuid, out)
+  return out
+}
+
+// ── Lobby creation + invites ─────────────────────────────────────────────────
+
+function lobbyPayload(mode: LobbyMode, partyName: string): unknown {
+  const custom = (mutatorId: number) => ({
+    customGameLobby: {
+      configuration: {
+        gameMode: 'CLASSIC', gameMutator: '', gameServerRegion: '', mapId: 11,
+        mutators: { id: mutatorId }, spectatorPolicy: 'AllAllowed', teamSize: 5,
+      },
+      lobbyName: partyName.slice(0, 32) || 'PartyBot Lobby',
+      lobbyPassword: '',
+    },
+    isCustom: true,
+  })
+  switch (mode) {
+    case 'custom-draft': return custom(6)   // tournament draft
+    case 'custom-blind': return custom(1)
+    case 'arena': return { queueId: 1700 }
+    case 'aram': return { queueId: 450 }
+    case 'normal-draft': return { queueId: 400 }
+  }
+}
+
+async function createLobbyAndInviteAll(mode: LobbyMode): Promise<InviteResult> {
+  if (!creds || !summoner) return { ok: false, error: 'League client is not connected.', outcomes: [] }
+  const party = lastSession?.party
+  if (!party) return { ok: false, error: 'You are not in a party.', outcomes: [] }
+  if (!lastSession?.canInvite) return { ok: false, error: 'You are not allowed to invite for this party.', outcomes: [] }
+
+  const create = await lcuRequest(creds, 'POST', '/lol-lobby/v2/lobby', lobbyPayload(mode, party.name))
+    .catch(() => ({ status: 0, body: null }))
+  if (create.status >= 400 || create.status === 0) {
+    return { ok: false, error: `Could not create the lobby (LCU ${create.status}).`, outcomes: [] }
+  }
+
+  const outcomes: InviteOutcome[] = []
+  const invites: { toSummonerId: number }[] = []
+
+  for (const m of party.members) {
+    if (m.userId === lastSession!.userId) {
+      outcomes.push({ displayName: m.displayName, ign: m.ign, status: 'self' })
+      continue
+    }
+    if (!m.ign) {
+      outcomes.push({ displayName: m.displayName, ign: null, status: 'no-ign' })
+      continue
+    }
+    const resolved = await resolveIgn(m.ign)
+    if (!resolved) {
+      outcomes.push({ displayName: m.displayName, ign: m.ign, status: 'not-found' })
+      continue
+    }
+    if (resolved.puuid === summoner.puuid) {
+      outcomes.push({ displayName: m.displayName, ign: m.ign, status: 'self' })
+      continue
+    }
+    invites.push({ toSummonerId: resolved.summonerId })
+    outcomes.push({ displayName: m.displayName, ign: m.ign, status: 'invited' })
+  }
+
+  if (invites.length > 0) {
+    const sent = await lcuRequest(creds, 'POST', '/lol-lobby/v2/lobby/invitations', invites)
+      .catch(() => ({ status: 0, body: null }))
+    if (sent.status >= 400 || sent.status === 0) {
+      for (const o of outcomes) if (o.status === 'invited') o.status = 'failed'
+      return { ok: false, error: `Lobby created, but invitations failed (LCU ${sent.status}).`, outcomes }
+    }
+  }
+
+  return { ok: true, outcomes }
+}
+
+// ── Lobby cross-reference ────────────────────────────────────────────────────
+
+async function lobbyStatus(): Promise<LobbyView> {
+  const none: LobbyView = { exists: false, rows: [], missing: [], intruders: 0 }
+  if (!creds) return none
+  const party = lastSession?.party
+  if (!party) return none
+
+  const res = await lcuRequest(creds, 'GET', '/lol-lobby/v2/lobby').catch(() => ({ status: 0, body: null }))
+  if (res.status !== 200 || !Array.isArray(res.body?.members)) return none
+
+  const lobby: LobbyEntry[] = await Promise.all(
+    res.body.members.map(async (m: any): Promise<LobbyEntry> => {
+      let gameName: string = m.gameName || ''
+      let tagLine: string = m.tagLine || ''
+      if (!gameName && m.puuid) {
+        const resolved = await riotIdForPuuid(m.puuid)
+        gameName = resolved.gameName
+        tagLine = resolved.tagLine
+      }
+      return { puuid: m.puuid ?? '', gameName: gameName || 'Unknown', tagLine, isLeader: !!m.isLeader }
+    }),
+  )
+
+  const roster: PartyEntry[] = await Promise.all(
+    party.members.map(async (m): Promise<PartyEntry> => ({
+      userId: m.userId,
+      displayName: m.displayName,
+      ign: m.ign,
+      puuid: m.ign ? (await resolveIgn(m.ign))?.puuid ?? null : null,
+    })),
+  )
+
+  return crossReference(roster, lobby, lastSession?.userId ?? null, summoner?.puuid ?? null)
+}
+
+// ── IPC ──────────────────────────────────────────────────────────────────────
+
+ipcMain.handle('lcu:status', (): LcuStatus => ({ connected: creds !== null, summoner }))
+ipcMain.handle('link:state', () => linkState())
+ipcMain.handle('link:auth', (_e, code: string) => linkWithCode(String(code ?? '')))
+ipcMain.handle('link:logout', () => { clearLink(); lastSession = null })
+ipcMain.handle('session:get', async (): Promise<SessionResult> => {
+  const result = await fetchSession()
+  lastSession = result.ok ? (result.session as Session) : null
+  return result as SessionResult
+})
+ipcMain.handle('lobby:create-invite', (_e, mode: LobbyMode) => createLobbyAndInviteAll(mode))
+ipcMain.handle('lobby:status', () => lobbyStatus())
+
+// ── Window ───────────────────────────────────────────────────────────────────
+
+function createWindow(): void {
+  const win = new BrowserWindow({
+    width: 460,
+    height: 700,
+    minWidth: 420,
+    minHeight: 560,
+    title: 'PartyBot',
+    backgroundColor: '#0f1115',
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  Menu.setApplicationMenu(null)
+  // Open any external links in the default browser, never in-app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  void win.loadFile(join(__dirname, 'index.html'))
+}
+
+app.whenReady().then(createWindow)
+app.on('window-all-closed', () => app.quit())

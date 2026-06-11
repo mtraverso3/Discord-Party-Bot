@@ -36,6 +36,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party bump`              | Repost embed to bottom of channel (owner only) |
 | `/party disband`           | Disband the party (owner only)                 |
 | `/party clear`             | Clear all parties in this server (admin only)  |
+| `/party link`              | Get a code to link the desktop client          |
 
 ## Stack
 
@@ -73,7 +74,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 - **Parties** — everything the owner commands can do (edit, close/open, members, queue, banlist, disband) plus search/sort, auto-refresh, queue reordering, embed bumping, and creating parties on a member's behalf
 - **Users** — inspect and edit any member's per-game IGN profile, and repair stale user→party mappings
 - **Audit log** — the last 200 admin actions with the acting admin's email
-- **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games
+- **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games, desktop client inviters
 
 1. In Cloudflare Zero Trust, create an Access Application covering `<your-domain>/admin*` with a policy allowing your email.
 2. Set the team subdomain and Application AUD on the Worker:
@@ -83,3 +84,9 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
    ```
 3. Without those vars set, `/admin` returns 503. The Worker also verifies the Access JWT in-process as defense in depth, so traffic that bypasses Access is rejected.
 4. Visit `https://<your-domain>/admin?guild=<guild-id>`.
+
+## Desktop client (optional)
+
+A portable Windows app (`client/`) for party leaders running League of Legends. It links to your Discord identity once via `/party link`, then lets the party owner (or admin-allowlisted members) create a League lobby and invite every party member by their IGN in one click — members don't install anything. It also cross-references the live League lobby against the party roster and flags anyone in the lobby who isn't in the party.
+
+Built as a single portable `.exe` (Electron) by the **Desktop client** GitHub Actions workflow — run it manually or push a `client-v*` tag to publish a release. See [client/README.md](client/README.md).

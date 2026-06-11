@@ -1,0 +1,13 @@
+appId: net.mtraverso.partybot
+productName: PartyBot
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+win:
+  target:
+    - target: portable
+      arch: [x64]
+portable:
+  artifactName: PartyBot-${version}.exe
