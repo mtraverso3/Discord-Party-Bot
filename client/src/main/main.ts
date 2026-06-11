@@ -122,10 +122,18 @@ async function createLobbyAndInviteAll(mode: LobbyMode): Promise<InviteResult> {
   if (!party) return { ok: false, error: 'You are not in a party.', outcomes: [] }
   if (!lastSession?.canInvite) return { ok: false, error: 'You are not allowed to invite for this party.', outcomes: [] }
 
-  const create = await lcuRequest(creds, 'POST', '/lol-lobby/v2/lobby', lobbyPayload(mode, party.name))
+  // Invite into the lobby the leader is already in, if any; only create a
+  // fresh one when there is none (creating would replace the current lobby).
+  let createdNew = false
+  const existing = await lcuRequest(creds, 'GET', '/lol-lobby/v2/lobby')
     .catch(() => ({ status: 0, body: null }))
-  if (create.status >= 400 || create.status === 0) {
-    return { ok: false, error: `Could not create the lobby (LCU ${create.status}).`, outcomes: [] }
+  if (existing.status !== 200) {
+    const create = await lcuRequest(creds, 'POST', '/lol-lobby/v2/lobby', lobbyPayload(mode, party.name))
+      .catch(() => ({ status: 0, body: null }))
+    if (create.status >= 400 || create.status === 0) {
+      return { ok: false, error: `Could not create the lobby (LCU ${create.status}).`, outcomes: [] }
+    }
+    createdNew = true
   }
 
   const outcomes: InviteOutcome[] = []
@@ -158,11 +166,11 @@ async function createLobbyAndInviteAll(mode: LobbyMode): Promise<InviteResult> {
       .catch(() => ({ status: 0, body: null }))
     if (sent.status >= 400 || sent.status === 0) {
       for (const o of outcomes) if (o.status === 'invited') o.status = 'failed'
-      return { ok: false, error: `Lobby created, but invitations failed (LCU ${sent.status}).`, outcomes }
+      return { ok: false, error: `Lobby ${createdNew ? 'created' : 'found'}, but invitations failed (LCU ${sent.status}).`, outcomes }
     }
   }
 
-  return { ok: true, outcomes }
+  return { ok: true, createdNew, outcomes }
 }
 
 // ── Lobby cross-reference ────────────────────────────────────────────────────
