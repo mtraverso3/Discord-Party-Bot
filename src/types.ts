@@ -148,6 +148,24 @@ export interface UserProfile {
   igns: Record<string, string>
 }
 
+/**
+ * A reusable party blueprint. Admins build these once and spin up parties from
+ * them, so a recurring party's title/description/cap/game/banlist don't have to
+ * be re-entered every time.
+ */
+export interface PartyTemplate {
+  id: string                // short random ID, unique within the guild
+  label: string             // how the template shows up in the list
+  name: string              // party title produced when applied (may be blank)
+  description: string
+  game: string
+  maxSize: number
+  voiceChannelId?: string
+  banlist?: string          // newline-separated champion list, as pasted
+  createdAt: number
+  updatedAt: number
+}
+
 export interface GuildSettings {
   maxParties: number        // max concurrent parties per guild
   defaultCap: number        // pre-filled player cap when creating a party

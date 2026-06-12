@@ -7,6 +7,7 @@ import {
 import { GAMES } from '../lib/games'
 import { gameAllowed } from '../lib/settings'
 import { getGuildSettings, sanitizeSettings, saveGuildSettings } from '../lib/settings'
+import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../lib/templates'
 import { appendAudit, getAudit } from '../lib/audit'
 import { getBotGuilds, getGuildChannels, getGuildMember, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 
@@ -51,6 +52,17 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path === '/clear' && method === 'POST') return await clearAllParties(env, guildId!)
     if (path === '/settings' && method === 'GET') return json(await getGuildSettings(env.PARTY_KV, guildId!))
     if (path === '/settings' && method === 'PATCH') return await patchSettings(env, guildId!, body)
+    if (path === '/templates' && method === 'GET') return json(await getTemplates(env.PARTY_KV, guildId!))
+    if (path === '/templates' && method === 'POST') return await createTemplateRoute(env, guildId!, body)
+
+    const tm = path.match(/^\/templates\/([^/]+)(\/.*)?$/)
+    if (tm) {
+      const templateId = tm[1]!
+      const sub = tm[2] ?? ''
+      if (sub === '' && method === 'PATCH')  return await updateTemplateRoute(env, guildId!, templateId, body)
+      if (sub === '' && method === 'DELETE') return await deleteTemplateRoute(env, guildId!, templateId)
+      if (sub === '/apply' && method === 'POST') return await applyTemplate(env, guildId!, templateId, body)
+    }
 
     const m = path.match(/^\/parties\/([^/]+)(\/.*)?$/)
     if (m) {
@@ -206,7 +218,12 @@ async function patchOne(env: AppBindings, guildId: string, partyId: string, body
   return json(result.data)
 }
 
-async function createOne(env: AppBindings, guildId: string, body: any): Promise<Response> {
+/**
+ * Shared core behind both "create a party" and "apply a template": validate the
+ * owner/channel/game/cap, spin up the party + embed, and optionally seed a
+ * banlist. `body` carries the resolved party fields.
+ */
+async function spawnParty(env: AppBindings, guildId: string, body: any): Promise<Response> {
   const ownerId = (body.ownerId ?? '').toString().trim()
   const channelId = (body.channelId ?? '').toString().trim()
   if (!ownerId) return json({ error: 'ownerId required' }, 400)
@@ -244,7 +261,60 @@ async function createOne(env: AppBindings, guildId: string, body: any): Promise<
     voiceChannelId: (body.voiceChannelId ?? '').toString() || undefined,
   })
   if (!result.ok) return json({ error: result.error }, 400)
+
+  // Seed the banlist after creation — createPartyAndEmbed doesn't take one, and
+  // the DO assigns bans to the (currently just the owner) members itself.
+  const banlist = (body.banlist ?? '').toString().trim()
+  if (banlist) {
+    const stub = getPartyStub(env, guildId, result.party.id)
+    const banned = await callParty<{ status: string; data: PartyData }>(stub, 'setbanlist', {
+      requesterId: result.party.ownerId, banlist,
+    }).catch(() => null)
+    if (banned?.status === 'updated') {
+      await trySyncEmbed(env.DISCORD_BOT_TOKEN, banned.data)
+      return json(banned.data)
+    }
+  }
   return json(result.party)
+}
+
+async function createOne(env: AppBindings, guildId: string, body: any): Promise<Response> {
+  return spawnParty(env, guildId, body)
+}
+
+async function createTemplateRoute(env: AppBindings, guildId: string, body: any): Promise<Response> {
+  const result = await createTemplate(env.PARTY_KV, guildId, body)
+  if (!result.ok) return json({ error: result.error }, 400)
+  return json(result.template)
+}
+
+async function updateTemplateRoute(env: AppBindings, guildId: string, id: string, body: any): Promise<Response> {
+  const result = await updateTemplate(env.PARTY_KV, guildId, id, body)
+  if (!result.ok) return json({ error: result.error }, result.error === 'Template not found' ? 404 : 400)
+  return json(result.template)
+}
+
+async function deleteTemplateRoute(env: AppBindings, guildId: string, id: string): Promise<Response> {
+  const ok = await deleteTemplate(env.PARTY_KV, guildId, id)
+  return ok ? json({ status: 'deleted' }) : json({ error: 'Template not found' }, 404)
+}
+
+/** Create a live party from a saved template, overriding owner/channel/voice. */
+async function applyTemplate(env: AppBindings, guildId: string, templateId: string, body: any): Promise<Response> {
+  const template = await getTemplate(env.PARTY_KV, guildId, templateId)
+  if (!template) return json({ error: 'Template not found' }, 404)
+
+  return spawnParty(env, guildId, {
+    ownerId: body.ownerId,
+    channelId: body.channelId,
+    name: template.name,
+    description: template.description,
+    game: template.game,
+    maxSize: template.maxSize,
+    // Let the apply form override the template's voice channel when given.
+    voiceChannelId: (body.voiceChannelId ?? '').toString() || template.voiceChannelId,
+    banlist: template.banlist,
+  })
 }
 
 async function bumpOne(env: AppBindings, guildId: string, partyId: string, body: any): Promise<Response> {

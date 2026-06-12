@@ -72,6 +72,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 - **Guild picker** — lists the servers the bot is in; remembers your last one
 - **Dashboard** — party/member/queue stats, per-game breakdown, upcoming auto-disbands
 - **Parties** — everything the owner commands can do (edit, close/open, members, queue, banlist, disband) plus search/sort, auto-refresh, queue reordering, embed bumping, and creating parties on a member's behalf
+- **Templates** — save reusable party blueprints (title, description, game, player cap, voice channel, banlist) and spin up a party for any member in one form, without re-entering everything each time
 - **Users** — inspect and edit any member's per-game IGN profile, and repair stale user→party mappings
 - **Audit log** — the last 200 admin actions with the acting admin's email
 - **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games, desktop client inviters
