@@ -1,13 +1,22 @@
 name: Desktop client
 
-# Builds the portable Windows .exe. Trigger it manually from the Actions tab,
-# or push a tag like client-v1.0.0 to also publish a GitHub release with the
-# executable attached.
+# Builds the portable Windows .exe.
+#
+#   • Run it manually from the Actions tab → publishes a GitHub release
+#     tagged client-v<version>-build.<run-number> and marks it "Latest",
+#     so https://github.com/<owner>/<repo>/releases/latest always points
+#     at the newest manual build. A stable-named PartyBot-windows-latest.exe
+#     is attached for a permanent download URL.
+#   • Push a semver tag like client-v1.0.0 → publishes that as a normal
+#     release with the versioned executable attached.
 
 on:
   workflow_dispatch:
   push:
     tags: ['client-v*']
+
+permissions:
+  contents: write          # required to create releases / upload assets
 
 jobs:
   build:
@@ -33,13 +42,52 @@ jobs:
       - name: Build portable executable
         run: npm run dist
 
+      # Build metadata used to tag the manual release. Run number keeps the
+      # tag unique even when the package version hasn't been bumped.
+      - name: Compute release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          "version=$version"                                    >> $env:GITHUB_OUTPUT
+          "tag=client-v$version-build.${{ github.run_number }}" >> $env:GITHUB_OUTPUT
+
+      # On manual builds, attach a constant-named copy so a fixed
+      # .../releases/latest/download/PartyBot-windows-latest.exe URL works.
+      - name: Add stable-named copy (manual builds)
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem release/PartyBot-*.exe | Select-Object -First 1
+          if ($exe) { Copy-Item $exe.FullName release/PartyBot-windows-latest.exe }
+
       - uses: actions/upload-artifact@v4
         with:
           name: PartyBot-windows
           path: client/release/PartyBot-*.exe
 
-      - name: Publish release
+      # Manual run: publish a numbered build release and mark it Latest.
+      - name: Publish manual build release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: PartyBot ${{ steps.meta.outputs.version }} (build ${{ github.run_number }})
+          make_latest: true
+          body: |
+            Automated desktop client build from the Actions tab.
+
+            * Version: ${{ steps.meta.outputs.version }}
+            * Commit: ${{ github.sha }}
+
+            Grab `PartyBot-windows-latest.exe` for a link that always points
+            at the newest build, or the versioned `.exe` to pin this one.
+          files: client/release/PartyBot-*.exe
+
+      # Semver tag push (client-v1.0.0): publish that as the release.
+      - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/client-v')
         uses: softprops/action-gh-release@v2
         with:
+          make_latest: true
           files: client/release/PartyBot-*.exe
