@@ -7,6 +7,10 @@ import {
   randomId, removeFromIndex, saveUserIgn, setUserPartyId, uniquePartyId, updateIndexEntry,
 } from '../src/lib/party'
 import { parseCreateModalSubmit } from '../src/lib/modal'
+import {
+  createTemplate, deleteTemplate, getTemplate, getTemplates,
+  sanitizeTemplateInput, updateTemplate,
+} from '../src/lib/templates'
 
 describe('settings', () => {
   it('clamps numbers and filters unknown games', () => {
@@ -39,6 +43,53 @@ describe('settings', () => {
     expect(s.clientInviters).toEqual(['123456789012345678'])
     expect(sanitizeSettings({}).clientInviters).toEqual([])
     expect(sanitizeSettings({ clientInviters: 'nope' }).clientInviters).toEqual([])
+  })
+})
+
+describe('party templates', () => {
+  it('clamps cap, filters unknown games, and trims fields', () => {
+    const t = sanitizeTemplateInput({
+      label: '  Friday ARAM  ', name: 'x'.repeat(200), game: 'NotAGame',
+      maxSize: 999, description: 'd', voiceChannelId: '', banlist: '  Ahri\nZed  ',
+    })
+    expect(t.label).toBe('Friday ARAM')
+    expect(t.name.length).toBe(100)
+    expect(t.game).toBe('Other')
+    expect(t.maxSize).toBe(10)
+    expect(t.voiceChannelId).toBeUndefined()
+    expect(t.banlist).toBe('Ahri\nZed')
+  })
+
+  it('rejects a template without a label', async () => {
+    const res = await createTemplate(env.PARTY_KV, 'gt', { label: '   ', game: 'Valorant' })
+    expect(res.ok).toBe(false)
+  })
+
+  it('creates, lists, fetches, updates, and deletes', async () => {
+    const created = await createTemplate(env.PARTY_KV, 'gt2', {
+      label: 'Inhouse', name: 'Inhouse 5s', game: 'Valorant', maxSize: 10,
+    })
+    expect(created.ok).toBe(true)
+    const id = (created as any).template.id
+
+    expect(await getTemplates(env.PARTY_KV, 'gt2')).toHaveLength(1)
+    expect((await getTemplate(env.PARTY_KV, 'gt2', id))!.label).toBe('Inhouse')
+
+    const updated = await updateTemplate(env.PARTY_KV, 'gt2', id, { label: 'Inhouse v2', game: 'Overwatch', maxSize: 6 })
+    expect(updated.ok).toBe(true)
+    const after = (await getTemplate(env.PARTY_KV, 'gt2', id))!
+    expect(after.label).toBe('Inhouse v2')
+    expect(after.game).toBe('Overwatch')
+    expect(after.maxSize).toBe(6)
+
+    expect(await deleteTemplate(env.PARTY_KV, 'gt2', id)).toBe(true)
+    expect(await deleteTemplate(env.PARTY_KV, 'gt2', id)).toBe(false)
+    expect(await getTemplates(env.PARTY_KV, 'gt2')).toHaveLength(0)
+  })
+
+  it('updating a missing template fails', async () => {
+    const res = await updateTemplate(env.PARTY_KV, 'gt3', 'nope', { label: 'x' })
+    expect(res.ok).toBe(false)
   })
 })
 

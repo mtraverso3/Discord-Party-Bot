@@ -197,6 +197,7 @@ let settings = null
 let voiceChannels = null
 let textChannels = null
 let lastParties = []
+let lastTemplates = []
 let autoTimer = null
 let searchQuery = ''
 let sortMode = localStorage.getItem('pb-sort') || 'newest'
@@ -218,6 +219,7 @@ async function getTextChannels() {
 const TABS = [
   ['dashboard', 'Dashboard'],
   ['parties', 'Parties'],
+  ['templates', 'Templates'],
   ['users', 'Users'],
   ['audit', 'Audit log'],
   ['settings', 'Settings'],
@@ -248,6 +250,7 @@ async function renderTab() {
   try {
     if (tab === 'dashboard')     await viewDashboard(view)
     else if (tab === 'parties')  await viewParties(view)
+    else if (tab === 'templates') await viewTemplates(view)
     else if (tab === 'users')    await viewUsers(view)
     else if (tab === 'audit')    await viewAudit(view)
     else if (tab === 'settings') await viewSettings(view)
@@ -805,6 +808,158 @@ function renderParty(p, isOpen = false) {
   return el('details', { class: 'party', 'data-party-id': p.id, open: isOpen ? 'open' : null }, summary, body)
 }
 
+// ── Templates tab ────────────────────────────────────────────────────────────
+async function viewTemplates(view) {
+  const [templates] = await Promise.all([api('/templates'), getSettings(), getVoiceChannels(), getTextChannels()])
+  lastTemplates = templates
+
+  const createBox = el('div', { id: 'tpl-create-box' })
+  const toolbar = el('div', { class: 'toolbar' },
+    el('span', { class: 'muted grow' }, 'Reusable party blueprints — build one, then spin up a party for any member without re-entering everything.'),
+    el('button', { class: 'tiny', onclick: () => toggleTemplateForm(createBox, null) }, 'New template'),
+  )
+  view.replaceChildren(toolbar, createBox, el('div', { id: 'tpllist' }))
+  renderTemplateList()
+}
+
+function renderTemplateList() {
+  const list = $('#tpllist')
+  if (!list) return
+  if (lastTemplates.length === 0) {
+    list.replaceChildren(el('div', { class: 'empty' }, 'No templates yet. Create one to get started.'))
+    return
+  }
+  list.replaceChildren(...lastTemplates.map(renderTemplate))
+}
+
+function renderTemplate(t) {
+  const editBox = el('div')
+  const applyBox = el('div')
+  const summary = el('summary', {}, el('div', { class: 'summary-row' },
+    el('span', { class: 'name' }, t.label),
+    el('span', { class: 'chip' }, t.game),
+    el('span', { class: 'chip' }, 'cap ' + t.maxSize),
+    t.banlist ? el('span', { class: 'chip chip-warn' }, 'banlist') : null,
+    el('span', { class: 'grow' }),
+    el('span', { class: 'uid' }, t.id),
+  ))
+  const body = el('div', { class: 'body' },
+    t.name
+      ? el('p', {}, el('strong', {}, 'Party title: '), t.name)
+      : el('p', { class: 'muted' }, 'No fixed title — defaults to the owner\\'s name.'),
+    t.description ? el('p', { class: 'muted' }, t.description) : null,
+    el('div', { class: 'toolbar' },
+      el('button', { type: 'button', class: 'tiny', onclick: () => toggleApplyForm(applyBox, t) }, 'Use template…'),
+      el('button', { type: 'button', class: 'tiny ghost', onclick: () => toggleTemplateForm(editBox, t) }, 'Edit'),
+      el('span', { class: 'grow' }),
+      el('button', { type: 'button', class: 'tiny ghost-danger', onclick: async () => {
+        if (!(await confirmDialog('Delete template "' + t.label + '"?', 'Delete'))) return
+        try {
+          await api('/templates/' + t.id, { method: 'DELETE' })
+          lastTemplates = lastTemplates.filter(x => x.id !== t.id)
+          renderTemplateList()
+          toast('Template deleted')
+        } catch (e) { toast(e.message, 'err') }
+      } }, 'Delete'),
+    ),
+    applyBox,
+    editBox,
+  )
+  return el('details', { class: 'party', 'data-template-id': t.id }, summary, body)
+}
+
+function toggleTemplateForm(box, t) {
+  if (box.childElementCount > 0) { box.replaceChildren(); return }
+  const s = settings || { defaultCap: 10, allowedGames: [] }
+  const allowed = GAMES.filter(g => s.allowedGames.length === 0 || s.allowedGames.includes(g))
+  const cur = t || {}
+  const vcs = voiceChannels || []
+  const f = {
+    label: el('input', { name: 'label', value: cur.label || '', placeholder: 'e.g. Friday ARAM', maxlength: 100, required: true }),
+    name: el('input', { name: 'name', value: cur.name || '', placeholder: 'Party title (optional)', maxlength: 100 }),
+    game: el('select', { name: 'game' }, ...allowed.map(g =>
+      el('option', { value: g, selected: g === (cur.game || 'Other') ? 'selected' : null }, g))),
+    cap: el('input', { type: 'number', name: 'cap', value: cur.maxSize || s.defaultCap, min: 2, max: 50 }),
+    voice: el('select', { name: 'voice' },
+      el('option', { value: '', selected: !cur.voiceChannelId ? 'selected' : null }, '— none —'),
+      ...vcs.map(c => el('option', { value: c.id, selected: c.id === cur.voiceChannelId ? 'selected' : null }, '#' + c.name)),
+      ...(cur.voiceChannelId && !vcs.find(c => c.id === cur.voiceChannelId)
+        ? [el('option', { value: cur.voiceChannelId, selected: 'selected' }, '(unknown: ' + cur.voiceChannelId + ')')] : [])),
+    desc: el('textarea', { name: 'description', placeholder: 'Description (optional)' }, cur.description || ''),
+    bans: el('textarea', { name: 'banlist', class: 'bans', placeholder: 'One champion per line (optional)' }, cur.banlist || ''),
+  }
+  const form = el('form', { class: 'grid-2' },
+    el('label', {}, 'Template label', f.label),
+    el('label', {}, 'Party title', f.name),
+    el('label', {}, 'Game', f.game),
+    el('label', {}, 'Player cap', f.cap),
+    el('label', { class: 'span-2' }, 'Voice channel', f.voice),
+    el('label', { class: 'span-2' }, 'Description', f.desc),
+    el('label', { class: 'span-2' }, 'Banlist', f.bans),
+    el('div', { class: 'span-2 toolbar' },
+      el('button', { type: 'submit' }, t ? 'Save template' : 'Create template'),
+      el('button', { type: 'button', class: 'secondary', onclick: () => box.replaceChildren() }, 'Cancel'),
+    ),
+  )
+  form.addEventListener('submit', async e => {
+    e.preventDefault()
+    if (!f.label.value.trim()) return toast('A template label is required.', 'err')
+    const payload = {
+      label: f.label.value, name: f.name.value, game: f.game.value,
+      maxSize: Number(f.cap.value), voiceChannelId: f.voice.value || undefined,
+      description: f.desc.value, banlist: f.bans.value,
+    }
+    try {
+      if (t) {
+        const updated = await api('/templates/' + t.id, { method: 'PATCH', body: JSON.stringify(payload) })
+        const i = lastTemplates.findIndex(x => x.id === t.id)
+        if (i !== -1) lastTemplates[i] = updated
+        toast('Template saved')
+      } else {
+        lastTemplates.push(await api('/templates', { method: 'POST', body: JSON.stringify(payload) }))
+        toast('Template created')
+      }
+      box.replaceChildren()
+      renderTemplateList()
+    } catch (err) { toast(err.message, 'err') }
+  })
+  box.replaceChildren(el('article', {}, el('h5', {}, t ? 'Edit template' : 'New template'), form))
+}
+
+function toggleApplyForm(box, t) {
+  if (box.childElementCount > 0) { box.replaceChildren(); return }
+  const vcs = voiceChannels || []
+  const ownerPicker = userPicker('Search member by name, or paste an ID')
+  const channel = el('select', { name: 'channel' }, ...(textChannels || []).map(c => el('option', { value: c.id }, '#' + c.name)))
+  const voice = el('select', { name: 'voice' },
+    el('option', { value: '', selected: !t.voiceChannelId ? 'selected' : null }, '— none —'),
+    ...vcs.map(c => el('option', { value: c.id, selected: c.id === t.voiceChannelId ? 'selected' : null }, '#' + c.name)),
+    ...(t.voiceChannelId && !vcs.find(c => c.id === t.voiceChannelId)
+      ? [el('option', { value: t.voiceChannelId, selected: 'selected' }, '(unknown: ' + t.voiceChannelId + ')')] : []))
+  const form = el('form', { class: 'grid-2' },
+    el('label', { class: 'span-2' }, 'Assign to', ownerPicker.node),
+    el('label', {}, 'Post embed in', channel),
+    el('label', {}, 'Voice channel', voice),
+    el('div', { class: 'span-2 toolbar' },
+      el('button', { type: 'submit' }, 'Create party'),
+      el('button', { type: 'button', class: 'secondary', onclick: () => box.replaceChildren() }, 'Cancel'),
+    ),
+  )
+  form.addEventListener('submit', async e => {
+    e.preventDefault()
+    const ownerId = ownerPicker.getId()
+    if (!ownerId) return toast('Pick an owner from the list or paste a user ID.', 'err')
+    try {
+      await api('/templates/' + t.id + '/apply', { method: 'POST', body: JSON.stringify({
+        ownerId, channelId: channel.value, voiceChannelId: voice.value || undefined,
+      }) })
+      toast('Party created from template')
+      box.replaceChildren()
+    } catch (err) { toast(err.message, 'err') }
+  })
+  box.replaceChildren(el('article', {}, el('h5', {}, 'Use "' + t.label + '"'), form))
+}
+
 // ── Users tab ────────────────────────────────────────────────────────────────
 async function viewUsers(view) {
   if (lastParties.length === 0) {
@@ -898,6 +1053,11 @@ function friendlyAction(entry) {
 
   if (p0 === 'clear') return 'Cleared all parties'
   if (p0 === 'settings') return 'Updated guild settings'
+  if (p0 === 'templates' && !p1) return 'Created a party template'
+  if (p0 === 'templates' && p1) {
+    if (p2 === 'apply') return 'Created a party from template ' + p1
+    if (!p2) return (m === 'DELETE' ? 'Deleted' : 'Edited') + ' party template ' + p1
+  }
   if (p0 === 'parties' && !p1) return 'Created a party'
   if (p0 === 'parties' && p1) {
     if (!p2) return (m === 'DELETE' ? 'Disbanded' : 'Edited') + ' party ' + p1
