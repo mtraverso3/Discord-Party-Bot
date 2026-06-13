@@ -52,13 +52,20 @@ describe('create', () => {
   })
 
   it('rejects malformed create payloads', async () => {
-    const stub = env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`bad-${Date.now()}-${seq++}`))
-    const noOwner = await call(stub, 'create', { id: 'X', guildId: 'g1', ownerName: 'O', maxSize: 3 })
-    expect(noOwner.error).toBeTruthy()
-    const badCap = await call(stub, 'create', {
-      id: 'X', guildId: 'g1', ownerId: 'o', ownerName: 'O', maxSize: 99,
+    const bad = (body: any) =>
+      call(env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`bad-${Date.now()}-${seq++}`)), 'create', body)
+    expect((await bad({ id: 'X', guildId: 'g1', ownerName: 'O', maxSize: 3 })).error).toBeTruthy()       // no owner
+    expect((await bad({ id: 'X', guildId: 'g1', ownerId: 'o', ownerName: 'O', maxSize: 99 })).error).toBeTruthy()  // cap too high
+    expect((await bad({ id: 'X', guildId: 'g1', ownerId: 'o', ownerName: 'O', maxSize: 0 })).error).toBeTruthy()   // cap too low
+    expect((await bad({ id: 'X', guildId: 'g1', ownerId: 'o', ownerName: 'O', maxSize: 2.5 })).error).toBeTruthy() // fractional
+  })
+
+  it('falls back to the owner name when no name is given', async () => {
+    const stub = env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`noname-${Date.now()}-${seq++}`))
+    const party = await call<PartyData>(stub, 'create', {
+      id: 'X', guildId: 'g1', ownerId: 'o', ownerName: 'Zara', maxSize: 3,
     })
-    expect(badCap.error).toBeTruthy()
+    expect(party.name).toBe("Zara's party")
   })
 })
 
@@ -76,6 +83,13 @@ describe('owner mutex (claim/release)', () => {
     expect((await call(stub, 'claim', { ttl: 1 })).ok).toBe(true)
     await new Promise(r => setTimeout(r, 5))
     expect((await call(stub, 'claim', { ttl: 5000 })).ok).toBe(true)
+  })
+
+  it('defaults the lease when no ttl is given and tolerates release of an unheld lock', async () => {
+    const stub = env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`lock-${Date.now()}-${seq++}`))
+    expect((await call(stub, 'release')).ok).toBe(true)   // no-op, must not throw
+    expect((await call(stub, 'claim', {})).ok).toBe(true) // default ttl
+    expect((await call(stub, 'claim', {})).ok).toBe(false)
   })
 })
 
