@@ -9,7 +9,7 @@ import { gameAllowed } from '../lib/settings'
 import { getGuildSettings, sanitizeSettings, saveGuildSettings } from '../lib/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../lib/templates'
 import { appendAudit, getAudit } from '../lib/audit'
-import { getBotGuilds, getGuildChannels, getGuildMember, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
+import { getBotGuilds, getGuildChannels, getGuildMember, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -48,6 +48,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path === '/parties' && method === 'GET') return await listParties(env, guildId!)
     if (path === '/parties' && method === 'POST') return await createOne(env, guildId!, body)
     if (path === '/channels' && method === 'GET') return await listChannels(env, guildId!, url.searchParams.get('kind'))
+    if (path === '/members/resolve' && method === 'GET') return await resolveMembers(env, guildId!, url.searchParams.get('ids'))
     if (path === '/members' && method === 'GET') return await searchMembers(env, guildId!, url.searchParams.get('q'))
     if (path === '/clear' && method === 'POST') return await clearAllParties(env, guildId!)
     if (path === '/settings' && method === 'GET') return json(await getGuildSettings(env.PARTY_KV, guildId!))
@@ -177,6 +178,30 @@ async function searchMembers(env: AppBindings, guildId: string, q: string | null
     username: m.user.username,
     displayName: m.nick ?? m.user.global_name ?? m.user.username,
   })))
+}
+
+/**
+ * Resolve a batch of user IDs to display names for the settings allowlists.
+ * Prefers the guild nickname/name; falls back to the global username so members
+ * who have left the guild still show a name rather than a bare ID. Runs in small
+ * concurrent batches to stay clear of Discord's rate limits.
+ */
+async function resolveMembers(env: AppBindings, guildId: string, idsParam: string | null): Promise<Response> {
+  const ids = [...new Set((idsParam ?? '').split(',').map(s => s.trim()).filter(Boolean))].slice(0, 100)
+  const names: Record<string, string> = {}
+  const BATCH = 5
+  for (let i = 0; i < ids.length; i += BATCH) {
+    await Promise.all(ids.slice(i, i + BATCH).map(async id => {
+      const member = await getGuildMember(env.DISCORD_BOT_TOKEN, guildId, id).catch(() => null)
+      if (member?.user) {
+        names[id] = member.nick ?? member.user.global_name ?? member.user.username
+        return
+      }
+      const user = await getUserById(env.DISCORD_BOT_TOKEN, id).catch(() => null)
+      if (user) names[id] = user.global_name ?? user.username
+    }))
+  }
+  return json(names)
 }
 
 async function getOne(env: AppBindings, guildId: string, partyId: string): Promise<Response> {

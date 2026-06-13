@@ -69,6 +69,17 @@ export async function getGuildMember(
   return res.json<any>()
 }
 
+// Global user lookup — works even for someone who has left the guild, so we can
+// still show a username instead of a bare ID. Returns null if the ID is unknown.
+export async function getUserById(
+  token: string,
+  userId: string,
+): Promise<{ id: string; username: string; global_name?: string } | null> {
+  const res = await discordFetch(token, `/users/${userId}`)
+  if (!res.ok) return null
+  return res.json<any>()
+}
+
 export async function searchGuildMembers(
   token: string,
   guildId: string,
