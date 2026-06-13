@@ -86,6 +86,20 @@ export function getPartyStub(env: AppBindings, guildId: string, partyId: string)
   return env.PARTY_STATE.get(doId)
 }
 
+// Lease length for the per-owner create lock. Comfortably longer than a normal
+// create (which posts a Discord embed), short enough to self-heal after a crash.
+const OWNER_LOCK_TTL_MS = 15_000
+
+/**
+ * A PartyState DO addressed by an owner-scoped name, used purely as a mutex
+ * around party creation. The `ownerlock-` prefix can't collide with a real
+ * party stub (those use `party-`), and it's never added to the guild index.
+ */
+function ownerLockStub(env: AppBindings, guildId: string, ownerId: string): DurableObjectStub {
+  const doId = env.PARTY_STATE.idFromName(`ownerlock-${guildId}-${ownerId}`)
+  return env.PARTY_STATE.get(doId)
+}
+
 export async function callParty<T>(
   stub: DurableObjectStub,
   action: string,
@@ -156,40 +170,60 @@ export async function createPartyAndEmbed(
   env: AppBindings,
   opts: CreatePartyOpts,
 ): Promise<{ ok: true; party: PartyData } | { ok: false; error: string }> {
-  const index = await getPartyIndex(env.PARTY_KV, opts.guildId)
-  const partyId = uniquePartyId(index)
-  const stub = getPartyStub(env, opts.guildId, partyId)
-
-  const party = await callParty<PartyData>(stub, 'create', {
-    id: partyId,
-    guildId: opts.guildId,
-    name: opts.name,
-    description: opts.description,
-    game: opts.game,
-    ownerId: opts.owner.id,
-    ownerUsername: opts.owner.username,
-    ownerName: opts.owner.displayName,
-    ownerIgn: opts.owner.ign,
-    maxSize: opts.maxSize,
-    voiceChannelId: opts.voiceChannelId,
-  })
-
-  // If the embed can't be posted (e.g. missing channel permissions), tear the
-  // party back down — otherwise it lingers as an unlisted DO whose cleanup
-  // alarm later wipes the owner's user→party mapping.
-  let msg: { id: string }
-  try {
-    msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, opts.channelId, party)
-  } catch (e) {
-    console.error('postPartyEmbed failed:', e)
-    await callParty(stub, 'forcedisband', {}).catch(() => {})
-    return { ok: false, error: "Couldn't post the party message in that channel — check the bot's permissions there." }
+  // Serialize creation per owner so two concurrent requests (e.g. a double-
+  // clicked "Create party") can't both slip past the "already in a party"
+  // check and spawn duplicate parties. Fail-open if the lock itself errors —
+  // it's a safety net, not a hard gate, and shouldn't take down creation.
+  const lock = ownerLockStub(env, opts.guildId, opts.owner.id)
+  const claimed = await callParty<{ ok: boolean }>(lock, 'claim', { ttl: OWNER_LOCK_TTL_MS })
+    .catch(() => ({ ok: true }))
+  if (!claimed.ok) {
+    return { ok: false, error: 'A party for this owner is already being created — try again in a moment.' }
   }
-  const final = await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId: opts.channelId })
 
-  await addToIndex(env.PARTY_KV, opts.guildId, { id: partyId, name: party.name, game: party.game })
-  await setUserPartyId(env.PARTY_KV, opts.guildId, opts.owner.id, partyId)
-  return { ok: true, party: final }
+  try {
+    // Authoritative duplicate guard, now behind the lock: callers pre-check this
+    // too, but only here is it race-free against a concurrent create.
+    const existing = await getUserPartyId(env.PARTY_KV, opts.guildId, opts.owner.id)
+    if (existing) return { ok: false, error: `Owner is already in party ${existing}.` }
+
+    const index = await getPartyIndex(env.PARTY_KV, opts.guildId)
+    const partyId = uniquePartyId(index)
+    const stub = getPartyStub(env, opts.guildId, partyId)
+
+    const party = await callParty<PartyData>(stub, 'create', {
+      id: partyId,
+      guildId: opts.guildId,
+      name: opts.name,
+      description: opts.description,
+      game: opts.game,
+      ownerId: opts.owner.id,
+      ownerUsername: opts.owner.username,
+      ownerName: opts.owner.displayName,
+      ownerIgn: opts.owner.ign,
+      maxSize: opts.maxSize,
+      voiceChannelId: opts.voiceChannelId,
+    })
+
+    // If the embed can't be posted (e.g. missing channel permissions), tear the
+    // party back down — otherwise it lingers as an unlisted DO whose cleanup
+    // alarm later wipes the owner's user→party mapping.
+    let msg: { id: string }
+    try {
+      msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, opts.channelId, party)
+    } catch (e) {
+      console.error('postPartyEmbed failed:', e)
+      await callParty(stub, 'forcedisband', {}).catch(() => {})
+      return { ok: false, error: "Couldn't post the party message in that channel — check the bot's permissions there." }
+    }
+    const final = await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId: opts.channelId })
+
+    await addToIndex(env.PARTY_KV, opts.guildId, { id: partyId, name: party.name, game: party.game })
+    await setUserPartyId(env.PARTY_KV, opts.guildId, opts.owner.id, partyId)
+    return { ok: true, party: final }
+  } finally {
+    await callParty(lock, 'release').catch(() => {})
+  }
 }
 
 /** Delete the old embed (if any) and post a fresh one in the given channel. */
