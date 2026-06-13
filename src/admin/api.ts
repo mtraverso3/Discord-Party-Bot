@@ -139,6 +139,9 @@ async function patchSettings(env: AppBindings, guildId: string, body: any): Prom
   if (body.clientInviters != null && !Array.isArray(body.clientInviters)) {
     return json({ error: 'clientInviters must be an array of user IDs' }, 400)
   }
+  if (body.partyBumpers != null && !Array.isArray(body.partyBumpers)) {
+    return json({ error: 'partyBumpers must be an array of user IDs' }, 400)
+  }
 
   const settings = sanitizeSettings({ ...current, ...body })
   await saveGuildSettings(env.PARTY_KV, guildId, settings)

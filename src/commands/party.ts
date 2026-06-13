@@ -9,7 +9,7 @@ import {
 import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
-import { gameAllowed, getGuildSettings } from '../lib/settings'
+import { canBump, gameAllowed, getGuildSettings } from '../lib/settings'
 import { generateLinkCode, writeLinkCode } from '../client-api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -552,7 +552,10 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
   const stub = getPartyStub(c.env, guildId, partyId)
   const party = await callParty<PartyData | null>(stub, 'get')
   if (!party) return c.followup({ content: 'Party not found.', flags: 64 })
-  if (party.ownerId !== userId) return c.followup({ content: 'Only the party owner can bump the party.', flags: 64 })
+  const settings = await getGuildSettings(c.env.PARTY_KV, guildId)
+  if (!canBump(settings, party, userId)) {
+    return c.followup({ content: 'Only the party owner or a designated bumper can bump the party.', flags: 64 })
+  }
 
   await repostPartyEmbed(c.env, stub, party, channelId)
 

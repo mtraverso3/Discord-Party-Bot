@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/lib/settings'
+import { canBump, gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/lib/settings'
 import { appendAudit, getAudit } from '../src/lib/audit'
 import {
   addToIndex, findParty, getPartyIndex, getUserPartyId, getUserProfile,
@@ -33,7 +33,7 @@ describe('settings', () => {
   })
 
   it('round-trips through KV', async () => {
-    const s = { maxParties: 5, defaultCap: 4, allowedGames: ['Other'], clientInviters: ['123456789012345678'] }
+    const s = { maxParties: 5, defaultCap: 4, allowedGames: ['Other'], clientInviters: ['123456789012345678'], partyBumpers: ['234567890123456789'] }
     await saveGuildSettings(env.PARTY_KV, 'g1', s)
     expect(await getGuildSettings(env.PARTY_KV, 'g1')).toEqual(s)
   })
@@ -43,6 +43,21 @@ describe('settings', () => {
     expect(s.clientInviters).toEqual(['123456789012345678'])
     expect(sanitizeSettings({}).clientInviters).toEqual([])
     expect(sanitizeSettings({ clientInviters: 'nope' }).clientInviters).toEqual([])
+  })
+
+  it('sanitizes party bumpers to unique valid Discord IDs', () => {
+    const s = sanitizeSettings({ partyBumpers: ['123456789012345678', '123456789012345678', 'not-an-id', 42, '12'] })
+    expect(s.partyBumpers).toEqual(['123456789012345678'])
+    expect(sanitizeSettings({}).partyBumpers).toEqual([])
+    expect(sanitizeSettings({ partyBumpers: 'nope' }).partyBumpers).toEqual([])
+  })
+
+  it('canBump allows the owner and designated bumpers only', () => {
+    const settings = { ...SETTINGS_DEFAULTS, partyBumpers: ['bumper'] }
+    expect(canBump(settings, { ownerId: 'owner' }, 'owner')).toBe(true)
+    expect(canBump(settings, { ownerId: 'owner' }, 'bumper')).toBe(true)
+    expect(canBump(settings, { ownerId: 'owner' }, 'rando')).toBe(false)
+    expect(canBump(SETTINGS_DEFAULTS, { ownerId: 'owner' }, 'rando')).toBe(false)
   })
 })
 

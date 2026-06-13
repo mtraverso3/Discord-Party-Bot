@@ -171,4 +171,5 @@ export interface GuildSettings {
   defaultCap: number        // pre-filled player cap when creating a party
   allowedGames: string[]    // subset of GAMES values; empty = all allowed
   clientInviters: string[]  // Discord user IDs allowed to lobby-invite from the desktop client (besides the party owner)
+  partyBumpers: string[]    // Discord user IDs allowed to bump any party they're in, even when not the owner
 }
