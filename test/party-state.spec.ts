@@ -38,6 +38,45 @@ describe('create', () => {
     expect(party.queue).toHaveLength(0)
     expect(party.isClosed).toBe(false)
   })
+
+  it('does not clobber an existing party on a duplicate create', async () => {
+    const { stub } = await makeParty({ maxSize: 3 })
+    await call(stub, 'join', user('a'))
+    // A retried/duplicate create must return the live party untouched.
+    const again = await call<PartyData>(stub, 'create', {
+      id: 'TEST01', guildId: 'g1', name: 'Clobbered', game: 'Other',
+      ownerId: 'owner', ownerUsername: 'owner_un', ownerName: 'Owner', maxSize: 3,
+    })
+    expect(again.name).toBe('Test party')
+    expect(again.members.map(m => m.userId)).toEqual(['owner', 'a'])
+  })
+
+  it('rejects malformed create payloads', async () => {
+    const stub = env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`bad-${Date.now()}-${seq++}`))
+    const noOwner = await call(stub, 'create', { id: 'X', guildId: 'g1', ownerName: 'O', maxSize: 3 })
+    expect(noOwner.error).toBeTruthy()
+    const badCap = await call(stub, 'create', {
+      id: 'X', guildId: 'g1', ownerId: 'o', ownerName: 'O', maxSize: 99,
+    })
+    expect(badCap.error).toBeTruthy()
+  })
+})
+
+describe('owner mutex (claim/release)', () => {
+  it('grants one holder at a time and frees on release', async () => {
+    const stub = env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`lock-${Date.now()}-${seq++}`))
+    expect((await call(stub, 'claim', { ttl: 5000 })).ok).toBe(true)
+    expect((await call(stub, 'claim', { ttl: 5000 })).ok).toBe(false)
+    await call(stub, 'release')
+    expect((await call(stub, 'claim', { ttl: 5000 })).ok).toBe(true)
+  })
+
+  it('expires a stale lease so an owner is never locked out', async () => {
+    const stub = env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`lock-${Date.now()}-${seq++}`))
+    expect((await call(stub, 'claim', { ttl: 1 })).ok).toBe(true)
+    await new Promise(r => setTimeout(r, 5))
+    expect((await call(stub, 'claim', { ttl: 5000 })).ok).toBe(true)
+  })
 })
 
 describe('join', () => {

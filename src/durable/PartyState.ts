@@ -101,6 +101,8 @@ export class PartyState extends DurableObject {
     try {
       switch (action) {
         case 'create':     return Response.json(await this.create(body))
+        case 'claim':      return Response.json(await this.claim(body))
+        case 'release':    return Response.json(await this.release())
         case 'get':        return Response.json(await this.load())
         case 'join':       return Response.json(await this.join(body))
         case 'forceadd':   return Response.json(await this.forceAdd(body))
@@ -127,22 +129,42 @@ export class PartyState extends DurableObject {
   }
 
   private async create(body: any): Promise<PartyData> {
+    // Defense-in-depth: never clobber an existing party. A duplicate/retried
+    // create on the same DO id returns the live state untouched instead of
+    // silently wiping its members, queue, and banlist.
+    const existing = await this.load()
+    if (existing) return existing
+
+    const id = (body?.id ?? '').toString()
+    const guildId = (body?.guildId ?? '').toString()
+    const ownerId = (body?.ownerId ?? '').toString()
+    const ownerName = (body?.ownerName ?? '').toString()
+    if (!id || !guildId || !ownerId || !ownerName) {
+      throw new Error('create requires id, guildId, ownerId, and ownerName')
+    }
+    // The 2-player minimum is a higher-layer UX rule; the DO only guards against
+    // structurally broken caps (zero, negative, fractional, absurdly large).
+    const maxSize = Number(body?.maxSize)
+    if (!Number.isInteger(maxSize) || maxSize < 1 || maxSize > 50) {
+      throw new Error('maxSize must be a whole number between 1 and 50')
+    }
+
     const data: PartyData = {
-      id: body.id,
-      guildId: body.guildId,
-      name: body.name,
+      id,
+      guildId,
+      name: (body.name ?? '').toString() || `${ownerName}'s party`,
       description: body.description ?? '',
       game: body.game ?? 'Other',
-      ownerId: body.ownerId,
-      ownerName: body.ownerName,
-      maxSize: body.maxSize,
+      ownerId,
+      ownerName,
+      maxSize,
       voiceChannelId: body.voiceChannelId,
       isClosed: false,
       createdAt: Date.now(),
       members: [{
-        userId: body.ownerId,
+        userId: ownerId,
         username: body.ownerUsername,
-        displayName: body.ownerName,
+        displayName: ownerName,
         ign: body.ownerIgn,
         joinedAt: Date.now(),
       }],
@@ -150,6 +172,29 @@ export class PartyState extends DurableObject {
     }
     await this.save(data)
     return data
+  }
+
+  // ── Owner-scoped mutex ───────────────────────────────────────────────────────
+  // A PartyState instance addressed by an owner-scoped name (never the index)
+  // doubles as a short-lived lock so two concurrent party creations for the same
+  // owner can't race past the "already in a party" check and both succeed. The
+  // lease self-expires so a crash mid-create can't lock an owner out forever.
+
+  private async claim(body: any): Promise<{ ok: boolean }> {
+    const ttl = Number(body?.ttl)
+    const lease = Number.isFinite(ttl) && ttl > 0 ? ttl : 15_000
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const until = (await this.ctx.storage.get<number>('lockUntil')) ?? 0
+      const now = Date.now()
+      if (now < until) return { ok: false }
+      await this.ctx.storage.put('lockUntil', now + lease)
+      return { ok: true }
+    })
+  }
+
+  private async release(): Promise<{ ok: true }> {
+    await this.ctx.storage.delete('lockUntil')
+    return { ok: true }
   }
 
   private async join(body: any): Promise<JoinResult> {
