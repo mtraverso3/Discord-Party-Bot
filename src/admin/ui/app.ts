@@ -159,6 +159,29 @@ function confirmDialog(message, confirmLabel) {
   })
 }
 
+// Guard an async form submit against double-submission: while the handler is
+// in flight the submit button is disabled and shows a busy label, so a slow
+// request (e.g. creating a party, which posts a Discord embed) can't be fired
+// twice by an impatient double-click. The handler runs only once at a time.
+function guardSubmit(form, busyLabel, handler) {
+  let inFlight = false
+  form.addEventListener('submit', async e => {
+    e.preventDefault()
+    if (inFlight) return
+    const btn = form.querySelector('button[type=submit]')
+    const label = btn ? btn.textContent : ''
+    inFlight = true
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = busyLabel }
+    try {
+      await handler()
+    } finally {
+      inFlight = false
+      // The form is often torn down on success; only restore if it's still here.
+      if (btn && btn.isConnected) { btn.disabled = false; btn.removeAttribute('aria-busy'); btn.textContent = label }
+    }
+  })
+}
+
 function hueOf(s) {
   let h = 0
   for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360
@@ -527,8 +550,7 @@ function toggleCreateForm(box) {
       el('button', { type: 'button', class: 'secondary', onclick: () => box.replaceChildren() }, 'Cancel'),
     ),
   )
-  form.addEventListener('submit', async e => {
-    e.preventDefault()
+  guardSubmit(form, 'Creating…', async () => {
     const ownerId = ownerPicker.getId()
     if (!ownerId) return toast('Pick an owner from the list or paste a user ID.', 'err')
     try {
@@ -901,8 +923,7 @@ function toggleTemplateForm(box, t) {
       el('button', { type: 'button', class: 'secondary', onclick: () => box.replaceChildren() }, 'Cancel'),
     ),
   )
-  form.addEventListener('submit', async e => {
-    e.preventDefault()
+  guardSubmit(form, t ? 'Saving…' : 'Creating…', async () => {
     if (!f.label.value.trim()) return toast('A template label is required.', 'err')
     const payload = {
       label: f.label.value, name: f.name.value, game: f.game.value,
@@ -945,16 +966,20 @@ function toggleApplyForm(box, t) {
       el('button', { type: 'button', class: 'secondary', onclick: () => box.replaceChildren() }, 'Cancel'),
     ),
   )
-  form.addEventListener('submit', async e => {
-    e.preventDefault()
+  guardSubmit(form, 'Creating…', async () => {
     const ownerId = ownerPicker.getId()
     if (!ownerId) return toast('Pick an owner from the list or paste a user ID.', 'err')
     try {
-      await api('/templates/' + t.id + '/apply', { method: 'POST', body: JSON.stringify({
+      const party = await api('/templates/' + t.id + '/apply', { method: 'POST', body: JSON.stringify({
         ownerId, channelId: channel.value, voiceChannelId: voice.value || undefined,
       }) })
-      toast('Party created from template')
       box.replaceChildren()
+      // Confirm the party exists and drop the admin on the Parties tab so they
+      // can see it — rather than leaving them staring at the template form with
+      // no sign anything happened (which led to double-clicks and duplicates).
+      // Switching to #/parties triggers a fresh fetch that includes the new party.
+      toast('Party "' + (party && party.name ? party.name : t.label) + '" created — see Parties')
+      location.hash = '#/parties'
     } catch (err) { toast(err.message, 'err') }
   })
   box.replaceChildren(el('article', {}, el('h5', {}, 'Use "' + t.label + '"'), form))
