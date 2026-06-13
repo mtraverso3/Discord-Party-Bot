@@ -33,7 +33,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 | `/party deny @user`        | Remove a player from the queue (owner only)    |
 | `/party remove @user`      | Remove a member (owner only)                   |
 | `/party promote @user`     | Transfer ownership to another member           |
-| `/party bump`              | Repost embed to bottom of channel (owner only) |
+| `/party bump`              | Repost embed to bottom of channel (owner or designated bumper) |
 | `/party disband`           | Disband the party (owner only)                 |
 | `/party clear`             | Clear all parties in this server (admin only)  |
 | `/party link`              | Get a code to link the desktop client          |

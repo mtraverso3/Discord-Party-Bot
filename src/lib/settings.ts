@@ -6,10 +6,12 @@ export const SETTINGS_DEFAULTS: GuildSettings = {
   defaultCap: 10,
   allowedGames: [],    // empty = all games allowed
   clientInviters: [],  // party owners can always invite; these users can too
+  partyBumpers: [],    // party owners can always bump; these users can too
 }
 
 const DISCORD_ID_RE = /^\d{5,25}$/
 const MAX_CLIENT_INVITERS = 50
+const MAX_PARTY_BUMPERS = 50
 
 const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
@@ -31,7 +33,17 @@ export function sanitizeSettings(raw: any): GuildSettings {
           (id: unknown): id is string => typeof id === 'string' && DISCORD_ID_RE.test(id),
         ))].slice(0, MAX_CLIENT_INVITERS)
       : [],
+    partyBumpers: Array.isArray(raw?.partyBumpers)
+      ? [...new Set<string>(raw.partyBumpers.filter(
+          (id: unknown): id is string => typeof id === 'string' && DISCORD_ID_RE.test(id),
+        ))].slice(0, MAX_PARTY_BUMPERS)
+      : [],
   }
+}
+
+/** Whether a user may bump the given party: the owner, or a designated bumper. */
+export function canBump(settings: GuildSettings, party: { ownerId: string }, userId: string): boolean {
+  return party.ownerId === userId || settings.partyBumpers.includes(userId)
 }
 
 export async function getGuildSettings(kv: KVNamespace, guildId: string): Promise<GuildSettings> {
