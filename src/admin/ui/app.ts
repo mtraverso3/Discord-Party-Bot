@@ -1142,73 +1142,63 @@ async function viewSettings(view) {
       el('input', { type: 'checkbox', value: g, checked: s.allowedGames.includes(g) ? 'checked' : null }),
       g))
 
-  // Desktop client inviter allowlist: list of user IDs, displayed with names
-  // when we can resolve them, edited via the member search picker.
-  let inviters = (s.clientInviters || []).slice()
-  const inviterNames = {}
-  const inviterList = el('div', { class: 'inviter-list' })
-  const renderInviters = () => {
-    inviterList.replaceChildren(
-      inviters.length === 0 ? el('span', { class: 'muted' }, 'No extra inviters — only party owners can invite.') : null,
-      ...inviters.map(id =>
-        el('span', { class: 'chip' },
-          inviterNames[id] || id,
-          el('button', { type: 'button', class: 'chip-x', title: 'Remove', onclick: () => {
-            inviters = inviters.filter(x => x !== id)
-            renderInviters()
-          } }, '\\u00d7'),
-        )),
-    )
+  // User-ID allowlists (inviters + bumpers) share one name cache. We display the
+  // resolved member name when we have it and fall back to the raw ID otherwise.
+  const memberNames = {}
+  // Build a chip list, taking care NOT to pass a bare null to replaceChildren —
+  // the DOM coerces that to a literal "null" text node.
+  const chipList = (ids, emptyText, onRemove) => node => {
+    const children = ids().length === 0
+      ? [el('span', { class: 'muted' }, emptyText)]
+      : ids().map(id =>
+          el('span', { class: 'chip' },
+            memberNames[id] || id,
+            el('button', { type: 'button', class: 'chip-x', title: 'Remove', onclick: () => onRemove(id) }, '\\u00d7')))
+    node.replaceChildren(...children)
   }
-  renderInviters()
-  inviters.forEach(async id => {
-    try {
-      const u = await api('/users/' + id)
-      if (u && u.member && u.member.displayName) { inviterNames[id] = u.member.displayName; renderInviters() }
-    } catch (e) { /* show raw ID */ }
+
+  let inviters = (s.clientInviters || []).slice()
+  const inviterList = el('div', { class: 'inviter-list' })
+  const renderInviters = () => fillInviters(inviterList)
+  const fillInviters = chipList(() => inviters, 'No extra inviters — only party owners can invite.', id => {
+    inviters = inviters.filter(x => x !== id); renderInviters()
   })
+  renderInviters()
   const inviterPicker = userPicker('Add a member who may lobby-invite from the desktop client', u => {
     if (!inviters.includes(u.id)) {
       inviters.push(u.id)
-      inviterNames[u.id] = u.displayName
+      memberNames[u.id] = u.displayName
       renderInviters()
     }
     inviterPicker.clear()
   })
 
-  // Party bumper allowlist: users who may /party bump a party they're in even
-  // when they aren't its owner. Same chip-list pattern as the inviters above.
   let bumpers = (s.partyBumpers || []).slice()
-  const bumperNames = {}
   const bumperList = el('div', { class: 'inviter-list' })
-  const renderBumpers = () => {
-    bumperList.replaceChildren(
-      bumpers.length === 0 ? el('span', { class: 'muted' }, 'No extra bumpers — only party owners can bump.') : null,
-      ...bumpers.map(id =>
-        el('span', { class: 'chip' },
-          bumperNames[id] || id,
-          el('button', { type: 'button', class: 'chip-x', title: 'Remove', onclick: () => {
-            bumpers = bumpers.filter(x => x !== id)
-            renderBumpers()
-          } }, '\\u00d7'),
-        )),
-    )
-  }
-  renderBumpers()
-  bumpers.forEach(async id => {
-    try {
-      const u = await api('/users/' + id)
-      if (u && u.member && u.member.displayName) { bumperNames[id] = u.member.displayName; renderBumpers() }
-    } catch (e) { /* show raw ID */ }
+  const renderBumpers = () => fillBumpers(bumperList)
+  const fillBumpers = chipList(() => bumpers, 'No extra bumpers — only party owners can bump.', id => {
+    bumpers = bumpers.filter(x => x !== id); renderBumpers()
   })
+  renderBumpers()
   const bumperPicker = userPicker('Add a member who may bump any party they are in', u => {
     if (!bumpers.includes(u.id)) {
       bumpers.push(u.id)
-      bumperNames[u.id] = u.displayName
+      memberNames[u.id] = u.displayName
       renderBumpers()
     }
     bumperPicker.clear()
   })
+
+  // Resolve every listed ID to a name in one batched request (instead of one
+  // heavy /users/:id call each, which rate-limited and left bare IDs showing).
+  const allIds = [...new Set([...inviters, ...bumpers])]
+  if (allIds.length > 0) {
+    api('/members/resolve?ids=' + encodeURIComponent(allIds.join(','))).then(map => {
+      Object.assign(memberNames, map || {})
+      renderInviters()
+      renderBumpers()
+    }).catch(() => { /* leave raw IDs */ })
+  }
 
   const form = el('form', {},
     el('div', { class: 'grid-2' },
