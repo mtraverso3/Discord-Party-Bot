@@ -1,7 +1,11 @@
 import type { AppBindings, PartyData, UpdateResult } from '../types'
 import { GAMES } from '../lib/games'
-import { callParty, getPartyStub, getUserProfile, getUserPartyId, updateIndexEntry, trySyncEmbed } from '../lib/party'
+import {
+  callParty, findUserIdByRiotId, getPartyStub, getUserProfile, getUserPartyId, updateIndexEntry, trySyncEmbed,
+  setUserPartyId,
+} from '../lib/party'
 import { gameAllowed, getGuildSettings } from '../lib/settings'
+import { getGuildMember } from '../lib/discord'
 
 const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
@@ -11,6 +15,8 @@ const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 //   GET    /client/session     (Bearer)  -> { userId, displayName, guildId, canInvite, party | null }
 //   DELETE /client/session     (Bearer)  -> { ok }
 //   POST   /client/party/game  (Bearer) { game } -> { ok, game? } | { ok: false, error }
+//   POST   /client/lookup      (Bearer) { riotIds } -> { players: Record<riotId, { userId, displayName } | null> }
+//   POST   /client/party/add   (Bearer) { userId } -> { ok, party? } | { ok: false, error }
 //
 // A short-lived link code (from `/party link` in Discord) is exchanged once
 // for a long-lived bearer token tied to the Discord user, so the client stays
@@ -79,6 +85,12 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
   }
   if (url.pathname === '/client/party/game' && req.method === 'POST') {
     return await setPartyGame(req, env)
+  }
+  if (url.pathname === '/client/lookup' && req.method === 'POST') {
+    return await lookupPlayers(req, env)
+  }
+  if (url.pathname === '/client/party/add' && req.method === 'POST') {
+    return await addPartyMember(req, env)
   }
   return new Response('Not Found', { status: 404 })
 }
@@ -249,4 +261,109 @@ async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
   await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
 
   return json({ ok: true, game: result.data.game })
+}
+
+/** Split a "Name#Tag" Riot ID string; tagline is optional. */
+function parseRiotId(raw: string): { name: string; tag: string } | null {
+  const s = raw.trim()
+  if (!s) return null
+  const hash = s.indexOf('#')
+  if (hash === -1) return { name: s, tag: '' }
+  const name = s.slice(0, hash).trim()
+  if (!name) return null
+  return { name, tag: s.slice(hash + 1).trim() }
+}
+
+export interface LookupHit {
+  userId: string
+  displayName: string
+}
+
+// Reverse-looks-up Riot IDs the client saw in the live League lobby against
+// registered player profiles, so it can tell "not in the party" apart from
+// "not in the system at all" and offer to add the former straight from the app.
+async function lookupPlayers(req: Request, env: AppBindings): Promise<Response> {
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ error: 'Not linked.' }, 401)
+  const { rec } = auth
+
+  let body: { riotIds?: unknown }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ error: 'Invalid JSON body.' }, 400)
+  }
+  const riotIds = Array.isArray(body.riotIds)
+    ? body.riotIds.filter((r): r is string => typeof r === 'string').slice(0, 50)
+    : []
+
+  const partyId = await getUserPartyId(env.PARTY_KV, rec.guildId, rec.userId)
+  if (!partyId) return json({ error: 'You are not in a party.' }, 404)
+  const stub = getPartyStub(env, rec.guildId, partyId)
+  const party = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+  if (!party) return json({ error: 'Party not found.' }, 404)
+
+  const memberIds = new Set(party.members.map(m => m.userId))
+  const players: Record<string, LookupHit | null> = {}
+
+  await Promise.all(riotIds.map(async (riotId) => {
+    const parsed = parseRiotId(riotId)
+    if (!parsed) { players[riotId] = null; return }
+    const userId = await findUserIdByRiotId(env.PARTY_KV, party.game, parsed.name, parsed.tag)
+    if (!userId || memberIds.has(userId)) { players[riotId] = null; return }
+    const member = await getGuildMember(env.DISCORD_BOT_TOKEN, rec.guildId, userId).catch(() => null)
+    if (!member?.user) { players[riotId] = null; return } // left the server, or never joined it
+    players[riotId] = { userId, displayName: member.nick ?? member.user.global_name ?? member.user.username }
+  }))
+
+  return json({ players })
+}
+
+// Adds a recognized (but not-yet-partied) player straight into the caller's
+// party — the desktop-client equivalent of the admin panel's "add member",
+// gated the same way `forceadd` itself is: owner only.
+async function addPartyMember(req: Request, env: AppBindings): Promise<Response> {
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ ok: false, error: 'Not linked.' }, 401)
+  const { rec } = auth
+
+  let body: { userId?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ ok: false, error: 'Invalid JSON body.' }, 400)
+  }
+  const targetId = typeof body.userId === 'string' ? body.userId.trim() : ''
+  if (!targetId) return json({ ok: false, error: 'userId is required.' }, 400)
+
+  const partyId = await getUserPartyId(env.PARTY_KV, rec.guildId, rec.userId)
+  if (!partyId) return json({ ok: false, error: 'You are not in a party.' }, 404)
+  const stub = getPartyStub(env, rec.guildId, partyId)
+  const party = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+  if (!party) return json({ ok: false, error: 'Party not found.' }, 404)
+  if (party.ownerId !== rec.userId) return json({ ok: false, error: 'Only the party owner can add members.' }, 403)
+
+  const existingPartyId = await getUserPartyId(env.PARTY_KV, rec.guildId, targetId)
+  if (existingPartyId && existingPartyId !== partyId) {
+    return json({ ok: false, error: 'That player is already in another party.' }, 400)
+  }
+
+  const member = await getGuildMember(env.DISCORD_BOT_TOKEN, rec.guildId, targetId).catch(() => null)
+  if (!member?.user) return json({ ok: false, error: 'User not found in this server.' }, 404)
+
+  const profile = await getUserProfile(env.PARTY_KV, targetId)
+  const result = await callParty<{ status: string; data: PartyData }>(stub, 'forceadd', {
+    requesterId: rec.userId,
+    userId: targetId,
+    username: member.user.username,
+    displayName: member.nick ?? member.user.global_name ?? member.user.username,
+    ign: profile.igns[party.game],
+  })
+  if (result.status === 'already_member') return json({ ok: false, error: 'Already a member.' }, 400)
+  if (result.status === 'full') return json({ ok: false, error: 'Party is full.' }, 400)
+  if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can add members.' }, 403)
+
+  await setUserPartyId(env.PARTY_KV, rec.guildId, targetId, partyId)
+  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  return json({ ok: true })
 }

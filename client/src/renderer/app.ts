@@ -1,5 +1,7 @@
 import type { PartyBotBridge } from '../preload'
-import type { AutoJoinSettings, LcuStatus, LinkState, LobbyMode, LobbyView, Session, SessionResult } from '../shared/types'
+import type {
+  AutoJoinSettings, KnownPlayer, LcuStatus, LinkState, LobbyMode, LobbyView, Session, SessionResult, TaggedPlayer,
+} from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
 
 declare global {
@@ -46,9 +48,14 @@ let session: Session | null = null
 let sessionError: string | null = null
 let lobby: LobbyView = { exists: false, rows: [], missing: [], intruders: 0 }
 let inviteBusy = false
+let addBusyUserId: string | null = null // userId currently being added to the party, if any
 let selectedMode: LobbyMode = 'custom-draft'
 let autoJoin: AutoJoinSettings = { enabled: false, targetName: '', inviteParty: false }
 let autoJoinOpen = false // not part of viewKey — re-renders shouldn't force it closed
+let tagged: TaggedPlayer[] = []
+let settingsOpen = false
+let newTagRiotId = '' // transient "add tag" form fields — not part of viewKey, so a
+let newTagLabel = ''  // background poll re-render can't wipe an in-progress entry
 
 const root = document.getElementById('app')!
 let lastKey = ''
@@ -62,7 +69,9 @@ function screen(): 'link' | 'no-party' | 'party' {
 // Re-render only when the data that drives the current screen changes, so the
 // link-code input never loses focus while polling.
 function viewKey(): string {
-  return JSON.stringify([screen(), lcu, session, sessionError, lobby, inviteBusy, autoJoin])
+  return JSON.stringify([
+    screen(), lcu, session, sessionError, lobby, inviteBusy, addBusyUserId, autoJoin, settingsOpen, tagged,
+  ])
 }
 
 function render(force = false): void {
@@ -70,12 +79,74 @@ function render(force = false): void {
   if (!force && key === lastKey) return
   lastKey = key
 
-  const main =
-    screen() === 'link' ? renderLink()
+  const main = settingsOpen ? renderSettings()
+    : screen() === 'link' ? renderLink()
     : screen() === 'no-party' ? renderNoParty()
     : renderParty()
 
-  root.replaceChildren(renderHeader(), renderAutoJoinCard(), ...main, renderFooter())
+  root.replaceChildren(
+    renderHeader(),
+    ...(settingsOpen ? [] : [renderAutoJoinCard()]),
+    ...main,
+    renderFooter(),
+  )
+}
+
+// ── Lobby-only tags (exclude known people from the "not in party" alert) ─────
+// Accessible from Settings at any time, and edited inline whenever someone
+// shows up in a live lobby — both paths go through the same setter.
+
+function normalizeRiotId(riotId: string): string {
+  return riotId.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function setTagFor(riotId: string, tagText: string): void {
+  const trimmed = tagText.trim()
+  const rest = tagged.filter(t => normalizeRiotId(t.riotId) !== normalizeRiotId(riotId))
+  tagged = trimmed ? [...rest, { riotId, tag: trimmed }] : rest
+  void pb.tagsSet(tagged)
+  render(true)
+  void refreshLobby() // reflect the new status in the live lobby view too
+}
+
+function renderSettings(): HTMLElement[] {
+  const riotIdInput = el('input', {
+    type: 'text', class: 'plain-input', placeholder: 'Riot ID (e.g. Faker#KR1)', value: newTagRiotId,
+    oninput: (e: Event) => { newTagRiotId = (e.target as HTMLInputElement).value },
+  })
+  const labelInput = el('input', {
+    type: 'text', class: 'plain-input', placeholder: 'Label (e.g. coach, friend)', value: newTagLabel,
+    oninput: (e: Event) => { newTagLabel = (e.target as HTMLInputElement).value },
+  })
+  const addBtn = el('button', {
+    class: 'block',
+    onclick: () => {
+      const riotId = newTagRiotId.trim()
+      const label = newTagLabel.trim()
+      if (!riotId || !label) { toast('Enter a Riot ID and a label', 'err'); return }
+      newTagRiotId = ''
+      newTagLabel = ''
+      setTagFor(riotId, label)
+    },
+  }, 'Add')
+
+  const rows = tagged.length > 0
+    ? tagged.map(t => el('div', { class: 'item' },
+        el('span', { class: 'name' }, t.riotId, el('span', { class: 'ign' }, t.tag)),
+        el('button', { class: 'linklike', onclick: () => setTagFor(t.riotId, '') }, 'Remove'),
+      ))
+    : [el('p', { class: 'muted small' }, 'No tagged players yet.')]
+
+  return [el('div', { class: 'card' },
+    el('h2', {}, 'Lobby tags'),
+    el('p', { class: 'sub' },
+      'Give lobby-only players you recognize a label of your own choosing. They\'ll still ' +
+      'show up in the lobby list, just excluded from the "not in party" alert.'),
+    el('div', { class: 'row', style: 'margin-bottom:8px' }, riotIdInput),
+    el('div', { class: 'row', style: 'margin-bottom:12px' }, labelInput),
+    el('div', { style: 'margin-bottom:12px' }, addBtn),
+    el('div', { class: 'list' }, rows),
+  )]
 }
 
 // ── Auto-join friend's lobby ──────────────────────────────────────────────────
@@ -127,7 +198,11 @@ function renderHeader(): HTMLElement {
     el('span', { class: 'dot' }),
     link.linked ? (link.displayName ?? 'Linked') : 'Not linked',
   )
-  return el('header', {}, el('h1', {}, 'PartyBot'), leaguePill, discordPill)
+  const settingsBtn = el('button', {
+    class: 'iconbtn', title: settingsOpen ? 'Back' : 'Settings',
+    onclick: () => { settingsOpen = !settingsOpen; render(true) },
+  }, settingsOpen ? '← Back' : '⚙ Settings')
+  return el('header', {}, el('h1', {}, 'PartyBot'), leaguePill, discordPill, settingsBtn)
 }
 
 function renderFooter(): HTMLElement {
@@ -212,7 +287,7 @@ function renderParty(): HTMLElement[] {
     return el('div', { class: 'item' },
       el('span', { class: 'name' },
         m.displayName + (m.isOwner ? ' 👑' : '') + (isSelf ? ' (you)' : ''),
-        el('span', { class: 'ign' }, m.ign ?? 'No IGN set — /party ign in Discord'),
+        el('span', { class: 'ign' }, m.ign ?? 'No IGN set: /party ign in Discord'),
       ),
       badge,
     )
@@ -248,7 +323,7 @@ function renderParty(): HTMLElement[] {
         } else {
           const sent = res.outcomes.filter(o => o.status === 'invited').length
           const skipped = res.outcomes.filter(o => o.status === 'no-ign' || o.status === 'not-found')
-          toast(`${res.createdNew ? 'Lobby created' : 'Invited to your lobby'} — ${sent} invite${sent === 1 ? '' : 's'} sent` +
+          toast(`${res.createdNew ? 'Lobby created' : 'Invited to your lobby'}, ${sent} invite${sent === 1 ? '' : 's'} sent` +
             (skipped.length ? `, ${skipped.length} skipped (no/invalid IGN)` : ''))
         }
         void refreshLobby()
@@ -269,15 +344,29 @@ function renderParty(): HTMLElement[] {
 
   // Live lobby cross-reference.
   if (lobby.exists) {
-    const rows = lobby.rows.map(r => el('div', { class: 'item' },
-      el('span', { class: 'name' },
+    const rows = lobby.rows.map((r) => {
+      const nameEl = el('span', { class: 'name' },
         r.riotId + (r.isLeader ? ' 👑' : ''),
-        r.displayName ? el('span', { class: 'ign' }, r.displayName) : null,
-      ),
-      r.status === 'you' ? el('span', { class: 'badge mut' }, 'you')
+        r.displayName ? el('span', { class: 'ign' }, r.displayName)
+        : r.known ? el('span', { class: 'ign' }, r.known.displayName)
+        : null,
+      )
+      const badge =
+        r.status === 'you' ? el('span', { class: 'badge mut' }, 'you')
         : r.status === 'party' ? el('span', { class: 'badge ok' }, 'party')
-        : el('span', { class: 'badge bad' }, 'NOT IN PARTY'),
-    ))
+        : r.status === 'tagged' ? el('span', { class: 'badge warn' }, r.tag)
+        : el('span', { class: 'badge bad' }, 'NOT IN PARTY')
+
+      const addBtn = r.status === 'intruder' && r.known && session!.canInvite
+        ? el('button', {
+            class: 'linklike',
+            disabled: addBusyUserId === r.known.userId,
+            onclick: () => void addPlayerToParty(r.known!),
+          }, addBusyUserId === r.known.userId ? 'Adding…' : 'Add to party')
+        : null
+
+      return el('div', { class: 'item' }, nameEl, badge, addBtn)
+    })
 
     out.push(el('div', { class: 'card' },
       el('h2', {}, 'In lobby'),
@@ -294,6 +383,21 @@ function renderParty(): HTMLElement[] {
   }
 
   return out
+}
+
+async function addPlayerToParty(known: KnownPlayer): Promise<void> {
+  addBusyUserId = known.userId
+  render(true)
+  const res = await pb.addToParty(known.userId)
+  addBusyUserId = null
+  if (res.ok) {
+    toast(`${known.displayName} added to the party`)
+    void refreshSession()
+  } else {
+    toast(res.error ?? 'Could not add player', 'err')
+  }
+  void refreshLobby()
+  render(true)
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────
@@ -313,7 +417,7 @@ async function refreshSession(): Promise<void> {
     link = await pb.linkState()
     session = null
     sessionError = null
-    toast('Your link expired — link again with /party link', 'err')
+    toast('Your link expired, link again with /party link', 'err')
   } else {
     sessionError = res.error ?? 'PartyBot is unreachable.'
   }
@@ -332,10 +436,15 @@ async function refreshAutoJoin(): Promise<void> {
   render()
 }
 
+async function refreshTagged(): Promise<void> {
+  tagged = await pb.tagsGet()
+}
+
 async function start(): Promise<void> {
   link = await pb.linkState()
   await refreshLcu()
   await refreshSession()
+  await refreshTagged()
   await refreshLobby()
   await refreshAutoJoin()
   render(true)

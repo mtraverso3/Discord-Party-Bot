@@ -3,6 +3,7 @@
 import { app } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import type { KnownPlayer, TaggedPlayer } from '../shared/types'
 
 const DEFAULT_BOT_URL = 'https://partybot.mtraverso.net'
 
@@ -15,6 +16,7 @@ interface StoredConfig {
   autoJoinEnabled?: boolean
   autoJoinTarget?: string   // friend's summoner/Riot ID name to auto-join when their lobby is joinable
   autoJoinInviteParty?: boolean  // after joining, invite the linked Discord party in too
+  taggedPlayers?: TaggedPlayer[]  // lobby-only players excluded from the intruder count, with a custom label
 }
 
 export interface AutoJoinSettings {
@@ -57,7 +59,11 @@ export function linkState(): { linked: boolean; displayName?: string; userId?: s
 }
 
 async function botFetch(method: string, path: string, body?: unknown, token?: string): Promise<{ status: number; body: any }> {
-  const headers: Record<string, string> = {}
+  // Identifies the desktop client to Cloudflare so it isn't mistaken for a
+  // headless bot by edge heuristics (e.g. Bot Fight Mode) — those block
+  // before the request reaches this Worker's own code, surfacing as a 403
+  // with no application-level error body.
+  const headers: Record<string, string> = { 'User-Agent': `PartyBot-Client/${app.getVersion()}` }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(`${botUrl()}${path}`, {
@@ -119,6 +125,30 @@ export async function setPartyGame(game: string): Promise<{ ok: boolean; error?:
   }
 }
 
+export async function lookupPlayers(riotIds: string[]): Promise<Record<string, KnownPlayer | null>> {
+  const token = loadConfig().token
+  if (!token || riotIds.length === 0) return {}
+  try {
+    const res = await botFetch('POST', '/client/lookup', { riotIds }, token)
+    if (res.status !== 200) return {}
+    return res.body?.players ?? {}
+  } catch {
+    return {}
+  }
+}
+
+export async function addToParty(userId: string): Promise<{ ok: boolean; error?: string }> {
+  const token = loadConfig().token
+  if (!token) return { ok: false, error: 'Not linked.' }
+  try {
+    const res = await botFetch('POST', '/client/party/add', { userId }, token)
+    if (res.status !== 200) return { ok: false, error: res.body?.error ?? `PartyBot returned ${res.status}.` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: `Could not reach PartyBot: ${(e as Error).message}` }
+  }
+}
+
 export function getAutoJoinSettings(): AutoJoinSettings {
   const c = loadConfig()
   return { enabled: !!c.autoJoinEnabled, targetName: c.autoJoinTarget ?? '', inviteParty: !!c.autoJoinInviteParty }
@@ -131,6 +161,14 @@ export function setAutoJoinSettings(next: AutoJoinSettings): void {
     autoJoinTarget: next.targetName,
     autoJoinInviteParty: next.inviteParty,
   })
+}
+
+export function getTaggedPlayers(): TaggedPlayer[] {
+  return loadConfig().taggedPlayers ?? []
+}
+
+export function setTaggedPlayers(next: TaggedPlayer[]): void {
+  saveConfig({ ...loadConfig(), taggedPlayers: next })
 }
 
 export function clearLink(revokeRemote = true): void {

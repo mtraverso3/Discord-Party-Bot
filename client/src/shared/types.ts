@@ -53,11 +53,11 @@ export interface SessionResult {
 export type LobbyMode = 'custom-draft' | 'custom-blind' | 'arena' | 'aram' | 'normal-draft'
 
 export const LOBBY_MODES: { value: LobbyMode; label: string }[] = [
-  { value: 'custom-draft', label: 'Custom — Tournament Draft' },
-  { value: 'custom-blind', label: 'Custom — Blind Pick' },
+  { value: 'custom-draft', label: 'Custom: Tournament Draft' },
+  { value: 'custom-blind', label: 'Custom: Blind Pick' },
   { value: 'arena', label: 'Arena' },
   { value: 'aram', label: 'ARAM' },
-  { value: 'normal-draft', label: 'Normal — Draft Pick' },
+  { value: 'normal-draft', label: 'Normal: Draft Pick' },
 ]
 
 export type InviteStatus = 'invited' | 'self' | 'no-ign' | 'not-found' | 'failed'
@@ -75,13 +75,21 @@ export interface InviteResult {
   outcomes: InviteOutcome[]
 }
 
-export type LobbySlotStatus = 'you' | 'party' | 'intruder'
+export type LobbySlotStatus = 'you' | 'party' | 'tagged' | 'intruder'
 
 export interface LobbyRow {
   riotId: string
   isLeader: boolean
   status: LobbySlotStatus
   displayName: string | null  // party display name when matched
+  tag: string | null          // user-set custom label, when status is 'tagged'
+  known: KnownPlayer | null   // set for intruders who are a registered Discord user (looked up async)
+}
+
+/** A lobby intruder recognized as a registered Discord user, keyed by riotId. */
+export interface KnownPlayer {
+  userId: string
+  displayName: string
 }
 
 export interface LobbyView {
@@ -89,6 +97,13 @@ export interface LobbyView {
   rows: LobbyRow[]
   missing: { displayName: string; ign: string | null }[]
   intruders: number
+}
+
+/** A lobby-only player the user recognizes and wants to stop being flagged as
+ *  an intruder — still shown in the lobby list, just under their own label. */
+export interface TaggedPlayer {
+  riotId: string  // Riot ID as entered by the user, e.g. "Faker#KR1" (tagline optional)
+  tag: string      // custom label shown in place of "NOT IN PARTY", e.g. "smurf", "coach"
 }
 
 export interface AutoJoinSettings {

@@ -73,10 +73,56 @@ export async function saveUserProfile(kv: KVNamespace, userId: string, profile: 
   await kv.put(`profile:${userId}`, JSON.stringify(profile))
 }
 
+// ── Reverse Riot ID lookup ───────────────────────────────────────────────────
+// Lets the desktop client recognize a player it finds in a live League lobby
+// as a Discord user who just isn't in the current party yet, so it can offer
+// to add them. Keyed by game since the same Riot ID can mean different people
+// across different titles' profiles.
+
+function normalizeIgnPart(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function parseIgnForIndex(raw: string): { name: string; tag: string | null } | null {
+  const s = raw.trim()
+  if (!s) return null
+  const hash = s.indexOf('#')
+  if (hash === -1) return { name: s, tag: null }
+  const name = s.slice(0, hash).trim()
+  const tag = s.slice(hash + 1).trim()
+  return name ? { name, tag: tag || null } : null
+}
+
+function ignIndexKey(game: string, name: string, tag: string | null): string {
+  return `ign-index:${game}:${normalizeIgnPart(name)}:${tag ? normalizeIgnPart(tag) : ''}`
+}
+
 export async function saveUserIgn(kv: KVNamespace, userId: string, game: string, ign: string): Promise<void> {
   const profile = await getUserProfile(kv, userId)
-  profile.igns[game] = ign
+  const prevParsed = profile.igns[game] ? parseIgnForIndex(profile.igns[game]!) : null
+  if (prevParsed) await kv.delete(ignIndexKey(game, prevParsed.name, prevParsed.tag))
+
+  const trimmed = ign.trim()
+  if (trimmed) {
+    profile.igns[game] = trimmed
+    const parsed = parseIgnForIndex(trimmed)
+    if (parsed) await kv.put(ignIndexKey(game, parsed.name, parsed.tag), userId)
+  } else {
+    delete profile.igns[game]
+  }
   await saveUserProfile(kv, userId, profile)
+}
+
+/** Which Discord user (if any) has registered this Riot ID for the given
+ *  game. A registration saved without a tagline matches any tagline — same
+ *  "no tag = wildcard" rule the client itself uses to match IGNs. */
+export async function findUserIdByRiotId(
+  kv: KVNamespace, game: string, gameName: string, tagLine: string,
+): Promise<string | null> {
+  const exact = await kv.get(ignIndexKey(game, gameName, tagLine || null))
+  if (exact) return exact
+  if (!tagLine) return null
+  return kv.get(ignIndexKey(game, gameName, null))
 }
 
 // ── Durable Object routing ───────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import type { AppBindings, MoveQueueResult, PartyData, UpdateResult } from '../t
 import {
   callParty, createPartyAndEmbed, getPartyIndex, getPartyStub, getUserPartyId,
   getUserProfile, markDisbanded, removeFromIndex, repostPartyEmbed,
-  saveUserProfile, setUserPartyId, trySyncEmbed, updateIndexEntry,
+  saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
 } from '../lib/party'
 import { GAMES } from '../lib/games'
 import { gameAllowed } from '../lib/settings'
@@ -398,10 +398,8 @@ async function patchUserProfile(env: AppBindings, guildId: string, userId: strin
   if (!GAMES.some(g => g.value === game)) return json({ error: 'Unknown game' }, 400)
   const ign = (body.ign ?? '').toString().trim().slice(0, 100)
 
+  await saveUserIgn(env.PARTY_KV, userId, game, ign)
   const profile = await getUserProfile(env.PARTY_KV, userId)
-  if (ign) profile.igns[game] = ign
-  else delete profile.igns[game]
-  await saveUserProfile(env.PARTY_KV, userId, profile)
 
   // Mirror /party ign: if they're in a party playing that game, refresh the
   // live member IGN and embed too.

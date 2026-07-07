@@ -1,7 +1,7 @@
 // Pure logic for Riot ID handling and party/lobby cross-referencing.
 // Kept dependency-free so it is unit-testable outside Electron.
 
-import type { LobbyRow, LobbyView } from './types'
+import type { LobbyRow, LobbyView, TaggedPlayer } from './types'
 
 export interface ParsedRiotId {
   name: string
@@ -55,12 +55,13 @@ export interface LobbyEntry {
 
 /** Compare the live League lobby against the Discord party roster.
  *  Matching precedence per lobby slot: self (by puuid) > party member by
- *  resolved puuid > party member by IGN string > intruder. */
+ *  resolved puuid > party member by IGN string > user-tagged player > intruder. */
 export function crossReference(
   party: PartyEntry[],
   lobby: LobbyEntry[],
   selfUserId: string | null,
   selfPuuid: string | null,
+  tagged: TaggedPlayer[] = [],
 ): LobbyView {
   const matched = new Set<string>()
 
@@ -68,16 +69,20 @@ export function crossReference(
     const riotId = formatRiotId(l.gameName, l.tagLine)
     if (selfPuuid && l.puuid === selfPuuid) {
       if (selfUserId) matched.add(selfUserId)
-      return { riotId, isLeader: l.isLeader, status: 'you', displayName: null }
+      return { riotId, isLeader: l.isLeader, status: 'you', displayName: null, tag: null, known: null }
     }
     const member = party.find(p =>
       (p.puuid !== null && p.puuid === l.puuid) || ignMatches(p.ign, l.gameName, l.tagLine),
     )
     if (member) {
       matched.add(member.userId)
-      return { riotId, isLeader: l.isLeader, status: 'party', displayName: member.displayName }
+      return { riotId, isLeader: l.isLeader, status: 'party', displayName: member.displayName, tag: null, known: null }
     }
-    return { riotId, isLeader: l.isLeader, status: 'intruder', displayName: null }
+    const taggedPlayer = tagged.find(t => ignMatches(t.riotId, l.gameName, l.tagLine))
+    if (taggedPlayer) {
+      return { riotId, isLeader: l.isLeader, status: 'tagged', displayName: null, tag: taggedPlayer.tag, known: null }
+    }
+    return { riotId, isLeader: l.isLeader, status: 'intruder', displayName: null, tag: null, known: null }
   })
 
   const missing = party
