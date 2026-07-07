@@ -15,6 +15,7 @@ export interface PartyBotBridge {
   autoJoinSet(settings: AutoJoinSettings): Promise<void>
   tagsGet(): Promise<TaggedPlayer[]>
   tagsSet(players: TaggedPlayer[]): Promise<void>
+  addToParty(userId: string): Promise<{ ok: boolean; error?: string }>
 }
 
 const bridge: PartyBotBridge = {
@@ -29,6 +30,7 @@ const bridge: PartyBotBridge = {
   autoJoinSet: (settings) => ipcRenderer.invoke('autojoin:set', settings),
   tagsGet: () => ipcRenderer.invoke('tags:get'),
   tagsSet: (players) => ipcRenderer.invoke('tags:set', players),
+  addToParty: (userId) => ipcRenderer.invoke('party:add', userId),
 }
 
 contextBridge.exposeInMainWorld('pb', bridge)

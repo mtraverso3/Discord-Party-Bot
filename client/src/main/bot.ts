@@ -3,7 +3,7 @@
 import { app } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import type { TaggedPlayer } from '../shared/types'
+import type { KnownPlayer, TaggedPlayer } from '../shared/types'
 
 const DEFAULT_BOT_URL = 'https://partybot.mtraverso.net'
 
@@ -118,6 +118,30 @@ export async function setPartyGame(game: string): Promise<{ ok: boolean; error?:
   if (!token) return { ok: false, error: 'Not linked.' }
   try {
     const res = await botFetch('POST', '/client/party/game', { game }, token)
+    if (res.status !== 200) return { ok: false, error: res.body?.error ?? `PartyBot returned ${res.status}.` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: `Could not reach PartyBot: ${(e as Error).message}` }
+  }
+}
+
+export async function lookupPlayers(riotIds: string[]): Promise<Record<string, KnownPlayer | null>> {
+  const token = loadConfig().token
+  if (!token || riotIds.length === 0) return {}
+  try {
+    const res = await botFetch('POST', '/client/lookup', { riotIds }, token)
+    if (res.status !== 200) return {}
+    return res.body?.players ?? {}
+  } catch {
+    return {}
+  }
+}
+
+export async function addToParty(userId: string): Promise<{ ok: boolean; error?: string }> {
+  const token = loadConfig().token
+  if (!token) return { ok: false, error: 'Not linked.' }
+  try {
+    const res = await botFetch('POST', '/client/party/add', { userId }, token)
     if (res.status !== 200) return { ok: false, error: res.body?.error ?? `PartyBot returned ${res.status}.` }
     return { ok: true }
   } catch (e) {

@@ -69,20 +69,20 @@ export function crossReference(
     const riotId = formatRiotId(l.gameName, l.tagLine)
     if (selfPuuid && l.puuid === selfPuuid) {
       if (selfUserId) matched.add(selfUserId)
-      return { riotId, isLeader: l.isLeader, status: 'you', displayName: null, tag: null }
+      return { riotId, isLeader: l.isLeader, status: 'you', displayName: null, tag: null, known: null }
     }
     const member = party.find(p =>
       (p.puuid !== null && p.puuid === l.puuid) || ignMatches(p.ign, l.gameName, l.tagLine),
     )
     if (member) {
       matched.add(member.userId)
-      return { riotId, isLeader: l.isLeader, status: 'party', displayName: member.displayName, tag: null }
+      return { riotId, isLeader: l.isLeader, status: 'party', displayName: member.displayName, tag: null, known: null }
     }
     const taggedPlayer = tagged.find(t => ignMatches(t.riotId, l.gameName, l.tagLine))
     if (taggedPlayer) {
-      return { riotId, isLeader: l.isLeader, status: 'tagged', displayName: null, tag: taggedPlayer.tag }
+      return { riotId, isLeader: l.isLeader, status: 'tagged', displayName: null, tag: taggedPlayer.tag, known: null }
     }
-    return { riotId, isLeader: l.isLeader, status: 'intruder', displayName: null, tag: null }
+    return { riotId, isLeader: l.isLeader, status: 'intruder', displayName: null, tag: null, known: null }
   })
 
   const missing = party

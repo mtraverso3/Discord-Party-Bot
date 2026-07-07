@@ -1,6 +1,6 @@
 import type { PartyBotBridge } from '../preload'
 import type {
-  AutoJoinSettings, LcuStatus, LinkState, LobbyMode, LobbyView, Session, SessionResult, TaggedPlayer,
+  AutoJoinSettings, KnownPlayer, LcuStatus, LinkState, LobbyMode, LobbyView, Session, SessionResult, TaggedPlayer,
 } from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
 
@@ -48,6 +48,7 @@ let session: Session | null = null
 let sessionError: string | null = null
 let lobby: LobbyView = { exists: false, rows: [], missing: [], intruders: 0 }
 let inviteBusy = false
+let addBusyUserId: string | null = null // userId currently being added to the party, if any
 let selectedMode: LobbyMode = 'custom-draft'
 let autoJoin: AutoJoinSettings = { enabled: false, targetName: '', inviteParty: false }
 let autoJoinOpen = false // not part of viewKey — re-renders shouldn't force it closed
@@ -68,7 +69,9 @@ function screen(): 'link' | 'no-party' | 'party' {
 // Re-render only when the data that drives the current screen changes, so the
 // link-code input never loses focus while polling.
 function viewKey(): string {
-  return JSON.stringify([screen(), lcu, session, sessionError, lobby, inviteBusy, autoJoin, settingsOpen, tagged])
+  return JSON.stringify([
+    screen(), lcu, session, sessionError, lobby, inviteBusy, addBusyUserId, autoJoin, settingsOpen, tagged,
+  ])
 }
 
 function render(force = false): void {
@@ -344,7 +347,9 @@ function renderParty(): HTMLElement[] {
     const rows = lobby.rows.map((r) => {
       const nameEl = el('span', { class: 'name' },
         r.riotId + (r.isLeader ? ' 👑' : ''),
-        r.displayName ? el('span', { class: 'ign' }, r.displayName) : null,
+        r.displayName ? el('span', { class: 'ign' }, r.displayName)
+        : r.known ? el('span', { class: 'ign' }, r.known.displayName)
+        : null,
       )
       const badge =
         r.status === 'you' ? el('span', { class: 'badge mut' }, 'you')
@@ -352,7 +357,15 @@ function renderParty(): HTMLElement[] {
         : r.status === 'tagged' ? el('span', { class: 'badge warn' }, r.tag)
         : el('span', { class: 'badge bad' }, 'NOT IN PARTY')
 
-      return el('div', { class: 'item' }, nameEl, badge)
+      const addBtn = r.status === 'intruder' && r.known && session!.canInvite
+        ? el('button', {
+            class: 'linklike',
+            disabled: addBusyUserId === r.known.userId,
+            onclick: () => void addPlayerToParty(r.known!),
+          }, addBusyUserId === r.known.userId ? 'Adding…' : 'Add to party')
+        : null
+
+      return el('div', { class: 'item' }, nameEl, badge, addBtn)
     })
 
     out.push(el('div', { class: 'card' },
@@ -370,6 +383,21 @@ function renderParty(): HTMLElement[] {
   }
 
   return out
+}
+
+async function addPlayerToParty(known: KnownPlayer): Promise<void> {
+  addBusyUserId = known.userId
+  render(true)
+  const res = await pb.addToParty(known.userId)
+  addBusyUserId = null
+  if (res.ok) {
+    toast(`${known.displayName} added to the party`)
+    void refreshSession()
+  } else {
+    toast(res.error ?? 'Could not add player', 'err')
+  }
+  void refreshLobby()
+  render(true)
 }
 
 // ── Polling ───────────────────────────────────────────────────────────────────

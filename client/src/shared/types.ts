@@ -83,6 +83,13 @@ export interface LobbyRow {
   status: LobbySlotStatus
   displayName: string | null  // party display name when matched
   tag: string | null          // user-set custom label, when status is 'tagged'
+  known: KnownPlayer | null   // set for intruders who are a registered Discord user (looked up async)
+}
+
+/** A lobby intruder recognized as a registered Discord user, keyed by riotId. */
+export interface KnownPlayer {
+  userId: string
+  displayName: string
 }
 
 export interface LobbyView {

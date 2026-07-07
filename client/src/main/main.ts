@@ -2,8 +2,8 @@ import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { discoverLcu, fetchFriends, fetchRegion, lcuRequest, type LcuCreds } from './lcu'
 import {
-  clearLink, fetchSession, getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode,
-  setAutoJoinSettings, setPartyGame, setTaggedPlayers,
+  addToParty, clearLink, fetchSession, getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode,
+  lookupPlayers, setAutoJoinSettings, setPartyGame, setTaggedPlayers,
 } from './bot'
 import { crossReference, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
 import type {
@@ -362,7 +362,19 @@ async function lobbyStatus(): Promise<LobbyView> {
     })),
   )
 
-  return crossReference(roster, lobby, lastSession?.userId ?? null, summoner?.puuid ?? null, getTaggedPlayers())
+  const view = crossReference(roster, lobby, lastSession?.userId ?? null, summoner?.puuid ?? null, getTaggedPlayers())
+
+  // Recognize intruders who are registered PartyBot users, so the UI can show
+  // their Discord tag and offer to add them instead of just flagging them.
+  const intruderIds = view.rows.filter(r => r.status === 'intruder').map(r => r.riotId)
+  if (intruderIds.length > 0) {
+    const known = await lookupPlayers(intruderIds)
+    for (const row of view.rows) {
+      if (row.status === 'intruder') row.known = known[row.riotId] ?? null
+    }
+  }
+
+  return view
 }
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
@@ -379,6 +391,11 @@ ipcMain.handle('session:get', async (): Promise<SessionResult> => {
 })
 ipcMain.handle('lobby:create-invite', (_e, mode: LobbyMode) => createLobbyAndInviteAll(mode))
 ipcMain.handle('lobby:status', () => lobbyStatus())
+ipcMain.handle('party:add', async (_e, userId: string) => {
+  const res = await addToParty(String(userId ?? ''))
+  if (res.ok) await fetchSession().then(r => { if (r.ok) lastSession = r.session as Session })
+  return res
+})
 ipcMain.handle('autojoin:get', (): AutoJoinSettings => getAutoJoinSettings())
 ipcMain.handle('autojoin:set', (_e, settings: AutoJoinSettings) => setAutoJoinSettings(settings))
 ipcMain.handle('tags:get', (): TaggedPlayer[] => getTaggedPlayers())
