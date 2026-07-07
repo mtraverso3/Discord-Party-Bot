@@ -11,7 +11,7 @@ import type {
 
 let creds: LcuCreds | null = null
 let summoner: SummonerInfo | null = null
-let region: string | null = null // platform id, e.g. "NA1" — stable for the connection
+let region: string | null = null // Riot Client region code, e.g. "NA" — stable for the connection
 
 // Riot ID lookups are stable for the lifetime of a client connection.
 const ignCache = new Map<string, { puuid: string; summonerId: number } | null>()
@@ -49,16 +49,19 @@ void pollLcu()
 
 // ── Auto-switch the party's game to match the connected LoL account's region ──
 
+// Keys match /riotclient/region-locale's own short region codes (e.g. "NA"),
+// not LCU platform ids (e.g. "NA1") — those are a different naming scheme.
 const REGION_GAME: Record<string, string> = {
-  NA1: 'LoL NA',
-  EUW1: 'LoL EUW',
-  PBE1: 'LoL PBE',
+  NA: 'LoL NA',
+  EUW: 'LoL EUW',
+  PBE: 'LoL PBE',
 }
 
 let autoSwitchRetryAt = 0 // backoff after a failed attempt, so failures don't spam every poll
+let switchingGame = false // in-flight guard: a slow request shouldn't overlap the next poll's attempt
 
 async function maybeAutoSwitchGame(): Promise<void> {
-  if (!region) return
+  if (!region || switchingGame) return
   const mapped = REGION_GAME[region]
   if (!mapped) return
 
@@ -66,11 +69,16 @@ async function maybeAutoSwitchGame(): Promise<void> {
   if (!party || !party.isOwner || party.game === mapped) return
   if (Date.now() < autoSwitchRetryAt) return
 
-  const res = await setPartyGame(mapped)
-  if (res.ok) {
-    party.game = mapped // optimistic; the next session poll confirms it
-  } else {
-    autoSwitchRetryAt = Date.now() + 30_000
+  switchingGame = true
+  try {
+    const res = await setPartyGame(mapped)
+    if (res.ok) {
+      party.game = mapped // optimistic; the next session poll confirms it
+    } else {
+      autoSwitchRetryAt = Date.now() + 30_000
+    }
+  } finally {
+    switchingGame = false
   }
 }
 
