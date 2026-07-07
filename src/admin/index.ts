@@ -1,7 +1,6 @@
 import type { AppBindings } from '../types'
 import { verifyAccessJwt } from './access'
 import { handleAdminApi } from './api'
-import { ADMIN_HTML } from './html'
 
 export async function handleAdmin(req: Request, env: AppBindings): Promise<Response> {
   const team = env.CF_ACCESS_TEAM
@@ -19,17 +18,36 @@ export async function handleAdmin(req: Request, env: AppBindings): Promise<Respo
   if (!verify.ok) return new Response('Forbidden — invalid Access token', { status: 403 })
 
   const url = new URL(req.url)
-  if (url.pathname === '/admin' || url.pathname === '/admin/') {
-    return new Response(ADMIN_HTML, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        // Don't let browsers cache the page; the JS picks up new server state on each load.
-        'Cache-Control': 'no-store',
-      },
-    })
-  }
   if (url.pathname.startsWith('/admin/api/')) {
     return handleAdminApi(req, env, url, verify.email)
   }
-  return new Response('Not Found', { status: 404 })
+  return serveSpa(req, env, url)
+}
+
+/**
+ * Serve the built admin SPA (admin-ui/dist) from the Worker's static assets
+ * binding. The SPA is built with base '/admin/', so we strip that prefix
+ * before hitting the binding; anything that isn't a real asset file falls
+ * back to index.html (client-side routing).
+ */
+async function serveSpa(req: Request, env: AppBindings, url: URL): Promise<Response> {
+  if (!env.ASSETS) {
+    return new Response('Admin UI assets not built — run `npm run build:admin` and redeploy.', { status: 503 })
+  }
+
+  const assetUrl = new URL(url)
+  assetUrl.pathname = url.pathname.slice('/admin'.length) || '/'
+
+  let res = await env.ASSETS.fetch(new Request(assetUrl.toString(), req))
+  if (res.status === 404) {
+    assetUrl.pathname = '/'
+    res = await env.ASSETS.fetch(new Request(assetUrl.toString(), req))
+  }
+
+  if ((res.headers.get('content-type') || '').includes('text/html')) {
+    // Don't let browsers cache the shell; hashed JS/CSS assets stay cacheable.
+    res = new Response(res.body, res)
+    res.headers.set('Cache-Control', 'no-store')
+  }
+  return res
 }

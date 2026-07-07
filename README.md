@@ -67,7 +67,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 
 ## Admin UI (optional)
 
-`/admin` serves a private web app for managing the bot — protected by Cloudflare Zero Trust (Access). It's a single inline asset served by the Worker: no build step, no framework.
+`/admin` serves a private web app for managing the bot — protected by Cloudflare Zero Trust (Access). It's a React + Vite SPA (`admin-ui/`) built to static assets and served by the Worker through the Workers static-assets binding; `npm run deploy` builds it automatically. Every request still goes through the Worker first (`run_worker_first`), so the Access JWT check gates the UI and its assets.
 
 - **Guild picker** — lists the servers the bot is in; remembers your last one
 - **Dashboard** — party/member/queue stats, per-game breakdown, upcoming auto-disbands
@@ -85,6 +85,8 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
    ```
 3. Without those vars set, `/admin` returns 503. The Worker also verifies the Access JWT in-process as defense in depth, so traffic that bypasses Access is rejected.
 4. Visit `https://<your-domain>/admin?guild=<guild-id>`.
+
+To hack on the UI itself: run `wrangler dev` in the repo root and `npm run dev` in `admin-ui/` — the Vite dev server proxies `/admin/api` to the Worker and hot-reloads the SPA.
 
 ## Desktop client (optional)
 

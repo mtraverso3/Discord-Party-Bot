@@ -3,10 +3,11 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "npm run build:admin && wrangler dev",
+    "deploy": "npm run build:admin && wrangler deploy",
+    "build:admin": "npm --prefix admin-ui install --no-audit --no-fund && npm --prefix admin-ui run build",
     "register": "npx tsx scripts/register.ts",
-    "test": "vitest run"
+    "test": "node -e \"require('fs').mkdirSync('admin-ui/dist', { recursive: true })\" && vitest run"
   },
   "dependencies": {
     "discord-hono": "^0.9.0"
