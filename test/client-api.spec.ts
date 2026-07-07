@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import type { PartyData } from '../src/types'
 import { generateLinkCode, handleClientApi, writeLinkCode } from '../src/client-api'
-import { setUserPartyId } from '../src/lib/party'
+import { saveUserIgn, setUserPartyId } from '../src/lib/party'
 import { saveGuildSettings, SETTINGS_DEFAULTS } from '../src/lib/settings'
 
 const OWNER = '100000000000000001'
@@ -129,5 +129,58 @@ describe('client session', () => {
     const token = await linkUser(OWNER, 'Owner', 'g4')
     expect((await req('DELETE', '/client/session', { token })).status).toBe(200)
     expect((await req('GET', '/client/session', { token })).status).toBe(401)
+  })
+})
+
+describe('client party game switch', () => {
+  it('requires a valid bearer token', async () => {
+    const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' } })
+    expect(res.status).toBe(401)
+  })
+
+  it('lets the owner switch the game and refreshes members\' per-game IGNs', async () => {
+    await makeParty('g5', 'LCU010', OWNER, [MEMBER])
+    await saveUserIgn(env.PARTY_KV, MEMBER, 'LoL NA', 'Sniper#NA1')
+    const token = await linkUser(OWNER, 'Owner', 'g5')
+
+    const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
+    expect(res.status).toBe(200)
+    const body = await res.json() as any
+    expect(body.ok).toBe(true)
+    expect(body.game).toBe('LoL NA')
+
+    const session = await (await req('GET', '/client/session', { token })).json() as any
+    expect(session.party.game).toBe('LoL NA')
+    const member = session.party.members.find((m: any) => m.userId === MEMBER)
+    expect(member.ign).toBe('Sniper#NA1')
+  })
+
+  it('is a no-op when the game is already set', async () => {
+    await makeParty('g6', 'LCU011', OWNER, [])
+    const token = await linkUser(OWNER, 'Owner', 'g6')
+    const res = await req('POST', '/client/party/game', { body: { game: 'League of Legends' }, token })
+    expect(res.status).toBe(200)
+    expect((await res.json() as any).ok).toBe(true)
+  })
+
+  it('rejects non-owners', async () => {
+    await makeParty('g7', 'LCU012', OWNER, [MEMBER])
+    const token = await linkUser(MEMBER, 'Member', 'g7')
+    const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects games disabled by guild settings', async () => {
+    await makeParty('g8', 'LCU013', OWNER, [])
+    await saveGuildSettings(env.PARTY_KV, 'g8', { ...SETTINGS_DEFAULTS, allowedGames: ['Valorant'] })
+    const token = await linkUser(OWNER, 'Owner', 'g8')
+    const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
+    expect(res.status).toBe(400)
+  })
+
+  it('404s when not in a party', async () => {
+    const token = await linkUser(OWNER, 'Owner', 'g9')
+    const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
+    expect(res.status).toBe(404)
   })
 })

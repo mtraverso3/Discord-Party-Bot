@@ -43,6 +43,17 @@ export async function discoverLcu(): Promise<LcuCreds | null> {
   return null
 }
 
+/** Platform id (e.g. "NA1", "EUW1") the running client is logged into, or null. */
+export async function fetchRegion(creds: LcuCreds): Promise<string | null> {
+  try {
+    const res = await lcuRequest(creds, 'GET', '/riotclient/region-locale')
+    const region = res.body?.region
+    return res.status === 200 && typeof region === 'string' ? region.toUpperCase() : null
+  } catch {
+    return null
+  }
+}
+
 export function lcuRequest(
   creds: LcuCreds,
   method: string,
