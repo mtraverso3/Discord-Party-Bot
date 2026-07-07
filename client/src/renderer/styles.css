@@ -94,6 +94,21 @@ header h1 {
   color: var(--muted);
   font-size: 12.5px;
 }
+.card summary {
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+.card summary::-webkit-details-marker { display: none; }
+.card summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+.card[open] summary::before { transform: rotate(90deg); }
 
 .center-card {
   margin-top: 8vh;

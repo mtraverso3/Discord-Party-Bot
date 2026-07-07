@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  InviteResult, LcuStatus, LinkState, LobbyMode, LobbyView, SessionResult,
+  AutoJoinSettings, InviteResult, LcuStatus, LinkState, LobbyMode, LobbyView, SessionResult,
 } from './shared/types'
 
 export interface PartyBotBridge {
@@ -11,6 +11,8 @@ export interface PartyBotBridge {
   session(): Promise<SessionResult>
   createLobbyAndInvite(mode: LobbyMode): Promise<InviteResult>
   lobbyStatus(): Promise<LobbyView>
+  autoJoinGet(): Promise<AutoJoinSettings>
+  autoJoinSet(settings: AutoJoinSettings): Promise<void>
 }
 
 const bridge: PartyBotBridge = {
@@ -21,6 +23,8 @@ const bridge: PartyBotBridge = {
   session: () => ipcRenderer.invoke('session:get'),
   createLobbyAndInvite: (mode) => ipcRenderer.invoke('lobby:create-invite', mode),
   lobbyStatus: () => ipcRenderer.invoke('lobby:status'),
+  autoJoinGet: () => ipcRenderer.invoke('autojoin:get'),
+  autoJoinSet: (settings) => ipcRenderer.invoke('autojoin:set', settings),
 }
 
 contextBridge.exposeInMainWorld('pb', bridge)

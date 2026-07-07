@@ -54,6 +54,21 @@ export async function fetchRegion(creds: LcuCreds): Promise<string | null> {
   }
 }
 
+/**
+ * Raw friend-list entries from the chat plugin. Shape isn't nailed down yet —
+ * this is deliberately typed loosely so the renderer can display whatever
+ * fields Riot actually sends until we've confirmed which one signals a
+ * joinable lobby.
+ */
+export async function fetchFriends(creds: LcuCreds): Promise<unknown[]> {
+  try {
+    const res = await lcuRequest(creds, 'GET', '/lol-chat/v1/friends')
+    return res.status === 200 && Array.isArray(res.body) ? res.body : []
+  } catch {
+    return []
+  }
+}
+
 export function lcuRequest(
   creds: LcuCreds,
   method: string,
