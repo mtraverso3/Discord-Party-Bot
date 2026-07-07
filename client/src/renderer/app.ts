@@ -1,5 +1,5 @@
 import type { PartyBotBridge } from '../preload'
-import type { LcuStatus, LinkState, LobbyMode, LobbyView, Session, SessionResult } from '../shared/types'
+import type { AutoJoinSettings, LcuStatus, LinkState, LobbyMode, LobbyView, Session, SessionResult } from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
 
 declare global {
@@ -47,6 +47,8 @@ let sessionError: string | null = null
 let lobby: LobbyView = { exists: false, rows: [], missing: [], intruders: 0 }
 let inviteBusy = false
 let selectedMode: LobbyMode = 'custom-draft'
+let autoJoin: AutoJoinSettings = { enabled: false, targetName: '', inviteParty: false }
+let autoJoinOpen = false // not part of viewKey — re-renders shouldn't force it closed
 
 const root = document.getElementById('app')!
 let lastKey = ''
@@ -60,7 +62,7 @@ function screen(): 'link' | 'no-party' | 'party' {
 // Re-render only when the data that drives the current screen changes, so the
 // link-code input never loses focus while polling.
 function viewKey(): string {
-  return JSON.stringify([screen(), lcu, session, sessionError, lobby, inviteBusy])
+  return JSON.stringify([screen(), lcu, session, sessionError, lobby, inviteBusy, autoJoin])
 }
 
 function render(force = false): void {
@@ -73,7 +75,43 @@ function render(force = false): void {
     : screen() === 'no-party' ? renderNoParty()
     : renderParty()
 
-  root.replaceChildren(renderHeader(), ...main, renderFooter())
+  root.replaceChildren(renderHeader(), renderAutoJoinCard(), ...main, renderFooter())
+}
+
+// ── Auto-join friend's lobby ──────────────────────────────────────────────────
+
+function renderAutoJoinCard(): HTMLElement {
+  const nameInput = el('input', {
+    type: 'text', placeholder: 'Friend Riot ID or name', value: autoJoin.targetName,
+    onchange: (e: Event) => {
+      autoJoin = { ...autoJoin, targetName: (e.target as HTMLInputElement).value }
+      void pb.autoJoinSet(autoJoin)
+    },
+  })
+  const enabledToggle = el('input', {
+    type: 'checkbox', checked: autoJoin.enabled,
+    onchange: (e: Event) => {
+      autoJoin = { ...autoJoin, enabled: (e.target as HTMLInputElement).checked }
+      void pb.autoJoinSet(autoJoin)
+    },
+  })
+  const invitePartyToggle = el('input', {
+    type: 'checkbox', checked: autoJoin.inviteParty,
+    onchange: (e: Event) => {
+      autoJoin = { ...autoJoin, inviteParty: (e.target as HTMLInputElement).checked }
+      void pb.autoJoinSet(autoJoin)
+    },
+  })
+
+  return el('details', {
+    class: 'card', open: autoJoinOpen,
+    ontoggle: (e: Event) => { autoJoinOpen = (e.target as HTMLDetailsElement).open },
+  },
+    el('summary', {}, "Auto-join friend's lobby"),
+    el('div', { class: 'row', style: 'margin-top:10px' }, el('label', {}, enabledToggle, ' Enabled'), nameInput),
+    el('div', { class: 'row', style: 'margin-top:8px' },
+      el('label', {}, invitePartyToggle, ' Invite my party after joining')),
+  )
 }
 
 // ── Header / footer ───────────────────────────────────────────────────────────
@@ -289,15 +327,22 @@ async function refreshLobby(): Promise<void> {
   render()
 }
 
+async function refreshAutoJoin(): Promise<void> {
+  autoJoin = await pb.autoJoinGet()
+  render()
+}
+
 async function start(): Promise<void> {
   link = await pb.linkState()
   await refreshLcu()
   await refreshSession()
   await refreshLobby()
+  await refreshAutoJoin()
   render(true)
   setInterval(() => { void refreshLcu() }, 3000)
   setInterval(() => { void refreshSession() }, 5000)
   setInterval(() => { void refreshLobby() }, 3000)
+  setInterval(() => { void refreshAutoJoin() }, 5000)
 }
 
 void start()

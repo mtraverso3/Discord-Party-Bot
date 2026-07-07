@@ -90,3 +90,9 @@ export interface LobbyView {
   missing: { displayName: string; ign: string | null }[]
   intruders: number
 }
+
+export interface AutoJoinSettings {
+  enabled: boolean
+  targetName: string
+  inviteParty: boolean
+}

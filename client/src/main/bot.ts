@@ -12,6 +12,15 @@ interface StoredConfig {
   displayName?: string
   guildId?: string
   botUrl?: string
+  autoJoinEnabled?: boolean
+  autoJoinTarget?: string   // friend's summoner/Riot ID name to auto-join when their lobby is joinable
+  autoJoinInviteParty?: boolean  // after joining, invite the linked Discord party in too
+}
+
+export interface AutoJoinSettings {
+  enabled: boolean
+  targetName: string
+  inviteParty: boolean
 }
 
 let config: StoredConfig | null = null
@@ -108,6 +117,20 @@ export async function setPartyGame(game: string): Promise<{ ok: boolean; error?:
   } catch (e) {
     return { ok: false, error: `Could not reach PartyBot: ${(e as Error).message}` }
   }
+}
+
+export function getAutoJoinSettings(): AutoJoinSettings {
+  const c = loadConfig()
+  return { enabled: !!c.autoJoinEnabled, targetName: c.autoJoinTarget ?? '', inviteParty: !!c.autoJoinInviteParty }
+}
+
+export function setAutoJoinSettings(next: AutoJoinSettings): void {
+  saveConfig({
+    ...loadConfig(),
+    autoJoinEnabled: next.enabled,
+    autoJoinTarget: next.targetName,
+    autoJoinInviteParty: next.inviteParty,
+  })
 }
 
 export function clearLink(revokeRemote = true): void {
