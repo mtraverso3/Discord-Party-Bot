@@ -1,12 +1,13 @@
-import type { AppBindings, PartyData } from '../types'
-import { callParty, getPartyStub, getUserPartyId } from '../lib/party'
-import { getGuildSettings } from '../lib/settings'
+import type { AppBindings, PartyData, UpdateResult } from '../types'
+import { callParty, getPartyStub, getUserProfile, getUserPartyId, updateIndexEntry, trySyncEmbed } from '../lib/party'
+import { gameAllowed, getGuildSettings } from '../lib/settings'
 
 // HTTP API consumed by the PartyBot desktop client.
 //
-//   POST   /client/auth     { code }  -> { token, userId, guildId, displayName }
-//   GET    /client/session  (Bearer)  -> { userId, displayName, guildId, canInvite, party | null }
-//   DELETE /client/session  (Bearer)  -> { ok }
+//   POST   /client/auth        { code }  -> { token, userId, guildId, displayName }
+//   GET    /client/session     (Bearer)  -> { userId, displayName, guildId, canInvite, party | null }
+//   DELETE /client/session     (Bearer)  -> { ok }
+//   POST   /client/party/game  (Bearer) { game } -> { ok, game? } | { ok: false, error }
 //
 // A short-lived link code (from `/party link` in Discord) is exchanged once
 // for a long-lived bearer token tied to the Discord user, so the client stays
@@ -73,7 +74,19 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
     }
     return await session(req, env)
   }
+  if (url.pathname === '/client/party/game' && req.method === 'POST') {
+    return await setPartyGame(req, env)
+  }
   return new Response('Not Found', { status: 404 })
+}
+
+/** Resolve the bearer token to its stored record, or null if invalid/expired. */
+async function authenticate(req: Request, env: AppBindings): Promise<TokenRecord | null> {
+  const header = req.headers.get('Authorization') ?? ''
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+  if (!/^[0-9a-f]{64}$/.test(token)) return null
+  const raw = await env.PARTY_KV.get(`client-token:${token}`)
+  return raw ? (JSON.parse(raw) as TokenRecord) : null
 }
 
 async function auth(req: Request, env: AppBindings): Promise<Response> {
@@ -169,4 +182,61 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
     canInvite,
     party,
   })
+}
+
+// Changes a party's game — used by the desktop client to auto-switch e.g.
+// "LoL NA" when it detects the linked player is on a matching League account.
+// Only the party owner may do this (same rule as `/party edit`).
+async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
+  const rec = await authenticate(req, env)
+  if (!rec) return json({ ok: false, error: 'Not linked.' }, 401)
+
+  let body: { game?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ ok: false, error: 'Invalid JSON body.' }, 400)
+  }
+  const game = typeof body.game === 'string' ? body.game.trim() : ''
+  if (!game) return json({ ok: false, error: 'game is required.' }, 400)
+
+  const partyId = await getUserPartyId(env.PARTY_KV, rec.guildId, rec.userId)
+  if (!partyId) return json({ ok: false, error: 'You are not in a party.' }, 404)
+
+  const stub = getPartyStub(env, rec.guildId, partyId)
+  const current = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+  if (!current) return json({ ok: false, error: 'Party not found.' }, 404)
+  if (current.ownerId !== rec.userId) {
+    return json({ ok: false, error: 'Only the party owner can change the game.' }, 403)
+  }
+  if (current.game === game) return json({ ok: true, game })
+
+  const settings = await getGuildSettings(env.PARTY_KV, rec.guildId)
+  if (!gameAllowed(settings, game)) return json({ ok: false, error: `${game} is not enabled on this server.` }, 400)
+
+  // Refresh every member's/queued user's IGN from their per-game profile, same
+  // as the `/party edit` modal does when the game changes.
+  const ids = [...current.members.map(m => m.userId), ...current.queue.map(q => q.userId)]
+  const profiles = await Promise.all(ids.map(uid => getUserProfile(env.PARTY_KV, uid)))
+  const ignMap: Record<string, string> = {}
+  ids.forEach((uid, i) => {
+    const ign = profiles[i]!.igns[game]
+    if (ign) ignMap[uid] = ign
+  })
+
+  const result = await callParty<UpdateResult>(stub, 'update', {
+    requesterId: rec.userId,
+    game,
+    ignMap,
+  }).catch(() => null)
+  if (!result) return json({ ok: false, error: 'Party not found.' }, 404)
+  if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can change the game.' }, 403)
+  if (result.status === 'invalid') return json({ ok: false, error: result.message ?? 'Invalid input.' }, 400)
+
+  if (result.gameChanged) {
+    await updateIndexEntry(env.PARTY_KV, rec.guildId, partyId, { game: result.data.game })
+  }
+  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+
+  return json({ ok: true, game: result.data.game })
 }

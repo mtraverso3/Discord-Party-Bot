@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
-import { discoverLcu, lcuRequest, type LcuCreds } from './lcu'
-import { clearLink, fetchSession, linkState, linkWithCode } from './bot'
+import { discoverLcu, fetchRegion, lcuRequest, type LcuCreds } from './lcu'
+import { clearLink, fetchSession, linkState, linkWithCode, setPartyGame } from './bot'
 import { crossReference, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
 import type {
   InviteOutcome, InviteResult, LcuStatus, LobbyMode, LobbyView, Session, SessionResult, SummonerInfo,
@@ -11,6 +11,7 @@ import type {
 
 let creds: LcuCreds | null = null
 let summoner: SummonerInfo | null = null
+let region: string | null = null // platform id, e.g. "NA1" — stable for the connection
 
 // Riot ID lookups are stable for the lifetime of a client connection.
 const ignCache = new Map<string, { puuid: string; summonerId: number } | null>()
@@ -23,6 +24,7 @@ async function pollLcu(): Promise<void> {
     creds = found
     ignCache.clear()
     puuidNameCache.clear()
+    region = null
   }
   try {
     const res = await lcuRequest(creds, 'GET', '/lol-summoner/v1/current-summoner')
@@ -33,15 +35,44 @@ async function pollLcu(): Promise<void> {
         gameName: res.body.gameName || res.body.displayName || 'Summoner',
         tagLine: res.body.tagLine || '',
       }
+      if (region === null) region = await fetchRegion(creds)
       return
     }
   } catch { /* client gone */ }
   creds = null
   summoner = null
+  region = null
 }
 
 setInterval(() => { void pollLcu() }, 3000)
 void pollLcu()
+
+// ── Auto-switch the party's game to match the connected LoL account's region ──
+
+const REGION_GAME: Record<string, string> = {
+  NA1: 'LoL NA',
+  EUW1: 'LoL EUW',
+  PBE1: 'LoL PBE',
+}
+
+let autoSwitchRetryAt = 0 // backoff after a failed attempt, so failures don't spam every poll
+
+async function maybeAutoSwitchGame(): Promise<void> {
+  if (!region) return
+  const mapped = REGION_GAME[region]
+  if (!mapped) return
+
+  const party = lastSession?.party
+  if (!party || !party.isOwner || party.game === mapped) return
+  if (Date.now() < autoSwitchRetryAt) return
+
+  const res = await setPartyGame(mapped)
+  if (res.ok) {
+    party.game = mapped // optimistic; the next session poll confirms it
+  } else {
+    autoSwitchRetryAt = Date.now() + 30_000
+  }
+}
 
 // ── Session cache (main is authoritative; renderer only renders) ────────────
 
@@ -218,6 +249,7 @@ ipcMain.handle('link:logout', () => { clearLink(); lastSession = null })
 ipcMain.handle('session:get', async (): Promise<SessionResult> => {
   const result = await fetchSession()
   lastSession = result.ok ? (result.session as Session) : null
+  void maybeAutoSwitchGame()
   return result as SessionResult
 })
 ipcMain.handle('lobby:create-invite', (_e, mode: LobbyMode) => createLobbyAndInviteAll(mode))

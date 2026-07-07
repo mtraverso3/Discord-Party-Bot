@@ -98,6 +98,18 @@ export async function fetchSession(): Promise<{ ok: boolean; authExpired?: boole
   return { ok: true, session: res.body }
 }
 
+export async function setPartyGame(game: string): Promise<{ ok: boolean; error?: string }> {
+  const token = loadConfig().token
+  if (!token) return { ok: false, error: 'Not linked.' }
+  try {
+    const res = await botFetch('POST', '/client/party/game', { game }, token)
+    if (res.status !== 200) return { ok: false, error: res.body?.error ?? `PartyBot returned ${res.status}.` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: `Could not reach PartyBot: ${(e as Error).message}` }
+  }
+}
+
 export function clearLink(revokeRemote = true): void {
   const token = loadConfig().token
   if (revokeRemote && token) {
