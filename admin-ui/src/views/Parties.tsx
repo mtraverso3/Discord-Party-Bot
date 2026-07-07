@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { Avatar } from '../components/Avatar'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
+import { ChannelSelect } from '../components/ChannelSelect'
 import { useGuildData } from '../lib/guildData'
 import { deadlineOf, fmtAbs, relTime } from '../lib/time'
 import type { ChannelInfo, GuildSettings, Party, PartyMember, QueueEntry, VoiceStatus } from '../types'
@@ -248,15 +249,10 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
         </label>
         <label>Player cap<input type="number" min={2} max={50} value={cap} onChange={e => setCap(Number(e.target.value))} /></label>
         <label>Post embed in
-          <select value={channel || textChannels[0]?.id || ''} onChange={e => setChannel(e.target.value)}>
-            {textChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-          </select>
+          <ChannelSelect channels={textChannels} value={channel || textChannels[0]?.id || ''} onChange={setChannel} />
         </label>
         <label>Voice channel
-          <select value={voice} onChange={e => setVoice(e.target.value)}>
-            <option value="">— none —</option>
-            {voiceChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-          </select>
+          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
         </label>
         <label className="span-2">Description<textarea value={desc} placeholder="Description (optional)" onChange={e => setDesc(e.target.value)} /></label>
         <div className="span-2 toolbar">
@@ -500,7 +496,6 @@ function SettingsSection({ p, voiceChannels, onUpdate, onRemove }: {
   const now = Date.now()
   const lastLabel = last <= now ? relTime(now - last) + ' ago' : 'just now'
   const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
-  const unknownVoice = voice && !voiceChannels.find(c => c.id === voice)
 
   const act = async (fn: () => Promise<Party>, okMsg: string) => {
     try {
@@ -525,10 +520,7 @@ function SettingsSection({ p, voiceChannels, onUpdate, onRemove }: {
           </select>
         </label>
         <label>Voice channel
-          <select value={voice} onChange={e => setVoice(e.target.value)}>
-            {voiceChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-            {unknownVoice && <option value={voice}>(unknown: {voice})</option>}
-          </select>
+          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
         </label>
         <label className="span-2">Description<textarea value={desc} onChange={e => setDesc(e.target.value)} /></label>
       </form>

@@ -4,6 +4,7 @@ import { GAMES } from '../games'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
+import { ChannelSelect } from '../components/ChannelSelect'
 import { useGuildData } from '../lib/guildData'
 import { useLoad } from '../lib/useLoad'
 import type { ChannelInfo, GuildSettings, Party, PartyTemplate } from '../types'
@@ -152,7 +153,6 @@ function TemplateForm({ t, settings, voiceChannels, onSaved, onCancel }: {
   const [desc, setDesc] = useState(t?.description || '')
   const [bans, setBans] = useState(t?.banlist || '')
   const [busy, setBusy] = useState(false)
-  const unknownVoice = voice && !voiceChannels.find(c => c.id === voice)
 
   const submit = async () => {
     if (!label.trim()) return toast('A template label is required.', 'err')
@@ -190,11 +190,7 @@ function TemplateForm({ t, settings, voiceChannels, onSaved, onCancel }: {
         </label>
         <label>Player cap<input type="number" min={2} max={50} value={cap} onChange={e => setCap(Number(e.target.value))} /></label>
         <label className="span-2">Voice channel
-          <select value={voice} onChange={e => setVoice(e.target.value)}>
-            <option value="">— none —</option>
-            {voiceChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-            {unknownVoice && <option value={voice}>(unknown: {voice})</option>}
-          </select>
+          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
         </label>
         <label className="span-2">Description<textarea value={desc} placeholder="Description (optional)" onChange={e => setDesc(e.target.value)} /></label>
         <label className="span-2">Banlist<textarea className="bans" value={bans} placeholder="One champion per line (optional)" onChange={e => setBans(e.target.value)} /></label>
@@ -220,7 +216,6 @@ function ApplyForm({ t, voiceChannels, textChannels, onDone }: {
   const [channel, setChannel] = useState('')
   const [voice, setVoice] = useState(t.voiceChannelId || '')
   const [busy, setBusy] = useState(false)
-  const unknownVoice = voice && !voiceChannels.find(c => c.id === voice)
 
   const submit = async () => {
     const ownerId = ownerPicker.current?.getId()
@@ -254,16 +249,10 @@ function ApplyForm({ t, voiceChannels, textChannels, onDone }: {
       <form className="grid-2" onSubmit={e => { e.preventDefault(); if (!busy) submit() }}>
         <label className="span-2">Assign to<UserPicker ref={ownerPicker} placeholder="Search member by name, or paste an ID" /></label>
         <label>Post embed in
-          <select value={channel || textChannels[0]?.id || ''} onChange={e => setChannel(e.target.value)}>
-            {textChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-          </select>
+          <ChannelSelect channels={textChannels} value={channel || textChannels[0]?.id || ''} onChange={setChannel} />
         </label>
         <label>Voice channel
-          <select value={voice} onChange={e => setVoice(e.target.value)}>
-            <option value="">— none —</option>
-            {voiceChannels.map(c => <option key={c.id} value={c.id}>#{c.name}</option>)}
-            {unknownVoice && <option value={voice}>(unknown: {voice})</option>}
-          </select>
+          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
         </label>
         <div className="span-2 toolbar">
           <button type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Creating…' : 'Create party'}</button>
