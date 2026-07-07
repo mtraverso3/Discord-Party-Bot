@@ -57,7 +57,11 @@ export function linkState(): { linked: boolean; displayName?: string; userId?: s
 }
 
 async function botFetch(method: string, path: string, body?: unknown, token?: string): Promise<{ status: number; body: any }> {
-  const headers: Record<string, string> = {}
+  // Identifies the desktop client to Cloudflare so it isn't mistaken for a
+  // headless bot by edge heuristics (e.g. Bot Fight Mode) — those block
+  // before the request reaches this Worker's own code, surfacing as a 403
+  // with no application-level error body.
+  const headers: Record<string, string> = { 'User-Agent': `PartyBot-Client/${app.getVersion()}` }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(`${botUrl()}${path}`, {
