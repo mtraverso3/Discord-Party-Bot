@@ -43,7 +43,7 @@ export async function discoverLcu(): Promise<LcuCreds | null> {
   return null
 }
 
-/** Platform id (e.g. "NA1", "EUW1") the running client is logged into, or null. */
+/** Riot Client's short region code (e.g. "NA", "EUW") for the logged-in account, or null. */
 export async function fetchRegion(creds: LcuCreds): Promise<string | null> {
   try {
     const res = await lcuRequest(creds, 'GET', '/riotclient/region-locale')
@@ -51,6 +51,21 @@ export async function fetchRegion(creds: LcuCreds): Promise<string | null> {
     return res.status === 200 && typeof region === 'string' ? region.toUpperCase() : null
   } catch {
     return null
+  }
+}
+
+/**
+ * Raw friend-list entries from the chat plugin. Shape isn't nailed down yet —
+ * this is deliberately typed loosely so the renderer can display whatever
+ * fields Riot actually sends until we've confirmed which one signals a
+ * joinable lobby.
+ */
+export async function fetchFriends(creds: LcuCreds): Promise<unknown[]> {
+  try {
+    const res = await lcuRequest(creds, 'GET', '/lol-chat/v1/friends')
+    return res.status === 200 && Array.isArray(res.body) ? res.body : []
+  } catch {
+    return []
   }
 }
 

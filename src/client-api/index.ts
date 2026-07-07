@@ -1,6 +1,9 @@
 import type { AppBindings, PartyData, UpdateResult } from '../types'
+import { GAMES } from '../lib/games'
 import { callParty, getPartyStub, getUserProfile, getUserPartyId, updateIndexEntry, trySyncEmbed } from '../lib/party'
 import { gameAllowed, getGuildSettings } from '../lib/settings'
+
+const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
 // HTTP API consumed by the PartyBot desktop client.
 //
@@ -80,13 +83,25 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
   return new Response('Not Found', { status: 404 })
 }
 
-/** Resolve the bearer token to its stored record, or null if invalid/expired. */
-async function authenticate(req: Request, env: AppBindings): Promise<TokenRecord | null> {
+/**
+ * Resolve the bearer token to its stored record (sliding-refreshing its TTL
+ * while in active use), or null if missing/invalid/expired.
+ */
+async function authenticate(req: Request, env: AppBindings): Promise<{ key: string; rec: TokenRecord } | null> {
   const header = req.headers.get('Authorization') ?? ''
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
   if (!/^[0-9a-f]{64}$/.test(token)) return null
-  const raw = await env.PARTY_KV.get(`client-token:${token}`)
-  return raw ? (JSON.parse(raw) as TokenRecord) : null
+  const key = `client-token:${token}`
+  const raw = await env.PARTY_KV.get(key)
+  if (!raw) return null
+  const rec = JSON.parse(raw) as TokenRecord
+
+  const now = Date.now()
+  if (now - rec.refreshedAt > TOKEN_REFRESH_INTERVAL_MS) {
+    rec.refreshedAt = now
+    await env.PARTY_KV.put(key, JSON.stringify(rec), { expirationTtl: TOKEN_TTL_SECONDS })
+  }
+  return { key, rec }
 }
 
 async function auth(req: Request, env: AppBindings): Promise<Response> {
@@ -128,25 +143,13 @@ async function auth(req: Request, env: AppBindings): Promise<Response> {
 }
 
 async function session(req: Request, env: AppBindings): Promise<Response> {
-  const header = req.headers.get('Authorization') ?? ''
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-  if (!/^[0-9a-f]{64}$/.test(token)) return json({ error: 'Not linked.' }, 401)
-
-  const key = `client-token:${token}`
-  const raw = await env.PARTY_KV.get(key)
-  if (!raw) return json({ error: 'Token expired or revoked. Link again with /party link.' }, 401)
-  const rec = JSON.parse(raw) as TokenRecord
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ error: 'Not linked.' }, 401)
+  const { key, rec } = auth
 
   if (req.method === 'DELETE') {
     await env.PARTY_KV.delete(key)
     return json({ ok: true })
-  }
-
-  // Sliding expiry: extend the token while the client is in active use.
-  const now = Date.now()
-  if (now - rec.refreshedAt > TOKEN_REFRESH_INTERVAL_MS) {
-    rec.refreshedAt = now
-    await env.PARTY_KV.put(key, JSON.stringify(rec), { expirationTtl: TOKEN_TTL_SECONDS })
   }
 
   const partyId = await getUserPartyId(env.PARTY_KV, rec.guildId, rec.userId)
@@ -188,8 +191,9 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
 // "LoL NA" when it detects the linked player is on a matching League account.
 // Only the party owner may do this (same rule as `/party edit`).
 async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
-  const rec = await authenticate(req, env)
-  if (!rec) return json({ ok: false, error: 'Not linked.' }, 401)
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ ok: false, error: 'Not linked.' }, 401)
+  const { rec } = auth
 
   let body: { game?: string }
   try {
@@ -199,6 +203,12 @@ async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
   }
   const game = typeof body.game === 'string' ? body.game.trim() : ''
   if (!game) return json({ ok: false, error: 'game is required.' }, 400)
+  // Every other way to set a party's game (the /party create/edit dropdown,
+  // the admin API) is constrained to the GAMES catalog — this client-facing
+  // path is the first one reachable by any linked user, not just admins, so
+  // it needs the same guard against an arbitrary, unbounded string landing
+  // in the guild-wide party index.
+  if (!VALID_GAMES.has(game)) return json({ ok: false, error: 'Invalid game.' }, 400)
 
   const partyId = await getUserPartyId(env.PARTY_KV, rec.guildId, rec.userId)
   if (!partyId) return json({ ok: false, error: 'You are not in a party.' }, 404)

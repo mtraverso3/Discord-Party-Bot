@@ -158,9 +158,17 @@ describe('client party game switch', () => {
   it('is a no-op when the game is already set', async () => {
     await makeParty('g6', 'LCU011', OWNER, [])
     const token = await linkUser(OWNER, 'Owner', 'g6')
-    const res = await req('POST', '/client/party/game', { body: { game: 'League of Legends' }, token })
+    await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
+    const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
     expect(res.status).toBe(200)
     expect((await res.json() as any).ok).toBe(true)
+  })
+
+  it('rejects games outside the GAMES catalog', async () => {
+    await makeParty('g11', 'LCU015', OWNER, [])
+    const token = await linkUser(OWNER, 'Owner', 'g11')
+    const res = await req('POST', '/client/party/game', { body: { game: 'Not A Real Game' }, token })
+    expect(res.status).toBe(400)
   })
 
   it('rejects non-owners', async () => {

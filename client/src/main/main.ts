@@ -1,17 +1,20 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
-import { discoverLcu, fetchRegion, lcuRequest, type LcuCreds } from './lcu'
-import { clearLink, fetchSession, linkState, linkWithCode, setPartyGame } from './bot'
+import { discoverLcu, fetchFriends, fetchRegion, lcuRequest, type LcuCreds } from './lcu'
+import {
+  clearLink, fetchSession, getAutoJoinSettings, linkState, linkWithCode, setAutoJoinSettings, setPartyGame,
+} from './bot'
 import { crossReference, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
 import type {
-  InviteOutcome, InviteResult, LcuStatus, LobbyMode, LobbyView, Session, SessionResult, SummonerInfo,
+  AutoJoinSettings, InviteOutcome, InviteResult, LcuStatus, LobbyMode, LobbyView, Session,
+  SessionResult, SummonerInfo,
 } from '../shared/types'
 
 // ── LCU connection state ─────────────────────────────────────────────────────
 
 let creds: LcuCreds | null = null
 let summoner: SummonerInfo | null = null
-let region: string | null = null // platform id, e.g. "NA1" — stable for the connection
+let region: string | null = null // Riot Client region code, e.g. "NA" — stable for the connection
 
 // Riot ID lookups are stable for the lifetime of a client connection.
 const ignCache = new Map<string, { puuid: string; summonerId: number } | null>()
@@ -49,16 +52,19 @@ void pollLcu()
 
 // ── Auto-switch the party's game to match the connected LoL account's region ──
 
+// Keys match /riotclient/region-locale's own short region codes (e.g. "NA"),
+// not LCU platform ids (e.g. "NA1") — those are a different naming scheme.
 const REGION_GAME: Record<string, string> = {
-  NA1: 'LoL NA',
-  EUW1: 'LoL EUW',
-  PBE1: 'LoL PBE',
+  NA: 'LoL NA',
+  EUW: 'LoL EUW',
+  PBE: 'LoL PBE',
 }
 
 let autoSwitchRetryAt = 0 // backoff after a failed attempt, so failures don't spam every poll
+let switchingGame = false // in-flight guard: a slow request shouldn't overlap the next poll's attempt
 
 async function maybeAutoSwitchGame(): Promise<void> {
-  if (!region) return
+  if (!region || switchingGame) return
   const mapped = REGION_GAME[region]
   if (!mapped) return
 
@@ -66,13 +72,119 @@ async function maybeAutoSwitchGame(): Promise<void> {
   if (!party || !party.isOwner || party.game === mapped) return
   if (Date.now() < autoSwitchRetryAt) return
 
-  const res = await setPartyGame(mapped)
-  if (res.ok) {
-    party.game = mapped // optimistic; the next session poll confirms it
-  } else {
-    autoSwitchRetryAt = Date.now() + 30_000
+  switchingGame = true
+  try {
+    const res = await setPartyGame(mapped)
+    if (res.ok) {
+      party.game = mapped // optimistic; the next session poll confirms it
+    } else {
+      autoSwitchRetryAt = Date.now() + 30_000
+    }
+  } finally {
+    switchingGame = false
   }
 }
+
+// ── Friend-list auto-join ────────────────────────────────────────────────────
+//
+// The League client's friends list shows a "Join" option next to a friend
+// when they have an open/joinable lobby. That's powered by the friend's
+// `lol.pty` field — a JSON-encoded string (confirmed live) shaped like:
+//   { partyId, queueId, isPartyOpen, maxPlayers, summonerPuuids, summoners }
+// `lol.ptyType === "open"` mirrors `isPartyOpen`. Joining calls
+// POST /lol-lobby/v2/party/{partyId}/join (confirmed against the LCU swagger
+// spec — undocumented in the usual community LCU references).
+
+let joiningParty = false
+
+// Cooldown after any join attempt (success or failure) — just long enough
+// for the friend's presence to reflect our membership, not a permanent
+// "already handled" flag. Leaving the lobby (on purpose or by disconnect)
+// gets us auto-joined right back in once this window passes and their
+// party is still open. Also used to space out the extra invite retries below.
+const RETRY_INTERVAL_MS = 10_000
+let joinRetryAt = 0
+
+// After a successful join, invite attempts are retried a couple more times on
+// the same interval — the first invite can fire before the LCU has fully
+// registered our membership in the lobby, so a bare one-shot attempt can
+// silently miss.
+const EXTRA_INVITE_ATTEMPTS = 2
+let inviteAttemptsRemaining = 0
+let nextInviteAttemptAt = 0
+
+function friendMatches(friend: any, targetName: string): boolean {
+  const target = targetName.trim().toLowerCase()
+  if (!target) return false
+  const candidates: unknown[] = [
+    friend?.name, friend?.gameName, friend?.summonerName,
+    friend?.gameName && friend?.gameTag ? `${friend.gameName}#${friend.gameTag}` : null,
+    friend?.gameName && friend?.tagLine ? `${friend.gameName}#${friend.tagLine}` : null,
+  ]
+  return candidates.some(c => typeof c === 'string' && c.trim().toLowerCase() === target)
+}
+
+interface FriendPartyInfo {
+  partyId: string
+  isPartyOpen: boolean
+  summonerPuuids: string[]
+}
+
+function parseFriendParty(friend: any): FriendPartyInfo | null {
+  const raw = friend?.lol?.pty
+  if (typeof raw !== 'string' || !raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed.partyId !== 'string') return null
+    return {
+      partyId: parsed.partyId,
+      isPartyOpen: !!parsed.isPartyOpen,
+      summonerPuuids: Array.isArray(parsed.summonerPuuids) ? parsed.summonerPuuids : [],
+    }
+  } catch {
+    return null
+  }
+}
+
+async function pollAutoJoin(): Promise<void> {
+  if (!creds) return
+  const settings = getAutoJoinSettings()
+  if (!settings.enabled || !settings.targetName.trim()) return
+
+  const friends = await fetchFriends(creds)
+  const friend = friends.find(f => friendMatches(f, settings.targetName)) ?? null
+  if (!friend) return
+
+  const party = parseFriendParty(friend)
+  if (!party || !party.isPartyOpen) return
+
+  if (summoner && party.summonerPuuids.includes(summoner.puuid)) {
+    // Already in it — fire the remaining follow-up invite retries, if any.
+    if (settings.inviteParty && inviteAttemptsRemaining > 0 && Date.now() >= nextInviteAttemptAt) {
+      inviteAttemptsRemaining--
+      nextInviteAttemptAt = Date.now() + RETRY_INTERVAL_MS
+      void inviteAllToCurrentLobby(false).catch(() => {})
+    }
+    return
+  }
+
+  if (joiningParty || Date.now() < joinRetryAt) return
+
+  joiningParty = true
+  try {
+    const res = await lcuRequest(creds, 'POST', `/lol-lobby/v2/party/${party.partyId}/join`, {})
+    if (res.status >= 200 && res.status < 300 && settings.inviteParty) {
+      inviteAttemptsRemaining = EXTRA_INVITE_ATTEMPTS
+      nextInviteAttemptAt = Date.now() + RETRY_INTERVAL_MS
+      void inviteAllToCurrentLobby(false).catch(() => {})
+    }
+  } catch { /* retried next cooldown window regardless */ } finally {
+    joinRetryAt = Date.now() + RETRY_INTERVAL_MS
+    joiningParty = false
+  }
+}
+
+setInterval(() => { void pollAutoJoin() }, 5000)
 
 // ── Session cache (main is authoritative; renderer only renders) ────────────
 
@@ -147,25 +259,15 @@ function lobbyPayload(mode: LobbyMode, partyName: string): unknown {
   }
 }
 
-async function createLobbyAndInviteAll(mode: LobbyMode): Promise<InviteResult> {
+// Sends invitations to every other party member into whatever lobby the
+// client is currently in — does not create or check for one, so it's safe to
+// call right after joining someone else's lobby (unlike createLobbyAndInviteAll,
+// this never falls back to creating a new one).
+async function inviteAllToCurrentLobby(createdNew: boolean): Promise<InviteResult> {
   if (!creds || !summoner) return { ok: false, error: 'League client is not connected.', outcomes: [] }
   const party = lastSession?.party
   if (!party) return { ok: false, error: 'You are not in a party.', outcomes: [] }
   if (!lastSession?.canInvite) return { ok: false, error: 'You are not allowed to invite for this party.', outcomes: [] }
-
-  // Invite into the lobby the leader is already in, if any; only create a
-  // fresh one when there is none (creating would replace the current lobby).
-  let createdNew = false
-  const existing = await lcuRequest(creds, 'GET', '/lol-lobby/v2/lobby')
-    .catch(() => ({ status: 0, body: null }))
-  if (existing.status !== 200) {
-    const create = await lcuRequest(creds, 'POST', '/lol-lobby/v2/lobby', lobbyPayload(mode, party.name))
-      .catch(() => ({ status: 0, body: null }))
-    if (create.status >= 400 || create.status === 0) {
-      return { ok: false, error: `Could not create the lobby (LCU ${create.status}).`, outcomes: [] }
-    }
-    createdNew = true
-  }
 
   const outcomes: InviteOutcome[] = []
   const invites: { toSummonerId: number }[] = []
@@ -202,6 +304,28 @@ async function createLobbyAndInviteAll(mode: LobbyMode): Promise<InviteResult> {
   }
 
   return { ok: true, createdNew, outcomes }
+}
+
+async function createLobbyAndInviteAll(mode: LobbyMode): Promise<InviteResult> {
+  if (!creds) return { ok: false, error: 'League client is not connected.', outcomes: [] }
+  const party = lastSession?.party
+  if (!party) return { ok: false, error: 'You are not in a party.', outcomes: [] }
+
+  // Invite into the lobby the leader is already in, if any; only create a
+  // fresh one when there is none (creating would replace the current lobby).
+  let createdNew = false
+  const existing = await lcuRequest(creds, 'GET', '/lol-lobby/v2/lobby')
+    .catch(() => ({ status: 0, body: null }))
+  if (existing.status !== 200) {
+    const create = await lcuRequest(creds, 'POST', '/lol-lobby/v2/lobby', lobbyPayload(mode, party.name))
+      .catch(() => ({ status: 0, body: null }))
+    if (create.status >= 400 || create.status === 0) {
+      return { ok: false, error: `Could not create the lobby (LCU ${create.status}).`, outcomes: [] }
+    }
+    createdNew = true
+  }
+
+  return inviteAllToCurrentLobby(createdNew)
 }
 
 // ── Lobby cross-reference ────────────────────────────────────────────────────
@@ -254,6 +378,8 @@ ipcMain.handle('session:get', async (): Promise<SessionResult> => {
 })
 ipcMain.handle('lobby:create-invite', (_e, mode: LobbyMode) => createLobbyAndInviteAll(mode))
 ipcMain.handle('lobby:status', () => lobbyStatus())
+ipcMain.handle('autojoin:get', (): AutoJoinSettings => getAutoJoinSettings())
+ipcMain.handle('autojoin:set', (_e, settings: AutoJoinSettings) => setAutoJoinSettings(settings))
 
 // ── Window ───────────────────────────────────────────────────────────────────
 
