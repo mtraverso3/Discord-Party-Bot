@@ -39,6 +39,9 @@ jobs:
       - name: Typecheck and test before deploying
         run: npx tsc --noEmit && npm test
 
+      - name: Build admin UI
+        run: npm run build:admin
+
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy
         env:
