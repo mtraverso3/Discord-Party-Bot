@@ -1,4 +1,6 @@
+import { CheckCircle2, XCircle } from 'lucide-react'
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
+import { cn } from '../lib/cn'
 
 type ToastFn = (msg: string, kind?: 'ok' | 'err') => void
 
@@ -21,7 +23,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={show}>
       {children}
-      {toast && <div id="toast" className={toast.kind === 'err' ? 'err' : ''}>{toast.msg}</div>}
+      {toast && (
+        <div
+          className={cn(
+            'animate-toast-in fixed right-4 bottom-4 z-50 flex max-w-sm items-center gap-2.5 rounded-lg border bg-popover px-4 py-3 text-sm text-popover-foreground shadow-lg',
+            toast.kind === 'err' && 'border-destructive/40',
+          )}
+          role="status"
+        >
+          {toast.kind === 'err'
+            ? <XCircle className="size-4 shrink-0 text-destructive" />
+            : <CheckCircle2 className="size-4 shrink-0 text-success" />}
+          {toast.msg}
+        </div>
+      )}
     </ToastContext.Provider>
   )
 }

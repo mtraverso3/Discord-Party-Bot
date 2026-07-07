@@ -1,4 +1,6 @@
+import { TriangleAlert } from 'lucide-react'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Button } from './ui'
 
 type ConfirmFn = (message: string, confirmLabel?: string) => Promise<boolean>
 
@@ -40,14 +42,22 @@ function ConfirmDialog({ pending, onFinish }: { pending: Pending; onFinish: (v: 
   return (
     <dialog
       ref={ref}
-      className="confirm"
+      className="animate-dialog-in m-auto w-full max-w-sm rounded-xl border bg-card p-6 text-card-foreground shadow-xl"
       onClose={() => onFinish(false)}
       onClick={e => { if (e.target === ref.current) onFinish(false) }}
     >
-      <p>{pending.message}</p>
-      <div className="dlg-actions">
-        <button type="button" className="ghost" onClick={() => onFinish(false)}>Cancel</button>
-        <button type="button" className="danger" onClick={() => onFinish(true)}>{pending.confirmLabel}</button>
+      <div className="flex gap-3">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-danger-muted">
+          <TriangleAlert className="size-4 text-destructive" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">Are you sure?</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{pending.message}</p>
+        </div>
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="outline" size="sm" onClick={() => onFinish(false)}>Cancel</Button>
+        <Button variant="destructive" size="sm" onClick={() => onFinish(true)}>{pending.confirmLabel}</Button>
       </div>
     </dialog>
   )
