@@ -69,6 +69,49 @@ export async function fetchFriends(creds: LcuCreds): Promise<unknown[]> {
   }
 }
 
+/** A champion pick keyed by the player's puuid. championId 0 means "no pick yet". */
+export interface ChampSelectPick {
+  puuid: string
+  championId: number
+}
+
+/**
+ * Champion picks from the local champ-select session, covering both teams.
+ * Works for every lobby type (customs included, unlike the Spectator API) and
+ * updates live as players hover/lock. Empty when not in champ select.
+ */
+export async function fetchChampSelectPicks(creds: LcuCreds): Promise<ChampSelectPick[]> {
+  try {
+    const res = await lcuRequest(creds, 'GET', '/lol-champ-select/v1/session')
+    if (res.status !== 200) return []
+    const teams = [res.body?.myTeam, res.body?.theirTeam]
+    const picks: ChampSelectPick[] = []
+    for (const team of teams) {
+      if (!Array.isArray(team)) continue
+      for (const cell of team) {
+        const puuid: unknown = cell?.puuid
+        const championId = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
+        if (typeof puuid === 'string' && puuid && Number.isFinite(championId) && championId > 0) {
+          picks.push({ puuid, championId })
+        }
+      }
+    }
+    return picks
+  } catch {
+    return []
+  }
+}
+
+/** The current gameflow phase (e.g. "ChampSelect", "InProgress"), or "" if unknown. */
+export async function fetchGameflowPhase(creds: LcuCreds): Promise<string> {
+  try {
+    const res = await lcuRequest(creds, 'GET', '/lol-gameflow/v1/gameflow-phase')
+    return res.status === 200 && typeof res.body === 'string' ? res.body : ''
+  } catch {
+    return ''
+  }
+}
+
 export function lcuRequest(
   creds: LcuCreds,
   method: string,

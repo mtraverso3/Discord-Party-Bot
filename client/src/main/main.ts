@@ -1,14 +1,18 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
-import { discoverLcu, fetchFriends, fetchRegion, lcuRequest, type LcuCreds } from './lcu'
 import {
-  addToParty, clearLink, fetchSession, getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode,
-  lookupPlayers, setAutoJoinSettings, setPartyGame, setTaggedPlayers,
+  discoverLcu, fetchChampSelectPicks, fetchFriends, fetchGameflowPhase, fetchRegion, lcuRequest,
+  type LcuCreds,
+} from './lcu'
+import {
+  addToParty, clearLink, fetchChampionCatalog, fetchLiveChampions, fetchSession, getAutoJoinSettings,
+  getTaggedPlayers, linkState, linkWithCode, lookupPlayers, setAutoJoinSettings, setPartyGame,
+  setTaggedPlayers, type ChampionCatalog,
 } from './bot'
-import { crossReference, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
+import { crossReference, formatRiotId, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
 import type {
-  AutoJoinSettings, InviteOutcome, InviteResult, LcuStatus, LobbyMode, LobbyView, Session,
-  SessionResult, SummonerInfo, TaggedPlayer,
+  AutoJoinSettings, ChampionPick, GamePhase, GameView, InviteOutcome, InviteResult, LcuStatus, LobbyMode,
+  LobbyView, Session, SessionResult, SummonerInfo, TaggedPlayer,
 } from '../shared/types'
 
 // ── LCU connection state ─────────────────────────────────────────────────────
@@ -377,6 +381,85 @@ async function lobbyStatus(): Promise<LobbyView> {
   return view
 }
 
+// ── Champion picks (champ select + live game) ────────────────────────────────
+
+// The Data Dragon catalog is stable for a patch; fetch it once per app run and
+// reuse it to turn numeric championIds into names + icons.
+let championCatalog: ChampionCatalog | null = null
+
+async function ensureCatalog(): Promise<ChampionCatalog | null> {
+  if (!championCatalog) championCatalog = await fetchChampionCatalog()
+  return championCatalog
+}
+
+function normalizeRiotId(riotId: string): string {
+  return riotId.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+const EMPTY_GAME: GameView = { phase: 'none', byUserId: {}, byRiotId: {} }
+
+/**
+ * Champion picks for the party's current champ select or live game.
+ *
+ * The local champ-select session is the primary source — it covers every lobby
+ * type (customs included) and updates live as members lock in. Once the match
+ * actually starts the session is gone, so for matchmade games we fall back to
+ * the Worker's Spectator-backed lookup keyed by the leader's puuid.
+ */
+async function gameChampions(): Promise<GameView> {
+  if (!creds) return EMPTY_GAME
+  const party = lastSession?.party
+  if (!party) return EMPTY_GAME
+
+  const phase = await fetchGameflowPhase(creds)
+
+  // Merge picks from both sources, keyed by puuid. Live-game data wins since
+  // it reflects the final locked champion.
+  const byPuuid = new Map<string, number>()
+  for (const p of await fetchChampSelectPicks(creds)) byPuuid.set(p.puuid, p.championId)
+
+  if (phase === 'InProgress' && summoner) {
+    const live = await fetchLiveChampions(region ?? '', summoner.puuid)
+    for (const p of live.participants) byPuuid.set(p.puuid, p.championId)
+  }
+
+  if (byPuuid.size === 0) {
+    return { ...EMPTY_GAME, phase: phase === 'InProgress' ? 'in-game' : phase === 'ChampSelect' ? 'champ-select' : 'none' }
+  }
+
+  const catalog = await ensureCatalog()
+  const pickFor = (championId: number): ChampionPick => {
+    const info = catalog?.champions[String(championId)]
+    return { championId, name: info?.name ?? `Champion ${championId}`, iconUrl: info?.iconUrl ?? null }
+  }
+
+  // Party members: match by their resolved puuid.
+  const byUserId: Record<string, ChampionPick> = {}
+  const claimedPuuids = new Set<string>()
+  await Promise.all(party.members.map(async (m) => {
+    if (!m.ign) return
+    const resolved = await resolveIgn(m.ign)
+    if (!resolved) return
+    const championId = byPuuid.get(resolved.puuid)
+    if (championId !== undefined) {
+      byUserId[m.userId] = pickFor(championId)
+      claimedPuuids.add(resolved.puuid)
+    }
+  }))
+
+  // Everyone else in the game/lobby: expose by (normalized) Riot ID so the
+  // renderer can annotate lobby guests too.
+  const byRiotId: Record<string, ChampionPick> = {}
+  await Promise.all([...byPuuid.entries()].map(async ([puuid, championId]) => {
+    if (claimedPuuids.has(puuid)) return
+    const name = await riotIdForPuuid(puuid)
+    byRiotId[normalizeRiotId(formatRiotId(name.gameName, name.tagLine))] = pickFor(championId)
+  }))
+
+  const phaseOut: GamePhase = phase === 'InProgress' ? 'in-game' : 'champ-select'
+  return { phase: phaseOut, byUserId, byRiotId }
+}
+
 // ── IPC ──────────────────────────────────────────────────────────────────────
 
 ipcMain.handle('lcu:status', (): LcuStatus => ({ connected: creds !== null, summoner }))
@@ -391,6 +474,7 @@ ipcMain.handle('session:get', async (): Promise<SessionResult> => {
 })
 ipcMain.handle('lobby:create-invite', (_e, mode: LobbyMode) => createLobbyAndInviteAll(mode))
 ipcMain.handle('lobby:status', () => lobbyStatus())
+ipcMain.handle('game:champions', () => gameChampions())
 ipcMain.handle('party:add', async (_e, userId: string) => {
   const res = await addToParty(String(userId ?? ''))
   if (res.ok) await fetchSession().then(r => { if (r.ok) lastSession = r.session as Session })

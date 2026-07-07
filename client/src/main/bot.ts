@@ -137,6 +137,38 @@ export async function lookupPlayers(riotIds: string[]): Promise<Record<string, K
   }
 }
 
+export interface ChampionCatalogEntry { id: number; name: string; iconUrl: string }
+export interface ChampionCatalog { version: string; champions: Record<string, ChampionCatalogEntry> }
+
+export async function fetchChampionCatalog(): Promise<ChampionCatalog | null> {
+  const token = loadConfig().token
+  if (!token) return null
+  try {
+    const res = await botFetch('GET', '/client/champions/catalog', undefined, token)
+    if (res.status !== 200 || !res.body?.champions) return null
+    return res.body as ChampionCatalog
+  } catch {
+    return null
+  }
+}
+
+export interface LiveParticipant { puuid: string; championId: number; teamId: number }
+
+export async function fetchLiveChampions(
+  region: string,
+  puuid: string,
+): Promise<{ live: boolean; participants: LiveParticipant[] }> {
+  const token = loadConfig().token
+  if (!token) return { live: false, participants: [] }
+  try {
+    const res = await botFetch('POST', '/client/champions/live', { region, puuid }, token)
+    if (res.status !== 200 || !res.body?.ok) return { live: false, participants: [] }
+    return { live: !!res.body.live, participants: res.body.participants ?? [] }
+  } catch {
+    return { live: false, participants: [] }
+  }
+}
+
 export async function addToParty(userId: string): Promise<{ ok: boolean; error?: string }> {
   const token = loadConfig().token
   if (!token) return { ok: false, error: 'Not linked.' }

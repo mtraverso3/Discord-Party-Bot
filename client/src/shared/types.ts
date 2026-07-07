@@ -111,3 +111,21 @@ export interface AutoJoinSettings {
   targetName: string
   inviteParty: boolean
 }
+
+/** A champion a player has picked/locked, resolved to a display name + icon. */
+export interface ChampionPick {
+  championId: number
+  name: string
+  iconUrl: string | null
+}
+
+export type GamePhase = 'none' | 'champ-select' | 'in-game'
+
+/** Champion picks for the current champ select or live game, cross-referenced
+ *  against the party. `byUserId` covers party members; `byRiotId` (normalized,
+ *  lowercase "name#tag") covers everyone else in the game/lobby. */
+export interface GameView {
+  phase: GamePhase
+  byUserId: Record<string, ChampionPick>
+  byRiotId: Record<string, ChampionPick>
+}

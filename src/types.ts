@@ -50,6 +50,10 @@ export interface AppBindings extends Record<string, unknown> {
   // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
   CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
   CF_ACCESS_AUD?: string    // Application AUD tag from the Access app
+  // Optional — only required for live-game champion lookups (the desktop
+  // client's Spectator-based fallback). When unset, that endpoint reports the
+  // feature as unavailable and the client relies on the local champ-select read.
+  RIOT_API_KEY?: string
   // Static assets binding serving the built admin SPA (admin-ui/dist).
   ASSETS?: Fetcher
 }
