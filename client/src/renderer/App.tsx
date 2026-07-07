@@ -6,7 +6,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PartyBotBridge } from '../preload'
 import type {
-  AutoJoinSettings, LcuStatus, LinkState, LobbyMode, LobbyRow, LobbyView, Session, SessionMember, TaggedPlayer,
+  AutoJoinSettings, ChampionPick, GameView, LcuStatus, LinkState, LobbyMode, LobbyRow, LobbyView, Session,
+  SessionMember, TaggedPlayer,
 } from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
 import { Avatar, Badge, Button, Card, EmptyState, Input, Select, StatusDot, Switch } from './ui'
@@ -17,6 +18,7 @@ declare global {
 const pb = window.pb
 
 const EMPTY_LOBBY: LobbyView = { exists: false, rows: [], missing: [], intruders: 0 }
+const EMPTY_GAME: GameView = { phase: 'none', byUserId: {}, byRiotId: {} }
 
 function normalizeRiotId(riotId: string): string {
   return riotId.toLowerCase().replace(/\s+/g, ' ').trim()
@@ -59,6 +61,7 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [lobby, setLobby] = useState<LobbyView>(EMPTY_LOBBY)
+  const [game, setGame] = useState<GameView>(EMPTY_GAME)
   const [autoJoin, setAutoJoin] = useState<AutoJoinSettings>({ enabled: false, targetName: '', inviteParty: false })
   const [tagged, setTagged] = useState<TaggedPlayer[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -70,7 +73,11 @@ export function App() {
 
   const refreshLobby = useCallback(async () => {
     const { link, session, lcu } = ref.current
-    setLobby(link.linked && session?.party && lcu.connected ? await pb.lobbyStatus() : EMPTY_LOBBY)
+    const active = link.linked && session?.party && lcu.connected
+    if (!active) { setLobby(EMPTY_LOBBY); setGame(EMPTY_GAME); return }
+    const [lobbyView, gameView] = await Promise.all([pb.lobbyStatus(), pb.gameChampions()])
+    setLobby(lobbyView)
+    setGame(gameView)
   }, [])
 
   const refreshSession = useCallback(async () => {
@@ -159,7 +166,7 @@ export function App() {
             {screen === 'no-party' && <NoPartyScreen sessionError={sessionError} />}
             {screen === 'party' && (
               <SquadCard
-                session={session!} lcu={lcu} lobby={lobby}
+                session={session!} lcu={lcu} lobby={lobby} game={game}
                 setTagFor={setTagFor} showToast={show} refreshLobby={refreshLobby}
               />
             )}
@@ -351,10 +358,11 @@ function NoPartyScreen({ sessionError }: { sessionError: string | null }) {
    Each person appears once; their League-lobby presence is a status on the
    row instead of a second list. Lobby-only players get their own section. */
 
-function SquadCard({ session, lcu, lobby, setTagFor, showToast, refreshLobby }: {
+function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLobby }: {
   session: Session
   lcu: LcuStatus
   lobby: LobbyView
+  game: GameView
   setTagFor: (riotId: string, tag: string) => void
   showToast: (msg: string, kind?: 'ok' | 'err') => void
   refreshLobby: () => Promise<void>
@@ -377,9 +385,11 @@ function SquadCard({ session, lcu, lobby, setTagFor, showToast, refreshLobby }: 
 
       {/* League-lobby status strip */}
       <div className="flex items-center gap-2 border-y bg-muted/40 px-4 py-2 text-xs">
-        <StatusDot className={lobby.exists ? 'text-success' : 'text-muted-foreground'} />
-        <span className={lobby.exists ? 'text-foreground' : 'text-muted-foreground'}>
+        <StatusDot className={lobby.exists || game.phase !== 'none' ? 'text-success' : 'text-muted-foreground'} />
+        <span className={lobby.exists || game.phase !== 'none' ? 'text-foreground' : 'text-muted-foreground'}>
           {!lcu.connected ? 'League client offline'
+            : game.phase === 'in-game' ? 'Game in progress — champion picks below'
+            : game.phase === 'champ-select' ? 'Champion select — picks below'
             : lobby.exists ? `League lobby open — ${inLobbyCount} of ${party.members.length} members in`
             : 'No League lobby open'}
         </span>
@@ -389,7 +399,7 @@ function SquadCard({ session, lcu, lobby, setTagFor, showToast, refreshLobby }: 
       <div className="flex flex-col px-4 py-1">
         {party.members.map(m => (
           <MemberRow key={m.userId} member={m} isSelf={m.userId === session.userId}
-            lobbyExists={lobby.exists}
+            lobbyExists={lobby.exists} champion={game.byUserId[m.userId] ?? null}
             inLobby={m.userId === session.userId || inLobbyNames.has(m.displayName)} />
         ))}
       </div>
@@ -407,7 +417,8 @@ function SquadCard({ session, lcu, lobby, setTagFor, showToast, refreshLobby }: 
             )}
           </div>
           {guests.map(r => (
-            <GuestRow key={r.riotId} row={r} setTagFor={setTagFor} showToast={showToast} />
+            <GuestRow key={r.riotId} row={r} champion={game.byRiotId[normalizeRiotId(r.riotId)] ?? null}
+              setTagFor={setTagFor} showToast={showToast} />
           ))}
         </div>
       )}
@@ -420,14 +431,30 @@ function SquadCard({ session, lcu, lobby, setTagFor, showToast, refreshLobby }: 
   )
 }
 
-function MemberRow({ member: m, isSelf, lobbyExists, inLobby }: {
+/* A champion pick chip: square portrait + name. Falls back to just the name
+   when Data Dragon didn't resolve an icon. */
+function ChampionBadge({ champion }: { champion: ChampionPick }) {
+  return (
+    <Badge variant="secondary" className="max-w-36 gap-1.5 pl-1" title={`Picked ${champion.name}`}>
+      {champion.iconUrl && (
+        <img src={champion.iconUrl} alt="" className="size-4 shrink-0 rounded-full object-cover" />
+      )}
+      <span className="truncate">{champion.name}</span>
+    </Badge>
+  )
+}
+
+function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion }: {
   member: SessionMember
   isSelf: boolean
   lobbyExists: boolean
   inLobby: boolean
+  champion: ChampionPick | null
 }) {
-  // One status chip per row, and only when it says something useful.
-  const chip = !m.ign ? <Badge variant="warning">no IGN</Badge>
+  // Champion pick takes precedence over lobby presence — it's the more specific
+  // signal once a game is underway. One status chip per row otherwise.
+  const chip = champion ? <ChampionBadge champion={champion} />
+    : !m.ign ? <Badge variant="warning">no IGN</Badge>
     : lobbyExists ? (inLobby ? <Badge variant="success"><StatusDot />in lobby</Badge> : <Badge variant="outline">not in lobby</Badge>)
     : null
 
@@ -448,8 +475,9 @@ function MemberRow({ member: m, isSelf, lobbyExists, inLobby }: {
   )
 }
 
-function GuestRow({ row: r, setTagFor, showToast }: {
+function GuestRow({ row: r, champion, setTagFor, showToast }: {
   row: LobbyRow
+  champion: ChampionPick | null
   setTagFor: (riotId: string, tag: string) => void
   showToast: (msg: string, kind?: 'ok' | 'err') => void
 }) {
@@ -470,6 +498,7 @@ function GuestRow({ row: r, setTagFor, showToast }: {
           <p className="truncate text-[0.8rem] font-medium">{r.riotId}</p>
           {r.known && <p className="truncate text-[0.7rem] text-muted-foreground">{r.known.displayName} on Discord</p>}
         </div>
+        {champion && <ChampionBadge champion={champion} />}
         {r.status === 'tagged'
           ? <Badge variant="secondary">{r.tag}</Badge>
           : <Badge variant="destructive">not in party</Badge>}

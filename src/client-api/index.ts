@@ -6,6 +6,7 @@ import {
 } from '../lib/party'
 import { gameAllowed, getGuildSettings } from '../lib/settings'
 import { getGuildMember } from '../lib/discord'
+import { fetchLiveGame, getChampionCatalog, platformForRegion } from '../lib/riot'
 
 const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
@@ -17,6 +18,8 @@ const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 //   POST   /client/party/game  (Bearer) { game } -> { ok, game? } | { ok: false, error }
 //   POST   /client/lookup      (Bearer) { riotIds } -> { players: Record<riotId, { userId, displayName } | null> }
 //   POST   /client/party/add   (Bearer) { userId } -> { ok, party? } | { ok: false, error }
+//   GET    /client/champions/catalog (Bearer) -> { version, champions: Record<id, { id, name, iconUrl }> }
+//   POST   /client/champions/live    (Bearer) { region, puuid } -> { ok, configured, live, participants: [{ puuid, championId, teamId }] }
 //
 // A short-lived link code (from `/party link` in Discord) is exchanged once
 // for a long-lived bearer token tied to the Discord user, so the client stays
@@ -91,6 +94,12 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
   }
   if (url.pathname === '/client/party/add' && req.method === 'POST') {
     return await addPartyMember(req, env)
+  }
+  if (url.pathname === '/client/champions/catalog' && req.method === 'GET') {
+    return await championCatalog(req, env)
+  }
+  if (url.pathname === '/client/champions/live' && req.method === 'POST') {
+    return await liveChampions(req, env)
   }
   return new Response('Not Found', { status: 404 })
 }
@@ -366,4 +375,53 @@ async function addPartyMember(req: Request, env: AppBindings): Promise<Response>
   await setUserPartyId(env.PARTY_KV, rec.guildId, targetId, partyId)
   await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
   return json({ ok: true })
+}
+
+// Serves the Data Dragon champion catalog (id -> name + icon URL) so the client
+// can render the numeric championIds it reads locally. Public data, but gated
+// behind the same bearer auth as everything else here.
+async function championCatalog(req: Request, env: AppBindings): Promise<Response> {
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ error: 'Not linked.' }, 401)
+  try {
+    const catalog = await getChampionCatalog(env)
+    return json(catalog)
+  } catch {
+    return json({ error: 'Champion catalog is temporarily unavailable.' }, 502)
+  }
+}
+
+// Looks up the caller-supplied player's live game via the Riot Spectator API and
+// returns each participant's champion. Used by the client once a match has
+// actually started (the local champ-select session is gone by then). Custom
+// games aren't exposed by Spectator, so `live: false` there is expected.
+async function liveChampions(req: Request, env: AppBindings): Promise<Response> {
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ ok: false, error: 'Not linked.' }, 401)
+
+  if (!env.RIOT_API_KEY) {
+    // Not an error — the client treats this as "fall back to local data".
+    return json({ ok: true, configured: false, live: false, participants: [] })
+  }
+
+  let body: { region?: unknown; puuid?: unknown }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ ok: false, error: 'Invalid JSON body.' }, 400)
+  }
+  const region = typeof body.region === 'string' ? body.region.trim() : ''
+  const puuid = typeof body.puuid === 'string' ? body.puuid.trim() : ''
+  if (!region || !puuid) return json({ ok: false, error: 'region and puuid are required.' }, 400)
+
+  const platform = platformForRegion(region)
+  if (!platform) return json({ ok: false, error: `Unsupported region "${region}".` }, 400)
+
+  try {
+    const game = await fetchLiveGame(env.RIOT_API_KEY, platform, puuid)
+    if (!game) return json({ ok: true, configured: true, live: false, participants: [] })
+    return json({ ok: true, configured: true, live: true, participants: game.participants })
+  } catch {
+    return json({ ok: false, configured: true, error: 'Live-game lookup failed.' }, 502)
+  }
 }

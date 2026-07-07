@@ -10,6 +10,12 @@ the League of Legends client to:
 - **Verify the lobby.** The live League lobby is cross-referenced against the
   Discord party roster, so anyone who slipped into the lobby without a party
   spot is flagged immediately, and you can see who hasn't joined yet.
+- **See everyone's champion.** During champ select and once the game is in
+  progress, each member's picked champion shows next to their name. Picks come
+  from the local champ-select session — which covers custom games too — and,
+  for matchmade games in progress, from the bot's Riot Spectator lookup (needs
+  `RIOT_API_KEY` set on the Worker; without it the champ-select read still
+  works). Champion names/icons come from Data Dragon via the Worker.
 
 ## Using it
 

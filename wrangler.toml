@@ -33,3 +33,6 @@ invocation_logs = true
 
 # Secrets set via: wrangler secret put SECRET_NAME
 # DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID
+# Optional: RIOT_API_KEY — enables live-game champion lookups (Spectator API)
+# for the desktop client. Without it, the client shows champions from the local
+# champ-select session only.
