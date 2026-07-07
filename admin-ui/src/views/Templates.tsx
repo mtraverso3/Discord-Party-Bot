@@ -1,3 +1,4 @@
+import { ChevronDown, FileStack, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { GAMES } from '../games'
@@ -5,6 +6,8 @@ import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
 import { ChannelSelect } from '../components/ChannelSelect'
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorNote, Input, Label, Mono, Select, Spinner, Textarea } from '../components/ui'
+import { cn } from '../lib/cn'
 import { useGuildData } from '../lib/guildData'
 import { useLoad } from '../lib/useLoad'
 import type { ChannelInfo, GuildSettings, Party, PartyTemplate } from '../types'
@@ -23,8 +26,8 @@ export function Templates() {
     guildData.getTextChannels().then(setTextChannels).catch(() => {})
   }, [guildData])
 
-  if (error) return <article>Error: {error}</article>
-  if (!templates) return <progress />
+  if (error) return <ErrorNote>Error: {error}</ErrorNote>
+  if (!templates) return <Spinner />
 
   const upsert = (t: PartyTemplate) => setTemplates(ts => {
     if (!ts) return [t]
@@ -36,12 +39,9 @@ export function Templates() {
   })
 
   return (
-    <div>
-      <div className="toolbar">
-        <span className="muted grow">
-          Reusable party blueprints — build one, then spin up a party for any member without re-entering everything.
-        </span>
-        <button className="tiny" onClick={() => setShowCreate(s => !s)}>New template</button>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => setShowCreate(s => !s)}><Plus />New template</Button>
       </div>
       {showCreate && (
         <TemplateForm
@@ -52,19 +52,23 @@ export function Templates() {
         />
       )}
       {templates.length === 0 ? (
-        <div className="empty">No templates yet. Create one to get started.</div>
+        <EmptyState icon={<FileStack />} title="No templates yet">
+          Create one to get started.
+        </EmptyState>
       ) : (
-        templates.map(t => (
-          <TemplateCard
-            key={t.id}
-            t={t}
-            settings={settings}
-            voiceChannels={voiceChannels}
-            textChannels={textChannels}
-            onSaved={upsert}
-            onDeleted={id => setTemplates(ts => ts ? ts.filter(x => x.id !== id) : ts)}
-          />
-        ))
+        <div className="space-y-2.5">
+          {templates.map(t => (
+            <TemplateCard
+              key={t.id}
+              t={t}
+              settings={settings}
+              voiceChannels={voiceChannels}
+              textChannels={textChannels}
+              onSaved={upsert}
+              onDeleted={id => setTemplates(ts => ts ? ts.filter(x => x.id !== id) : ts)}
+            />
+          ))}
+        </div>
       )}
     </div>
   )
@@ -80,57 +84,66 @@ function TemplateCard({ t, settings, voiceChannels, textChannels, onSaved, onDel
 }) {
   const toast = useToast()
   const confirm = useConfirm()
+  const [open, setOpen] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showApply, setShowApply] = useState(false)
 
   return (
-    <details className="party">
-      <summary>
-        <div className="summary-row">
-          <span className="name">{t.label}</span>
-          <span className="chip">{t.game}</span>
-          <span className="chip">cap {t.maxSize}</span>
-          {t.banlist && <span className="chip chip-warn">banlist</span>}
-          <span className="grow" />
-          <span className="uid">{t.id}</span>
+    <Card className={cn('overflow-hidden transition-colors', open && 'border-primary/40')}>
+      <button
+        type="button"
+        className="flex w-full cursor-pointer flex-wrap items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <span className="text-sm font-semibold">{t.label}</span>
+        <Badge variant="outline">{t.game}</Badge>
+        <Badge variant="secondary">cap {t.maxSize}</Badge>
+        {t.banlist && <Badge variant="warning">banlist</Badge>}
+        <span className="grow" />
+        <Mono className="hidden sm:inline">{t.id}</Mono>
+        <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="space-y-4 border-t px-4 py-4">
+          <div className="text-sm">
+            {t.name
+              ? <p><span className="font-medium">Party title: </span>{t.name}</p>
+              : <p className="text-muted-foreground">No fixed title — defaults to the owner's name.</p>}
+            {t.description && <p className="mt-1 text-muted-foreground">{t.description}</p>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => { setShowApply(s => !s); setShowEdit(false) }}><Play />Use template…</Button>
+            <Button variant="outline" size="sm" onClick={() => { setShowEdit(s => !s); setShowApply(false) }}><Pencil />Edit</Button>
+            <span className="grow" />
+            <Button
+              variant="destructive-outline"
+              size="sm"
+              onClick={async () => {
+                if (!(await confirm(`Delete template "${t.label}"?`, 'Delete'))) return
+                try {
+                  await api('/templates/' + t.id, { method: 'DELETE' })
+                  onDeleted(t.id)
+                  toast('Template deleted')
+                } catch (e) { toast((e as Error).message, 'err') }
+              }}
+            >
+              <Trash2 />Delete
+            </Button>
+          </div>
+          {showApply && <ApplyForm t={t} voiceChannels={voiceChannels} textChannels={textChannels} onDone={() => setShowApply(false)} />}
+          {showEdit && (
+            <TemplateForm
+              t={t}
+              settings={settings}
+              voiceChannels={voiceChannels}
+              onSaved={x => { onSaved(x); setShowEdit(false) }}
+              onCancel={() => setShowEdit(false)}
+            />
+          )}
         </div>
-      </summary>
-      <div className="body">
-        {t.name
-          ? <p><strong>Party title: </strong>{t.name}</p>
-          : <p className="muted">No fixed title — defaults to the owner's name.</p>}
-        {t.description && <p className="muted">{t.description}</p>}
-        <div className="toolbar">
-          <button type="button" className="tiny" onClick={() => setShowApply(s => !s)}>Use template…</button>
-          <button type="button" className="tiny ghost" onClick={() => setShowEdit(s => !s)}>Edit</button>
-          <span className="grow" />
-          <button
-            type="button"
-            className="tiny ghost-danger"
-            onClick={async () => {
-              if (!(await confirm(`Delete template "${t.label}"?`, 'Delete'))) return
-              try {
-                await api('/templates/' + t.id, { method: 'DELETE' })
-                onDeleted(t.id)
-                toast('Template deleted')
-              } catch (e) { toast((e as Error).message, 'err') }
-            }}
-          >
-            Delete
-          </button>
-        </div>
-        {showApply && <ApplyForm t={t} voiceChannels={voiceChannels} textChannels={textChannels} onDone={() => setShowApply(false)} />}
-        {showEdit && (
-          <TemplateForm
-            t={t}
-            settings={settings}
-            voiceChannels={voiceChannels}
-            onSaved={x => { onSaved(x); setShowEdit(false) }}
-            onCancel={() => setShowEdit(false)}
-          />
-        )}
-      </div>
-    </details>
+      )}
+    </Card>
   )
 }
 
@@ -178,30 +191,32 @@ function TemplateForm({ t, settings, voiceChannels, onSaved, onCancel }: {
   }
 
   return (
-    <article>
-      <h5>{t ? 'Edit template' : 'New template'}</h5>
-      <form className="grid-2" onSubmit={e => { e.preventDefault(); if (!busy) submit() }}>
-        <label>Template label<input value={label} placeholder="e.g. Friday ARAM" maxLength={100} required onChange={e => setLabel(e.target.value)} /></label>
-        <label>Party title<input value={name} placeholder="Party title (optional)" maxLength={100} onChange={e => setName(e.target.value)} /></label>
-        <label>Game
-          <select value={game} onChange={e => setGame(e.target.value)}>
-            {allowed.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-        </label>
-        <label>Player cap<input type="number" min={2} max={50} value={cap} onChange={e => setCap(Number(e.target.value))} /></label>
-        <label className="span-2">Voice channel
-          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
-        </label>
-        <label className="span-2">Description<textarea value={desc} placeholder="Description (optional)" onChange={e => setDesc(e.target.value)} /></label>
-        <label className="span-2">Banlist<textarea className="bans" value={bans} placeholder="One champion per line (optional)" onChange={e => setBans(e.target.value)} /></label>
-        <div className="span-2 toolbar">
-          <button type="submit" disabled={busy} aria-busy={busy}>
-            {busy ? (t ? 'Saving…' : 'Creating…') : (t ? 'Save template' : 'Create template')}
-          </button>
-          <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
-        </div>
-      </form>
-    </article>
+    <Card className="animate-fade-in border-primary/30">
+      <CardHeader><CardTitle>{t ? 'Edit template' : 'New template'}</CardTitle></CardHeader>
+      <CardContent>
+        <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); if (!busy) submit() }}>
+          <Label>Template label<Input value={label} placeholder="e.g. Friday ARAM" maxLength={100} required onChange={e => setLabel(e.target.value)} /></Label>
+          <Label>Party title<Input value={name} placeholder="Party title (optional)" maxLength={100} onChange={e => setName(e.target.value)} /></Label>
+          <Label>Game
+            <Select value={game} onChange={e => setGame(e.target.value)}>
+              {allowed.map(g => <option key={g} value={g}>{g}</option>)}
+            </Select>
+          </Label>
+          <Label>Player cap<Input type="number" min={2} max={50} value={cap} onChange={e => setCap(Number(e.target.value))} /></Label>
+          <Label className="sm:col-span-2">Voice channel
+            <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
+          </Label>
+          <Label className="sm:col-span-2">Description<Textarea value={desc} placeholder="Description (optional)" onChange={e => setDesc(e.target.value)} /></Label>
+          <Label className="sm:col-span-2">Banlist<Textarea className="min-h-28 font-mono text-xs" value={bans} placeholder="One champion per line (optional)" onChange={e => setBans(e.target.value)} /></Label>
+          <div className="flex gap-2 sm:col-span-2">
+            <Button type="submit" busy={busy}>
+              {busy ? (t ? 'Saving…' : 'Creating…') : (t ? 'Save template' : 'Create template')}
+            </Button>
+            <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -244,21 +259,23 @@ function ApplyForm({ t, voiceChannels, textChannels, onDone }: {
   }
 
   return (
-    <article>
-      <h5>Use "{t.label}"</h5>
-      <form className="grid-2" onSubmit={e => { e.preventDefault(); if (!busy) submit() }}>
-        <label className="span-2">Assign to<UserPicker ref={ownerPicker} placeholder="Search member by name, or paste an ID" /></label>
-        <label>Post embed in
-          <ChannelSelect channels={textChannels} value={channel || textChannels[0]?.id || ''} onChange={setChannel} />
-        </label>
-        <label>Voice channel
-          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
-        </label>
-        <div className="span-2 toolbar">
-          <button type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Creating…' : 'Create party'}</button>
-          <button type="button" className="secondary" onClick={onDone}>Cancel</button>
-        </div>
-      </form>
-    </article>
+    <Card className="animate-fade-in border-primary/30">
+      <CardHeader><CardTitle>Use "{t.label}"</CardTitle></CardHeader>
+      <CardContent>
+        <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); if (!busy) submit() }}>
+          <Label className="sm:col-span-2">Assign to<UserPicker ref={ownerPicker} placeholder="Search member by name, or paste an ID" /></Label>
+          <Label>Post embed in
+            <ChannelSelect channels={textChannels} value={channel || textChannels[0]?.id || ''} onChange={setChannel} />
+          </Label>
+          <Label>Voice channel
+            <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
+          </Label>
+          <div className="flex gap-2 sm:col-span-2">
+            <Button type="submit" busy={busy}>{busy ? 'Creating…' : 'Create party'}</Button>
+            <Button type="button" variant="outline" onClick={onDone}>Cancel</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   )
 }

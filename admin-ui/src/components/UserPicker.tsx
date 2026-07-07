@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { api, isSnowflake } from '../api'
 import type { MemberHit } from '../types'
+import { Input, Mono } from './ui'
 
 export interface UserPickerHandle {
   /** The chosen/pasted user ID, or '' if neither. */
@@ -63,8 +64,8 @@ export const UserPicker = forwardRef<UserPickerHandle, Props>(function UserPicke
   }
 
   return (
-    <div className="upick">
-      <input
+    <div className="relative">
+      <Input
         type="text"
         placeholder={placeholder}
         autoComplete="off"
@@ -73,12 +74,17 @@ export const UserPicker = forwardRef<UserPickerHandle, Props>(function UserPicke
         onKeyDown={e => { if (e.key === 'Escape') close() }}
       />
       {results.length > 0 && (
-        <div className="upick-list">
+        <div className="animate-fade-in absolute top-full right-0 left-0 z-20 mt-1 max-h-56 overflow-y-auto rounded-lg border bg-popover p-1 shadow-lg">
           {results.map(u => (
-            <button key={u.id} type="button" className="upick-item" onClick={() => pick(u)}>
-              <strong>{u.displayName}</strong>
-              <span className="muted">@{u.username}</span>
-              <span className="uid">{u.id}</span>
+            <button
+              key={u.id}
+              type="button"
+              className="flex w-full cursor-pointer items-baseline gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent"
+              onClick={() => pick(u)}
+            >
+              <span className="font-medium">{u.displayName}</span>
+              <span className="text-xs text-muted-foreground">@{u.username}</span>
+              <Mono className="ml-auto">{u.id}</Mono>
             </button>
           ))}
         </div>

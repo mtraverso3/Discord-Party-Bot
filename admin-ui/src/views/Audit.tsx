@@ -1,7 +1,9 @@
+import { RefreshCw, ScrollText } from 'lucide-react'
 import { api } from '../api'
 import { useLoad } from '../lib/useLoad'
 import { fmtAbs, relTime } from '../lib/time'
 import type { AuditEntry } from '../types'
+import { Button, Card, EmptyState, ErrorNote, Spinner, Table, TBody, THead } from '../components/ui'
 
 function friendlyAction(entry: AuditEntry): string {
   const parts = entry.path.split('/').filter(Boolean)
@@ -43,30 +45,32 @@ function friendlyAction(entry: AuditEntry): string {
 export function Audit() {
   const { data: log, error, reload } = useLoad(() => api<AuditEntry[]>('/log'))
 
-  if (error) return <article>Error: {error}</article>
-  if (!log) return <progress />
-  if (log.length === 0) return <div className="empty">No admin actions recorded yet.</div>
+  if (error) return <ErrorNote>Error: {error}</ErrorNote>
+  if (!log) return <Spinner />
+  if (log.length === 0) return <EmptyState icon={<ScrollText />} title="No admin actions recorded yet" />
 
   return (
-    <div>
-      <div className="toolbar">
-        <span className="muted grow">{log.length} recorded action{log.length === 1 ? '' : 's'}</span>
-        <button className="secondary tiny" onClick={reload}>Refresh</button>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">{log.length} recorded action{log.length === 1 ? '' : 's'}</span>
+        <Button variant="outline" size="sm" onClick={reload}><RefreshCw />Refresh</Button>
       </div>
-      <article>
-        <table className="compact">
-          <thead><tr><th>When</th><th>Admin</th><th>Action</th></tr></thead>
-          <tbody>
+      <Card>
+        <Table>
+          <THead><tr><th>When</th><th>Admin</th><th>Action</th></tr></THead>
+          <TBody>
             {log.map((entry, i) => (
               <tr key={i}>
-                <td title={fmtAbs(entry.ts)}>{relTime(Date.now() - entry.ts)} ago</td>
-                <td>{entry.email || '—'}</td>
+                <td className="whitespace-nowrap text-muted-foreground" title={fmtAbs(entry.ts)}>
+                  {relTime(Date.now() - entry.ts)} ago
+                </td>
+                <td className="whitespace-nowrap">{entry.email || '—'}</td>
                 <td>{friendlyAction(entry)}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
-      </article>
+          </TBody>
+        </Table>
+      </Card>
     </div>
   )
 }

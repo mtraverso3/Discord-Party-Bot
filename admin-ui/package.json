@@ -9,9 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@picocss/pico": "^2.1.1",
+    "@tailwindcss/vite": "^4.3.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.23.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "tailwindcss": "^4.3.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

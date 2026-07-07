@@ -1,9 +1,11 @@
+import { Search, UserX } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { GAMES } from '../games'
 import { useToast } from '../components/Toast'
 import { Avatar } from '../components/Avatar'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
+import { Badge, Button, Card, CardContent, Input, Mono, Spinner } from '../components/ui'
 import type { Party, UserLookup } from '../types'
 
 export function Users() {
@@ -41,10 +43,9 @@ export function Users() {
   }, [])
 
   return (
-    <div>
-      <p className="muted">Look up a member to inspect their IGN profile and party state.</p>
+    <div className="space-y-4">
       <form
-        className="toolbar"
+        className="flex max-w-xl gap-2"
         onSubmit={e => {
           e.preventDefault()
           const id = picker.current?.getId()
@@ -52,12 +53,12 @@ export function Users() {
           else toast('Pick a member from the list or paste a user ID.', 'err')
         }}
       >
-        <div className="grow">
+        <div className="flex-1">
           <UserPicker ref={picker} placeholder="Search member by name, or paste an ID" onPick={u => doLookup(u.id)} />
         </div>
-        <button type="submit">Look up</button>
+        <Button type="submit"><Search />Look up</Button>
       </form>
-      {loading && <progress />}
+      {loading && <Spinner />}
       {lookup && <UserCard u={lookup} parties={parties} onRefresh={() => doLookup(lookup.userId)} />}
     </div>
   )
@@ -68,18 +69,24 @@ function UserCard({ u, parties, onRefresh }: { u: UserLookup; parties: Party[]; 
 
   let partyInfo
   if (!u.partyId) {
-    partyInfo = <p className="muted">Not in any party.</p>
+    partyInfo = <p className="text-sm text-muted-foreground">Not in any party.</p>
   } else if (u.inParty) {
     const entry = parties.find(p => p.id === u.partyId)
-    partyInfo = <p>In party <strong>{entry ? entry.name : u.partyId}</strong> <span className="uid">{u.partyId}</span></p>
+    partyInfo = (
+      <p className="text-sm">
+        In party <span className="font-semibold">{entry ? entry.name : u.partyId}</span>{' '}
+        <Mono>{u.partyId}</Mono>
+      </p>
+    )
   } else {
     partyInfo = (
-      <div className="toolbar">
-        <span className="warn">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="warning">
           Stale mapping → party {u.partyId}{u.partyExists ? ' (not a member)' : ' (party gone)'}
-        </span>
-        <button
-          className="tiny"
+        </Badge>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={async () => {
             try {
               await api('/users/' + u.userId + '/unstick', { method: 'POST' })
@@ -89,28 +96,41 @@ function UserCard({ u, parties, onRefresh }: { u: UserLookup; parties: Party[]; 
           }}
         >
           Clear mapping
-        </button>
+        </Button>
       </div>
     )
   }
 
   return (
-    <article>
-      {u.member ? (
-        <div className="uhead">
-          <Avatar name={u.member.displayName} />
-          <div>
-            <strong>{u.member.displayName}</strong> <span className="muted">@{u.member.username}</span>
+    <Card className="animate-fade-in max-w-xl">
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-3">
+          {u.member ? (
+            <>
+              <Avatar name={u.member.displayName} className="size-11 text-sm" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold">
+                  {u.member.displayName} <span className="font-normal text-muted-foreground">@{u.member.username}</span>
+                </div>
+                <Mono>{u.userId}</Mono>
+              </div>
+            </>
+          ) : (
+            <div>
+              <Badge variant="warning"><UserX className="size-3" />Not a member of this guild</Badge>
+              <div className="mt-1"><Mono>{u.userId}</Mono></div>
+            </div>
+          )}
+        </div>
+        {partyInfo}
+        <div>
+          <h4 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">In-game names</h4>
+          <div className="space-y-2">
+            {GAMES.map(g => <IgnRow key={g} game={g} userId={u.userId} initial={u.profile.igns[g] || ''} />)}
           </div>
         </div>
-      ) : (
-        <div><span className="warn">Not a member of this guild</span></div>
-      )}
-      <p className="uid">{u.userId}</p>
-      {partyInfo}
-      <h5>In-game names</h5>
-      {GAMES.map(g => <IgnRow key={g} game={g} userId={u.userId} initial={u.profile.igns[g] || ''} />)}
-    </article>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -118,11 +138,12 @@ function IgnRow({ game, userId, initial }: { game: string; userId: string; initi
   const toast = useToast()
   const [value, setValue] = useState(initial)
   return (
-    <div className="ign-row">
-      <label>{game}</label>
-      <input value={value} placeholder="—" maxLength={100} onChange={e => setValue(e.target.value)} />
-      <button
-        className="tiny secondary"
+    <div className="flex items-center gap-2">
+      <span className="w-36 shrink-0 text-xs font-medium text-muted-foreground">{game}</span>
+      <Input value={value} placeholder="—" maxLength={100} onChange={e => setValue(e.target.value)} />
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={async () => {
           try {
             await api('/users/' + userId + '/profile', {
@@ -134,7 +155,7 @@ function IgnRow({ game, userId, initial }: { game: string; userId: string; initi
         }}
       >
         Save
-      </button>
+      </Button>
     </div>
   )
 }
