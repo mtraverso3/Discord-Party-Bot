@@ -66,4 +66,22 @@ describe('crossReference', () => {
     expect(view.missing).toHaveLength(4)
     expect(view.intruders).toBe(0)
   })
+
+  it('excludes tagged players from the intruder count and shows their label', () => {
+    const view = crossReference(party, lobby, 'me', 'puuid-me', [{ riotId: 'Sniper#EUW', tag: 'smurf' }])
+    expect(view.rows.map(r => r.status)).toEqual(['you', 'party', 'party', 'tagged'])
+    expect(view.rows[3]).toMatchObject({ riotId: 'Sniper#EUW', status: 'tagged', tag: 'smurf' })
+    expect(view.intruders).toBe(0)
+  })
+
+  it('matches a tagged player by name alone, ignoring tagline', () => {
+    const view = crossReference(party, lobby, 'me', 'puuid-me', [{ riotId: 'Sniper', tag: 'coach' }])
+    expect(view.rows[3]).toMatchObject({ status: 'tagged', tag: 'coach' })
+  })
+
+  it('still flags as intruder when no tag matches', () => {
+    const view = crossReference(party, lobby, 'me', 'puuid-me', [{ riotId: 'SomeoneElse#NA1', tag: 'friend' }])
+    expect(view.rows[3]).toMatchObject({ status: 'intruder', tag: null })
+    expect(view.intruders).toBe(1)
+  })
 })

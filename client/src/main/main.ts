@@ -2,12 +2,13 @@ import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { discoverLcu, fetchFriends, fetchRegion, lcuRequest, type LcuCreds } from './lcu'
 import {
-  clearLink, fetchSession, getAutoJoinSettings, linkState, linkWithCode, setAutoJoinSettings, setPartyGame,
+  clearLink, fetchSession, getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode,
+  setAutoJoinSettings, setPartyGame, setTaggedPlayers,
 } from './bot'
 import { crossReference, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
 import type {
   AutoJoinSettings, InviteOutcome, InviteResult, LcuStatus, LobbyMode, LobbyView, Session,
-  SessionResult, SummonerInfo,
+  SessionResult, SummonerInfo, TaggedPlayer,
 } from '../shared/types'
 
 // ── LCU connection state ─────────────────────────────────────────────────────
@@ -361,7 +362,7 @@ async function lobbyStatus(): Promise<LobbyView> {
     })),
   )
 
-  return crossReference(roster, lobby, lastSession?.userId ?? null, summoner?.puuid ?? null)
+  return crossReference(roster, lobby, lastSession?.userId ?? null, summoner?.puuid ?? null, getTaggedPlayers())
 }
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
@@ -380,6 +381,8 @@ ipcMain.handle('lobby:create-invite', (_e, mode: LobbyMode) => createLobbyAndInv
 ipcMain.handle('lobby:status', () => lobbyStatus())
 ipcMain.handle('autojoin:get', (): AutoJoinSettings => getAutoJoinSettings())
 ipcMain.handle('autojoin:set', (_e, settings: AutoJoinSettings) => setAutoJoinSettings(settings))
+ipcMain.handle('tags:get', (): TaggedPlayer[] => getTaggedPlayers())
+ipcMain.handle('tags:set', (_e, players: TaggedPlayer[]) => setTaggedPlayers(players))
 
 // ── Window ───────────────────────────────────────────────────────────────────
 

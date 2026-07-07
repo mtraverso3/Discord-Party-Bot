@@ -3,6 +3,7 @@
 import { app } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import type { TaggedPlayer } from '../shared/types'
 
 const DEFAULT_BOT_URL = 'https://partybot.mtraverso.net'
 
@@ -15,6 +16,7 @@ interface StoredConfig {
   autoJoinEnabled?: boolean
   autoJoinTarget?: string   // friend's summoner/Riot ID name to auto-join when their lobby is joinable
   autoJoinInviteParty?: boolean  // after joining, invite the linked Discord party in too
+  taggedPlayers?: TaggedPlayer[]  // lobby-only players excluded from the intruder count, with a custom label
 }
 
 export interface AutoJoinSettings {
@@ -135,6 +137,14 @@ export function setAutoJoinSettings(next: AutoJoinSettings): void {
     autoJoinTarget: next.targetName,
     autoJoinInviteParty: next.inviteParty,
   })
+}
+
+export function getTaggedPlayers(): TaggedPlayer[] {
+  return loadConfig().taggedPlayers ?? []
+}
+
+export function setTaggedPlayers(next: TaggedPlayer[]): void {
+  saveConfig({ ...loadConfig(), taggedPlayers: next })
 }
 
 export function clearLink(revokeRemote = true): void {

@@ -174,6 +174,15 @@ button.linklike {
   padding: 4px 6px;
 }
 button.linklike:hover { color: var(--bad); background: none; }
+button.iconbtn {
+  background: var(--card-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  font-size: 12.5px;
+  flex: none;
+}
+button.iconbtn:hover { background: var(--border); }
 .block { width: 100%; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row > .grow { flex: 1; }
@@ -190,6 +199,17 @@ button.linklike:hover { color: var(--bad); background: none; }
 .list .item:last-child { border-bottom: none; }
 .item .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .name .ign { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+
+input.plain-input {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  text-align: left;
+}
 
 .badge {
   flex: none;
