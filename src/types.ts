@@ -50,6 +50,8 @@ export interface AppBindings extends Record<string, unknown> {
   // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
   CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
   CF_ACCESS_AUD?: string    // Application AUD tag from the Access app
+  // Static assets binding serving the built admin SPA (admin-ui/dist).
+  ASSETS?: Fetcher
 }
 
 export type AppEnv = { Bindings: AppBindings }
