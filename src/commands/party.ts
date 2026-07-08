@@ -9,6 +9,7 @@ import { getIgnMap, getUserIgn, saveUserIgn } from '../store/profiles'
 import { canBump, gameAllowed, getGuildSettings } from '../store/settings'
 import { generateLinkCode, writeLinkCode } from '../store/clientAuth'
 import { generateAdminToken, isAdmin, writeAdminLinkToken } from '../store/adminAuth'
+import { normalizeBaseUrl } from '../auth/session'
 import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
@@ -560,7 +561,7 @@ async function adminLink(c: CommandContext<AppEnv>, userId: string) {
   const { displayName } = extractMemberInfo(c.interaction)
   const token = generateAdminToken()
   await writeAdminLinkToken(c.env.DB, token, { userId, displayName })
-  const url = `${base.replace(/\/$/, '')}/auth/login?token=${token}`
+  const url = `${normalizeBaseUrl(base)}/auth/login?token=${token}`
 
   return c.followup({
     content: `**Admin panel login:** ${url}\n\nThis link is single-use and expires in 24 hours. Opening it signs you in for 24 hours. Don't share it — anyone who opens it signs in as you.`,

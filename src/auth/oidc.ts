@@ -18,7 +18,7 @@
 import type { AppBindings } from '../types'
 import { publicJwk, signRs256, verifyRs256, sha256B64url, type RsaPrivateJwk } from '../lib/jwt'
 import { consumeOidcCode, generateOidcCode, isAdmin, writeOidcCode } from '../store/adminAuth'
-import { readSession, page } from './session'
+import { readSession, page, normalizeBaseUrl } from './session'
 
 const ID_TOKEN_TTL_S = 60 * 60
 const SUPPORTED_SCOPES = 'openid email profile'
@@ -50,7 +50,7 @@ function config(env: AppBindings): OidcConfig | null {
   if (env.OIDC_REDIRECT_URI) redirectUris.add(env.OIDC_REDIRECT_URI)
   if (env.CF_ACCESS_TEAM) redirectUris.add(`https://${env.CF_ACCESS_TEAM}.cloudflareaccess.com/cdn-cgi/access/callback`)
   return {
-    issuer: PUBLIC_BASE_URL.replace(/\/$/, ''),
+    issuer: normalizeBaseUrl(PUBLIC_BASE_URL),
     clientId: OIDC_CLIENT_ID,
     clientSecret: OIDC_CLIENT_SECRET,
     jwk,

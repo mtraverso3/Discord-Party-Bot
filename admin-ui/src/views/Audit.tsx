@@ -10,17 +10,36 @@ import { Button, Card, EmptyState, ErrorNote, Spinner, Table, TBody, THead } fro
 // (the OIDC provider has no real address). Surface those as the member's name.
 const DISCORD_ID_RE = /^(\d{15,21})@/
 
+// relTime returns "just now" for sub-minute gaps, so don't append " ago" to it.
+function whenLabel(ts: number): string {
+  const rel = relTime(Date.now() - ts)
+  return rel === 'just now' ? rel : rel + ' ago'
+}
+
 function discordIdOf(email?: string): string | null {
   const m = email?.match(DISCORD_ID_RE)
   return m ? m[1]! : null
 }
 
-function friendlyAction(entry: AuditEntry): string {
+// The Discord user IDs an entry references, so we can resolve them to names:
+// the acting admin (synthetic email) and any admin add/remove target.
+function referencedIds(entry: AuditEntry): string[] {
+  const ids: string[] = []
+  const actor = discordIdOf(entry.email)
+  if (actor) ids.push(actor)
+  const target = entry.path.match(/^\/admins\/(\d{15,21})$/)
+  if (target) ids.push(target[1]!)
+  return ids
+}
+
+function friendlyAction(entry: AuditEntry, name: (id: string) => string): string {
   const parts = entry.path.split('/').filter(Boolean)
   const m = entry.method
   const [p0, p1, p2, p3] = parts
 
   if (p0 === 'clear') return 'Cleared all parties'
+  if (p0 === 'admins' && !p1) return 'Added a Discord admin'
+  if (p0 === 'admins' && p1) return 'Removed Discord admin ' + name(p1)
   if (p0 === 'settings') return 'Updated guild settings'
   if (p0 === 'templates' && !p1) return 'Created a party template'
   if (p0 === 'templates' && p1) {
@@ -56,19 +75,21 @@ export function Audit() {
   const { data: log, error, reload } = useLoad(() => api<AuditEntry[]>('/log'))
   const [names, setNames] = useState<Record<string, string>>({})
 
-  // Resolve the Discord IDs behind synthetic admin emails to member names.
+  // Resolve every referenced Discord ID (acting admin + admin add/remove
+  // targets) to a member name in one batched request.
   useEffect(() => {
     if (!log) return
-    const ids = [...new Set(log.map(e => discordIdOf(e.email)).filter((x): x is string => !!x))]
+    const ids = [...new Set(log.flatMap(referencedIds))]
     if (ids.length === 0) return
     api<Record<string, string>>('/members/resolve?ids=' + encodeURIComponent(ids.join(',')))
       .then(map => setNames(n => ({ ...n, ...(map || {}) })))
       .catch(() => { /* fall back to the raw ID */ })
   }, [log])
 
+  const name = (id: string): string => names[id] || id
   const adminLabel = (email?: string): string => {
     const id = discordIdOf(email)
-    if (id) return `${names[id] || id} · Discord`
+    if (id) return `${name(id)} · Discord`
     return email || '—'
   }
 
@@ -89,10 +110,10 @@ export function Audit() {
             {log.map((entry, i) => (
               <tr key={i}>
                 <td className="whitespace-nowrap text-muted-foreground" title={fmtAbs(entry.ts)}>
-                  {relTime(Date.now() - entry.ts)} ago
+                  {whenLabel(entry.ts)}
                 </td>
                 <td className="whitespace-nowrap">{adminLabel(entry.email)}</td>
-                <td>{friendlyAction(entry)}</td>
+                <td>{friendlyAction(entry, name)}</td>
               </tr>
             ))}
           </TBody>
