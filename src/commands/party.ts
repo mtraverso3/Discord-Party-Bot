@@ -8,6 +8,7 @@ import * as parties from '../store/parties'
 import { getIgnMap, getUserIgn, saveUserIgn } from '../store/profiles'
 import { canBump, gameAllowed, getGuildSettings } from '../store/settings'
 import { generateLinkCode, writeLinkCode } from '../store/clientAuth'
+import { generateAdminToken, isAdmin, writeAdminLinkToken } from '../store/adminAuth'
 import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
@@ -60,6 +61,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
         case 'link':    return await link(c, guildId, userId)
+        case 'admin':   return await adminLink(c, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
       }
     } catch (e) {
@@ -537,6 +539,31 @@ async function link(c: CommandContext<AppEnv>, guildId: string, userId: string) 
 
   return c.followup({
     content: `Your link code: \`${code}\` — enter it in the PartyBot desktop app to link your account. The code expires in 10 minutes; the link itself stays active.`,
+    flags: 64,
+  })
+}
+
+// ── /party admin ────────────────────────────────────────────────────────────
+
+async function adminLink(c: CommandContext<AppEnv>, userId: string) {
+  const base = c.env.PUBLIC_BASE_URL
+  if (!base || !c.env.ADMIN_SESSION_SECRET) {
+    return c.followup({ content: 'Admin login is not configured on this bot.', flags: 64 })
+  }
+  if (!(await isAdmin(c.env.DB, userId))) {
+    return c.followup({
+      content: "You're not on the admin allow-list. Ask an existing admin to add you in the admin panel's **Admins** page.",
+      flags: 64,
+    })
+  }
+
+  const { displayName } = extractMemberInfo(c.interaction)
+  const token = generateAdminToken()
+  await writeAdminLinkToken(c.env.DB, token, { userId, displayName })
+  const url = `${base.replace(/\/$/, '')}/auth/login?token=${token}`
+
+  return c.followup({
+    content: `**Admin panel login:** ${url}\n\nThis link is single-use and expires in 24 hours. Opening it signs you in for 24 hours. Don't share it — anyone who opens it signs in as you.`,
     flags: 64,
   })
 }

@@ -158,6 +158,12 @@ const commands = [
         // admin gating happens at runtime via isGuildAdmin().
         description: 'Clear all active parties in this server (admin only)',
       },
+      {
+        type: 1,
+        name: 'admin',
+        // Allow-list gated at runtime via the admin_users table (isAdmin()).
+        description: 'Get a private link to sign in to the PartyBot admin panel (allow-listed users only)',
+      },
     ],
   },
 ]
