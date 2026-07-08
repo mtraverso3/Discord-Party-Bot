@@ -1,9 +1,19 @@
 import { RefreshCw, ScrollText } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useLoad } from '../lib/useLoad'
 import { fmtAbs, relTime } from '../lib/time'
 import type { AuditEntry } from '../types'
 import { Button, Card, EmptyState, ErrorNote, Spinner, Table, TBody, THead } from '../components/ui'
+
+// Discord-identity admins are recorded with a synthetic "<discordId>@…" email
+// (the OIDC provider has no real address). Surface those as the member's name.
+const DISCORD_ID_RE = /^(\d{15,21})@/
+
+function discordIdOf(email?: string): string | null {
+  const m = email?.match(DISCORD_ID_RE)
+  return m ? m[1]! : null
+}
 
 function friendlyAction(entry: AuditEntry): string {
   const parts = entry.path.split('/').filter(Boolean)
@@ -44,6 +54,23 @@ function friendlyAction(entry: AuditEntry): string {
 
 export function Audit() {
   const { data: log, error, reload } = useLoad(() => api<AuditEntry[]>('/log'))
+  const [names, setNames] = useState<Record<string, string>>({})
+
+  // Resolve the Discord IDs behind synthetic admin emails to member names.
+  useEffect(() => {
+    if (!log) return
+    const ids = [...new Set(log.map(e => discordIdOf(e.email)).filter((x): x is string => !!x))]
+    if (ids.length === 0) return
+    api<Record<string, string>>('/members/resolve?ids=' + encodeURIComponent(ids.join(',')))
+      .then(map => setNames(n => ({ ...n, ...(map || {}) })))
+      .catch(() => { /* fall back to the raw ID */ })
+  }, [log])
+
+  const adminLabel = (email?: string): string => {
+    const id = discordIdOf(email)
+    if (id) return `${names[id] || id} · Discord`
+    return email || '—'
+  }
 
   if (error) return <ErrorNote>Error: {error}</ErrorNote>
   if (!log) return <Spinner />
@@ -64,7 +91,7 @@ export function Audit() {
                 <td className="whitespace-nowrap text-muted-foreground" title={fmtAbs(entry.ts)}>
                   {relTime(Date.now() - entry.ts)} ago
                 </td>
-                <td className="whitespace-nowrap">{entry.email || '—'}</td>
+                <td className="whitespace-nowrap">{adminLabel(entry.email)}</td>
                 <td>{friendlyAction(entry)}</td>
               </tr>
             ))}

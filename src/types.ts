@@ -59,6 +59,17 @@ export interface AppBindings extends Record<string, unknown> {
   // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
   CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
   CF_ACCESS_AUD?: string    // Application AUD tag from the Access app
+  // Optional — enables the Discord-identity admin login (magic link → built-in
+  // OIDC provider → Cloudflare Access). All required together; when any is
+  // unset, /auth and /oidc return 503 and `/party admin` reports it disabled.
+  // See the "Discord admin login" section of the README.
+  PUBLIC_BASE_URL?: string      // public origin serving this Worker, e.g. https://partybot.example.com (no trailing slash)
+  ADMIN_SESSION_SECRET?: string // HMAC secret for the 24h admin session cookie
+  OIDC_CLIENT_ID?: string       // client_id configured in the Cloudflare Access OIDC login method
+  OIDC_CLIENT_SECRET?: string   // matching client_secret
+  OIDC_PRIVATE_JWK?: string     // RSA private key (JWK JSON) used to sign OIDC tokens — see scripts/gen-oidc-key.ts
+  OIDC_EMAIL_DOMAIN?: string    // synthetic email domain for Discord identities (default "discord.local")
+  OIDC_REDIRECT_URI?: string    // optional override of the allowed Access callback URL (derived from CF_ACCESS_TEAM otherwise)
   // Optional — only required for live-game champion lookups (the desktop
   // client's Spectator-based fallback). When unset, that endpoint reports the
   // feature as unavailable and the client relies on the local champ-select read.

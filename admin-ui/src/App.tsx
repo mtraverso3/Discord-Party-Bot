@@ -1,4 +1,4 @@
-import { ArrowLeftRight, History as HistoryIcon, LayoutDashboard, Moon, ScrollText, Settings as SettingsIcon, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
+import { ArrowLeftRight, History as HistoryIcon, LayoutDashboard, Moon, ScrollText, Settings as SettingsIcon, ShieldCheck, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, guildId, onSessionExpired } from './api'
 import type { GuildInfo } from './types'
@@ -14,6 +14,7 @@ import { Templates } from './views/Templates'
 import { Users } from './views/Users'
 import { History } from './views/History'
 import { Audit } from './views/Audit'
+import { Admins } from './views/Admins'
 import { Settings } from './views/Settings'
 
 const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
@@ -23,6 +24,7 @@ const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
   { id: 'history', label: 'History', icon: <HistoryIcon />, desc: 'Past and present parties — who joined, who left, and League games played.' },
   { id: 'users', label: 'Users', icon: <User />, desc: 'Look up a member — IGN profile, admin notes, party history, and games played.' },
   { id: 'audit', label: 'Audit log', icon: <ScrollText />, desc: 'Every admin action taken through this panel.' },
+  { id: 'admins', label: 'Admins', icon: <ShieldCheck />, desc: 'Discord users allowed to sign in to this panel via /party admin.' },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon />, desc: 'Guild-wide limits enforced by the bot.' },
 ]
 
@@ -245,6 +247,7 @@ function TabView({ tab }: { tab: string }) {
     case 'history': return <History />
     case 'users': return <Users />
     case 'audit': return <Audit />
+    case 'admins': return <Admins />
     case 'settings': return <Settings />
     default: return <Dashboard />
   }

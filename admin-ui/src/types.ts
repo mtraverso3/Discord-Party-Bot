@@ -89,6 +89,13 @@ export interface AuditEntry {
   path: string
 }
 
+export interface Admin {
+  userId: string
+  displayName: string
+  addedBy: string | null
+  addedAt: number
+}
+
 export interface UserLookup {
   userId: string
   profile: { igns: Record<string, string> }

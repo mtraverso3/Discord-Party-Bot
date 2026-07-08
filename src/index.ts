@@ -7,9 +7,12 @@ import { handleAwayButton, handleHelpPage, handleJoinButton, handleLeaveButton, 
 import { CREATE_MODAL_PREFIX, EDIT_MODAL_PREFIX } from './lib/modal'
 import { handleAdmin } from './admin'
 import { handleClientApi } from './client-api'
+import { handleOidc } from './auth/oidc'
+import { handleAuth } from './auth/session'
 import { tryMarkDisbanded } from './lib/party'
 import { sweepInactiveParties } from './store/parties'
 import { sweepExpiredAuth } from './store/clientAuth'
+import { sweepExpiredAdminAuth } from './store/adminAuth'
 import { resolvePendingGames } from './store/games'
 
 const inner = new DiscordHono<AppEnv>()
@@ -34,6 +37,14 @@ export default {
     }
     if (url.pathname.startsWith('/client/')) {
       return handleClientApi(req, env, url)
+    }
+    // Discord-identity admin login. These live outside the Access-protected
+    // /admin* so browsers and Access itself can reach them unauthenticated.
+    if (url.pathname === '/.well-known/openid-configuration' || url.pathname.startsWith('/oidc/')) {
+      return handleOidc(req, env, url)
+    }
+    if (url.pathname.startsWith('/auth/')) {
+      return handleAuth(req, env, url)
     }
 
     if (req.method !== 'POST') return inner.fetch(req, env as any, ctx)
@@ -89,6 +100,7 @@ export default {
         await tryMarkDisbanded(env.DISCORD_BOT_TOKEN, party, reason)
       }
       await sweepExpiredAuth(env.DB)
+      await sweepExpiredAdminAuth(env.DB)
       // Fill in participants for League games the desktop client reported once
       // the matches have finished and Match-v5 can return them.
       const resolved = await resolvePendingGames(env.DB, env.RIOT_API_KEY)

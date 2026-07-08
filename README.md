@@ -39,6 +39,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server. All state live
 | `/party disband`           | Disband the party (owner only)                 |
 | `/party clear`             | Clear all parties in this server (admin only)  |
 | `/party link`              | Get a code to link the desktop client          |
+| `/party admin`             | Get a private link to sign in to the admin UI (allow-listed users only) |
 
 ## Stack
 
@@ -85,7 +86,8 @@ Older deployments stored state in KV + Durable Objects. After deploying the D1 v
 - **Templates** — save reusable party blueprints (title, description, game, player cap, voice channel, banlist) and spin up a party for any member in one form, without re-entering everything each time
 - **History** — every past and present party session, with a timeline of who came and went and the League games played in it (champions, teams, win/loss)
 - **Users** — a member profile deep-linked by ID (survives refresh and is shareable): per-game IGN profile, admin notes, party history, League games played, live stats, and a jump to their current party
-- **Audit log** — the last 200 admin actions with the acting admin's email
+- **Audit log** — the last 200 admin actions with the acting admin's email (or Discord name, for Discord-identity admins)
+- **Admins** — manage the Discord users allowed to sign in via `/party admin` (see [Discord admin login](#discord-admin-login-optional))
 - **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games, desktop client inviters
 
 1. In Cloudflare Zero Trust, create an Access Application covering `<your-domain>/admin*` with a policy allowing your email.
@@ -98,6 +100,42 @@ Older deployments stored state in KV + Durable Objects. After deploying the D1 v
 4. Visit `https://<your-domain>/admin?guild=<guild-id>`.
 
 To hack on the UI itself: run `wrangler dev` in the repo root and `npm run dev` in `admin-ui/` — the Vite dev server proxies `/admin/api` to the Worker and hot-reloads the SPA.
+
+### Discord admin login (optional)
+
+Lets you allow specific **Discord users** into the admin UI without giving them an email in the Access policy — and without any Discord OAuth. Cloudflare Access still fronts `/admin*`; the difference is only *how* a session is obtained.
+
+**How it works.** An allow-listed user runs `/party admin` and gets a single-use link. Opening it drops a signed 24h session cookie (the Discord slash-command interaction *is* the proof of identity). From there the Worker acts as a small OIDC identity provider: hitting `/admin` bounces through Cloudflare Access → the Worker's `/oidc/authorize`, which reads that cookie and issues Access an identity of `<discordId>@<domain>`. Access mints its own JWT as usual, so the existing in-Worker verification and audit trail are unchanged — actions are attributed to the Discord user (shown by name on the **Admins**/**Audit** pages). Email SSO keeps working alongside this. The OIDC and login endpoints (`/oidc/*`, `/auth/*`, `/.well-known/openid-configuration`) live **outside** the Access application so the browser and Access can reach them; keep the Access app scoped to `/admin*` only.
+
+**Setup:**
+
+1. Generate an RSA signing key and store it as a secret:
+   ```
+   npx tsx scripts/gen-oidc-key.ts | wrangler secret put OIDC_PRIVATE_JWK
+   ```
+2. Set the remaining secrets (pick your own client id/secret — they just have to match what you enter in Access next):
+   ```
+   wrangler secret put PUBLIC_BASE_URL        # e.g. https://partybot.example.com (no trailing slash)
+   wrangler secret put ADMIN_SESSION_SECRET   # any long random string
+   wrangler secret put OIDC_CLIENT_ID
+   wrangler secret put OIDC_CLIENT_SECRET
+   # optional: OIDC_EMAIL_DOMAIN (default "discord.local"), OIDC_REDIRECT_URI (override)
+   ```
+3. In Cloudflare Zero Trust → **Settings → Authentication → Login methods → Add new → OpenID Connect**:
+   - **App ID** / **Client secret**: the `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` you chose.
+   - **Auth URL**: `https://<your-domain>/oidc/authorize`
+   - **Token URL**: `https://<your-domain>/oidc/token`
+   - **Certificate URL**: `https://<your-domain>/oidc/jwks`
+   - Enable **PKCE**. Save, then **Test** — it should sign in cleanly once a session cookie exists.
+4. On the Access application covering `/admin*`, add this OIDC provider as an allowed login method (keep your email SSO method too if you want both). The Worker's allow-list is the real gate, so a broad "allow everyone via this IdP" policy rule is fine.
+5. Seed the first admin (bootstrap — after this, admins add each other in the UI):
+   ```
+   wrangler d1 execute partybot --remote --command \
+     "INSERT INTO admin_users (user_id, display_name, added_at) VALUES ('YOUR_DISCORD_ID', 'You', unixepoch()*1000)"
+   ```
+6. Run `/party admin` in Discord and open the link. Manage the allow-list afterward from the admin UI's **Admins** page.
+
+Removing a user from the allow-list cuts them off at their next Access re-auth (the `/oidc/authorize` step re-checks the list even against a still-valid cookie). All the login credentials are short-lived and swept by the existing cron.
 
 ## Desktop client (optional)
 

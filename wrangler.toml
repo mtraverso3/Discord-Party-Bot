@@ -31,7 +31,8 @@ binding = "PARTY_KV"
 id = "32fff28077814cbcac824ebd05c0ce66"
 
 # Replaces the old Durable Object inactivity alarm: sweeps idle parties,
-# expired link codes/client tokens, and trims audit logs.
+# expired link codes/client tokens, admin login tokens/OIDC codes, and trims
+# audit logs.
 [triggers]
 crons = ["*/15 * * * *"]
 
@@ -53,3 +54,9 @@ invocation_logs = true
 # Optional: RIOT_API_KEY — enables live-game champion lookups (Spectator API)
 # for the desktop client. Without it, the client shows champions from the local
 # champ-select session only.
+# Optional: CF_ACCESS_TEAM, CF_ACCESS_AUD — enable the /admin UI behind Access.
+# Optional (Discord admin login — see README "Discord admin login"):
+#   PUBLIC_BASE_URL, ADMIN_SESSION_SECRET, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET,
+#   OIDC_PRIVATE_JWK (from scripts/gen-oidc-key.ts), and optionally
+#   OIDC_EMAIL_DOMAIN / OIDC_REDIRECT_URI. All required together or the
+#   /auth and /oidc endpoints stay disabled (503).

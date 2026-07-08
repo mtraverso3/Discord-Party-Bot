@@ -6,6 +6,7 @@ import { GAMES } from '../lib/games'
 import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings } from '../store/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../store/templates'
 import { appendAudit, getAudit } from '../store/audit'
+import { addAdmin, listAdmins, removeAdmin } from '../store/adminAuth'
 import * as history from '../store/history'
 import * as games from '../store/games'
 import * as notes from '../store/notes'
@@ -21,7 +22,10 @@ function json(body: unknown, status = 200): Response {
 
 export async function handleAdminApi(req: Request, env: AppBindings, url: URL, email?: string): Promise<Response> {
   const guildId = url.searchParams.get('guild')
-  const guildless = url.pathname.endsWith('/me') || url.pathname.endsWith('/guilds') || url.pathname.endsWith('/import-kv')
+  // The admin allow-list is a global capability, not per-guild, so its routes
+  // (and the other cross-guild endpoints) don't require a ?guild= param.
+  const guildless = url.pathname.endsWith('/me') || url.pathname.endsWith('/guilds')
+    || url.pathname.endsWith('/import-kv') || url.pathname.includes('/admin/api/admins')
   if (!guildId && !guildless) {
     return json({ error: 'guild query param required' }, 400)
   }
@@ -36,6 +40,10 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path === '/me' && method === 'GET') return json({ email })
     if (path === '/guilds' && method === 'GET') return await listGuilds(env)
     if (path === '/import-kv' && method === 'POST') return await importFromKv(env)
+    if (path === '/admins' && method === 'GET') return json(await listAdmins(env.DB))
+    if (path === '/admins' && method === 'POST') return await addAdminRoute(env, body, email)
+    const adm = path.match(/^\/admins\/([^/]+)$/)
+    if (adm && method === 'DELETE') return await removeAdminRoute(env, adm[1]!)
     if (path === '/log' && method === 'GET') return json(await getAudit(env.DB, guildId!))
     if (path === '/history' && method === 'GET') return await listHistory(env, guildId!, url.searchParams)
     const hm = path.match(/^\/history\/([^/]+)$/)
@@ -186,6 +194,29 @@ async function partyGames(env: AppBindings, guildId: string, partyId: string): P
 async function listGuilds(env: AppBindings): Promise<Response> {
   const guilds = await getBotGuilds(env.DISCORD_BOT_TOKEN).catch(() => [])
   return json(guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon })))
+}
+
+// ── Admin allow-list (Discord-identity login) ──────────────────────────────────
+
+async function addAdminRoute(env: AppBindings, body: any, email?: string): Promise<Response> {
+  const userId = (body.userId ?? '').toString().trim()
+  if (!/^\d{15,21}$/.test(userId)) return json({ error: 'A valid Discord user ID is required' }, 400)
+
+  // Prefer a caller-supplied name (from the member picker); otherwise resolve
+  // the global Discord username so the list shows something readable.
+  let displayName = (body.displayName ?? '').toString().trim()
+  if (!displayName) {
+    const user = await getUserById(env.DISCORD_BOT_TOKEN, userId).catch(() => null)
+    displayName = user ? (user.global_name ?? user.username) : userId
+  }
+
+  await addAdmin(env.DB, { userId, displayName, addedBy: email ?? null })
+  return json(await listAdmins(env.DB))
+}
+
+async function removeAdminRoute(env: AppBindings, userId: string): Promise<Response> {
+  const ok = await removeAdmin(env.DB, userId)
+  return ok ? json({ status: 'removed' }) : json({ error: 'Not on the admin list' }, 404)
 }
 
 async function listChannels(env: AppBindings, guildId: string, kind: string | null): Promise<Response> {
