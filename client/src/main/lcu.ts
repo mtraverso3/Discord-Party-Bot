@@ -75,62 +75,123 @@ export interface ChampSelectPick {
   championId: number
 }
 
+/** A completed ban, with everything we can use to attribute it to a player:
+ *  the caster's puuid when the client exposes it (ally always, enemy in customs),
+ *  and the team+position slot it came from — the fallback for enemy bans, which
+ *  we resolve to a player once the game loads and reveals who's in each slot. */
+export interface ChampSelectBan {
+  championId: number
+  puuid: string | null
+  team: 'my' | 'their'  // relative to the local player
+  position: string      // normalized lowercase role, or '' if unassigned
+}
+
 export interface ChampSelectData {
-  picks: ChampSelectPick[]      // hovered/locked champions, both teams
-  allyBans: ChampSelectPick[]   // completed bans by ally (party) players
+  picks: ChampSelectPick[]   // hovered/locked champions, both teams
+  bans: ChampSelectBan[]     // every completed ban, both teams
+}
+
+function normPosition(p: unknown): string {
+  return typeof p === 'string' ? p.toLowerCase().trim() : ''
 }
 
 /**
- * Picks and ally bans from the local champ-select session. Works for every
- * lobby type (customs included, unlike the Spectator API) and updates live as
- * players hover/lock/ban. Empty when not in champ select.
+ * Picks and bans from the local champ-select session. Works for every lobby
+ * type (customs included, unlike the Spectator API) and updates live as players
+ * hover/lock/ban. Empty when not in champ select.
  *
- * Bans are attributed to the player who cast them via actorCellId → puuid;
- * this attribution only exists while the champ-select session is live (it's
- * gone once the game starts).
+ * The session only exposes ally puuids (and enemy puuids in customs), so enemy
+ * bans carry their team+position slot instead — enough to attribute them once
+ * the game loads in and reveals who ended up in each slot.
  */
 export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData> {
-  const empty: ChampSelectData = { picks: [], allyBans: [] }
+  const empty: ChampSelectData = { picks: [], bans: [] }
   try {
     const res = await lcuRequest(creds, 'GET', '/lol-champ-select/v1/session')
     if (res.status !== 200) return empty
     const body = res.body
 
     const picks: ChampSelectPick[] = []
-    const cellToPuuid = new Map<number, string>()
-    for (const team of [body?.myTeam, body?.theirTeam]) {
+    const cellMeta = new Map<number, { team: 'my' | 'their'; position: string; puuid: string | null }>()
+    for (const [team, side] of [[body?.myTeam, 'my'], [body?.theirTeam, 'their']] as const) {
       if (!Array.isArray(team)) continue
       for (const cell of team) {
         const puuid: unknown = cell?.puuid
-        if (typeof puuid !== 'string' || !puuid) continue
-        const championId = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
-        if (Number.isFinite(championId) && championId > 0) picks.push({ puuid, championId })
-      }
-    }
-    if (Array.isArray(body?.myTeam)) {
-      for (const cell of body.myTeam) {
-        if (typeof cell?.puuid === 'string' && Number.isFinite(Number(cell?.cellId))) {
-          cellToPuuid.set(Number(cell.cellId), cell.puuid)
+        const hasPuuid = typeof puuid === 'string' && puuid
+        if (hasPuuid) {
+          const championId = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
+          if (Number.isFinite(championId) && championId > 0) picks.push({ puuid, championId })
+        }
+        if (Number.isFinite(Number(cell?.cellId))) {
+          cellMeta.set(Number(cell.cellId), {
+            team: side, position: normPosition(cell?.assignedPosition), puuid: hasPuuid ? puuid : null,
+          })
         }
       }
     }
 
-    const allyBans: ChampSelectPick[] = []
+    const bans: ChampSelectBan[] = []
     if (Array.isArray(body?.actions)) {
       for (const phase of body.actions) {
         if (!Array.isArray(phase)) continue
         for (const a of phase) {
-          if (a?.type !== 'ban' || !a?.completed || !a?.isAllyAction) continue
+          if (a?.type !== 'ban' || !a?.completed) continue
           const championId = Number(a?.championId ?? 0)
-          const puuid = cellToPuuid.get(Number(a?.actorCellId))
-          if (puuid && championId > 0) allyBans.push({ puuid, championId })
+          if (!(championId > 0)) continue
+          const meta = cellMeta.get(Number(a?.actorCellId))
+          bans.push({
+            championId,
+            puuid: meta?.puuid ?? null,
+            team: meta?.team ?? (a?.isAllyAction ? 'my' : 'their'),
+            position: meta?.position ?? '',
+          })
         }
       }
     }
-    return { picks, allyBans }
+    return { picks, bans }
   } catch {
     return empty
   }
+}
+
+/** A player as seen in the in-game Live Client Data API (only up once loaded in). */
+export interface LivePlayer {
+  riotId: string    // "gameName#tagLine" (or summoner name on older clients)
+  team: string      // "ORDER" | "CHAOS"
+  position: string  // normalized lowercase role, or '' (e.g. ARAM)
+}
+
+/**
+ * The in-game player list from the Live Client Data API (port 2999, no auth,
+ * self-signed). Available only while a match is actually loaded/running; returns
+ * [] otherwise. This is what reveals each player's team + position after champ
+ * select, letting us attribute enemy bans we couldn't during the draft.
+ */
+export function fetchLiveClientPlayers(): Promise<LivePlayer[]> {
+  return new Promise((resolve) => {
+    const req = https.request(
+      { host: '127.0.0.1', port: 2999, path: '/liveclientdata/playerlist', method: 'GET', rejectUnauthorized: false, timeout: 5000 },
+      (res) => {
+        let data = ''
+        res.setEncoding('utf8')
+        res.on('data', (c) => { data += c })
+        res.on('end', () => {
+          try {
+            const arr = JSON.parse(data)
+            if (!Array.isArray(arr)) return resolve([])
+            resolve(arr.map((p: any): LivePlayer => ({
+              riotId: (typeof p?.riotId === 'string' && p.riotId) ? p.riotId : String(p?.summonerName ?? ''),
+              team: String(p?.team ?? ''),
+              position: normPosition(p?.position),
+            })).filter((p) => p.riotId))
+          } catch { resolve([]) }
+        })
+      },
+    )
+    req.on('timeout', () => req.destroy())
+    req.on('error', () => resolve([]))
+    req.end()
+  })
 }
 
 /** The current gameflow phase (e.g. "ChampSelect", "InProgress"), or "" if unknown. */

@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import {
-  discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchGameId, fetchRegion, lcuRequest,
-  type LcuCreds,
+  discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchGameId, fetchLiveClientPlayers, fetchRegion,
+  lcuRequest, type ChampSelectBan, type LcuCreds,
 } from './lcu'
 import {
   addToParty, clearLink, fetchChampionCatalog, fetchLiveChampions, fetchSession, getAutoJoinSettings,
@@ -437,7 +437,59 @@ const PRE_CHAMP_PHASES = new Set(['None', 'Lobby', 'Matchmaking', 'ReadyCheck', 
 // Ban attribution only exists in the live champ-select session, so we snapshot
 // the computed compliance there and keep serving it through the game the champ
 // select produced (keyed by party so a different party's snapshot never leaks).
-let banSnapshot: { partyId: string; bans: Record<string, BanCheck> } | null = null
+// The snapshot also retains every raw ban (with its team+position slot) so a
+// second pass, once the game loads in, can attribute enemy bans the champ-select
+// data couldn't (the client only exposes ally puuids).
+interface BanMember { userId: string; ign: string | null }
+interface BanSnapshot {
+  partyId: string
+  bans: Record<string, BanCheck>
+  rawBans: ChampSelectBan[]
+  members: BanMember[]
+  enriched: boolean  // whether the load-in correlation pass has run
+}
+let banSnapshot: BanSnapshot | null = null
+
+function banHasUnresolved(s: BanSnapshot): boolean {
+  return s.members.some(m => s.bans[m.userId] && s.bans[m.userId]!.actual == null)
+}
+
+function livePlayerMatchesIgn(ign: string | null, riotId: string): boolean {
+  const [gameName, tagLine = ''] = riotId.split('#')
+  return ignMatches(ign, gameName ?? '', tagLine)
+}
+
+// Second ban check, run once the game has loaded: the Live Client Data API now
+// reveals every player's team + position, so we can attribute each ban (kept
+// with its team+position slot from champ select) to the party member who ended
+// up in that slot — filling in the members the champ-select puuids couldn't.
+async function enrichBansAtLoadIn(s: BanSnapshot, pickFor: (id: number) => ChampionPick): Promise<void> {
+  if (!summoner) return
+  const players = await fetchLiveClientPlayers()
+  if (players.length === 0) return  // API not up yet — retry on a later poll
+  const leaderIgn = summoner.tagLine ? `${summoner.gameName}#${summoner.tagLine}` : summoner.gameName
+  const leader = players.find(p => livePlayerMatchesIgn(leaderIgn, p.riotId))
+  s.enriched = true  // players are live now; don't keep re-polling this pass
+  if (!leader || !leader.team) return
+
+  // Ban per team+position slot (teams are relative to the local/leader player).
+  const banBySlot = new Map<string, number>()
+  for (const b of s.rawBans) if (b.position) banBySlot.set(`${b.team}:${b.position}`, b.championId)
+
+  for (const m of s.members) {
+    const cur = s.bans[m.userId]
+    if (!cur || cur.actual != null) continue
+    const lp = players.find(p => livePlayerMatchesIgn(m.ign, p.riotId))
+    if (!lp || !lp.position) continue
+    const championId = banBySlot.get(`${lp.team === leader.team ? 'my' : 'their'}:${lp.position}`)
+    if (championId === undefined) continue
+    const pick = pickFor(championId)
+    s.bans[m.userId] = {
+      ...cur, actual: pick.name, actualIcon: pick.iconUrl,
+      ok: normalizeChamp(pick.name) === normalizeChamp(cur.assigned),
+    }
+  }
+}
 
 /**
  * Champion picks for the party's current champ select or live game.
@@ -459,20 +511,58 @@ async function gameChampions(): Promise<GameView> {
 
   // A new game cycle invalidates any retained ban snapshot.
   if (PRE_CHAMP_PHASES.has(phase)) banSnapshot = null
-  // Outside champ select, fall back to the snapshot captured during it (same party).
-  const restoredBans = phase !== 'ChampSelect' && banSnapshot?.partyId === party.id
-    ? banSnapshot.bans : null
 
-  const phaseOut: GamePhase = IN_GAME_PHASES.has(phase) ? 'in-game'
-    : phase === 'ChampSelect' ? 'champ-select'
-    : restoredBans ? 'in-game' : 'none'
+  const catalog = await ensureCatalog()
+  const pickFor = (championId: number): ChampionPick => {
+    const info = catalog?.champions[String(championId)]
+    return { championId, name: info?.name ?? `Champion ${championId}`, iconUrl: info?.iconUrl ?? null }
+  }
 
-  // Champ select: picks + ally bans, keyed by LCU puuid.
+  // Champ select: picks + bans, keyed by LCU puuid where the client exposes it.
   const champSelect = await fetchChampSelect(creds)
   const csByPuuid = new Map<string, number>()
   for (const p of champSelect.picks) csByPuuid.set(p.puuid, p.championId)
   const banByPuuid = new Map<string, number>()
-  for (const b of champSelect.allyBans) banByPuuid.set(b.puuid, b.championId)
+  for (const b of champSelect.bans) if (b.puuid) banByPuuid.set(b.puuid, b.championId)
+
+  // Ban compliance: computed during champ select (attributed by puuid), then
+  // snapshotted. Once the game loads in, a second pass attributes any members
+  // the champ-select data couldn't (see enrichBansAtLoadIn).
+  let bansByUserId: Record<string, BanCheck> = {}
+  if (phase === 'ChampSelect') {
+    const iconByName = new Map<string, string>()
+    for (const info of Object.values(catalog?.champions ?? {})) iconByName.set(normalizeChamp(info.name), info.iconUrl)
+
+    const computed: Record<string, BanCheck> = {}
+    const members: BanMember[] = []
+    await Promise.all(party.members.map(async (m) => {
+      if (!m.assignedBan) return
+      const resolved = m.ign ? await resolveIgn(m.ign) : null
+      const actualId = resolved ? banByPuuid.get(resolved.puuid) : undefined
+      const actualPick = actualId !== undefined ? pickFor(actualId) : null
+      computed[m.userId] = {
+        assigned: m.assignedBan,
+        assignedIcon: iconByName.get(normalizeChamp(m.assignedBan)) ?? null,
+        actual: actualPick?.name ?? null,
+        actualIcon: actualPick?.iconUrl ?? null,
+        ok: actualPick !== null && normalizeChamp(actualPick.name) === normalizeChamp(m.assignedBan),
+      }
+      members.push({ userId: m.userId, ign: m.ign })
+    }))
+    bansByUserId = computed
+    if (members.length > 0) {
+      banSnapshot = { partyId: party.id, bans: computed, rawBans: champSelect.bans, members, enriched: false }
+    }
+  } else if (banSnapshot?.partyId === party.id) {
+    if (IN_GAME_PHASES.has(phase) && !banSnapshot.enriched && banHasUnresolved(banSnapshot)) {
+      await enrichBansAtLoadIn(banSnapshot, pickFor).catch(() => { /* best effort */ })
+    }
+    bansByUserId = banSnapshot.bans
+  }
+
+  const phaseOut: GamePhase = IN_GAME_PHASES.has(phase) ? 'in-game'
+    : phase === 'ChampSelect' ? 'champ-select'
+    : Object.keys(bansByUserId).length > 0 ? 'in-game' : 'none'
 
   // Live game: championId by normalized public Riot ID.
   const liveByRiotId = new Map<string, number>()
@@ -483,15 +573,10 @@ async function gameChampions(): Promise<GameView> {
     }
   }
 
-  if (csByPuuid.size === 0 && liveByRiotId.size === 0 && banByPuuid.size === 0) {
-    return { ...EMPTY_GAME, phase: phaseOut, bansByUserId: restoredBans ?? {} }
+  if (csByPuuid.size === 0 && liveByRiotId.size === 0) {
+    return { ...EMPTY_GAME, phase: phaseOut, bansByUserId }
   }
 
-  const catalog = await ensureCatalog()
-  const pickFor = (championId: number): ChampionPick => {
-    const info = catalog?.champions[String(championId)]
-    return { championId, name: info?.name ?? `Champion ${championId}`, iconUrl: info?.iconUrl ?? null }
-  }
   // Look up a live pick for a party member's IGN (tagline optional in the IGN),
   // returning the matched map key so it can be excluded from the guest list.
   const livePickForIgn = (ign: string | null): { championId: number; key: string } | undefined => {
@@ -535,33 +620,6 @@ async function gameChampions(): Promise<GameView> {
     const key = normalizeRiotId(formatRiotId(name.gameName, name.tagLine))
     if (!(key in byRiotId)) byRiotId[key] = pickFor(championId)
   }))
-
-  // Ban compliance: computed live during champ select (where each ban is
-  // attributed to its caster), then snapshotted so it keeps showing through the
-  // game — once the game starts the attribution is gone from the LCU.
-  let bansByUserId: Record<string, BanCheck> = restoredBans ?? {}
-  if (phase === 'ChampSelect') {
-    // Resolve an assigned ban's name (as pasted into the banlist) to its icon.
-    const iconByName = new Map<string, string>()
-    for (const info of Object.values(catalog?.champions ?? {})) iconByName.set(normalizeChamp(info.name), info.iconUrl)
-
-    const computed: Record<string, BanCheck> = {}
-    await Promise.all(party.members.map(async (m) => {
-      if (!m.assignedBan) return
-      const resolved = m.ign ? await resolveIgn(m.ign) : null
-      const actualId = resolved ? banByPuuid.get(resolved.puuid) : undefined
-      const actualPick = actualId !== undefined ? pickFor(actualId) : null
-      computed[m.userId] = {
-        assigned: m.assignedBan,
-        assignedIcon: iconByName.get(normalizeChamp(m.assignedBan)) ?? null,
-        actual: actualPick?.name ?? null,
-        actualIcon: actualPick?.iconUrl ?? null,
-        ok: actualPick !== null && normalizeChamp(actualPick.name) === normalizeChamp(m.assignedBan),
-      }
-    }))
-    bansByUserId = computed
-    if (Object.keys(computed).length > 0) banSnapshot = { partyId: party.id, bans: computed }
-  }
 
   return { phase: phaseOut, byUserId, byRiotId, bansByUserId }
 }
