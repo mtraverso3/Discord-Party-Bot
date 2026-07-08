@@ -133,11 +133,11 @@ function HistoryDetailView({ historyId }: { historyId: number }) {
 
   return (
     <div className="space-y-4">
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <button type="button" className="cursor-pointer transition-colors hover:text-foreground" onClick={goToList}>History</button>
-        <ChevronRight className="size-3.5" />
-        <span className="font-medium text-foreground">{s.name}</span>
-      </nav>
+      {/*<nav className="flex items-center gap-1.5 text-sm text-muted-foreground">*/}
+      {/*  <button type="button" className="cursor-pointer transition-colors hover:text-foreground" onClick={goToList}>History</button>*/}
+      {/*  <ChevronRight className="size-3.5" />*/}
+      {/*  <span className="font-medium text-foreground">{s.name}</span>*/}
+      {/*</nav>*/}
       <BackLink />
 
       <Card>
