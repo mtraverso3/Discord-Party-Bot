@@ -84,6 +84,7 @@ export interface ChampSelectBan {
   puuid: string | null
   team: 'my' | 'their'  // relative to the local player
   position: string      // normalized lowercase role, or '' if unassigned
+  casterPick: number    // champion the caster ultimately locked (0 if none yet)
 }
 
 export interface ChampSelectData {
@@ -112,19 +113,18 @@ export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData
     const body = res.body
 
     const picks: ChampSelectPick[] = []
-    const cellMeta = new Map<number, { team: 'my' | 'their'; position: string; puuid: string | null }>()
+    const cellMeta = new Map<number, { team: 'my' | 'their'; position: string; puuid: string | null; pick: number }>()
     for (const [team, side] of [[body?.myTeam, 'my'], [body?.theirTeam, 'their']] as const) {
       if (!Array.isArray(team)) continue
       for (const cell of team) {
         const puuid: unknown = cell?.puuid
         const hasPuuid = typeof puuid === 'string' && puuid
-        if (hasPuuid) {
-          const championId = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
-          if (Number.isFinite(championId) && championId > 0) picks.push({ puuid, championId })
-        }
+        const pick = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
+        const pickId = Number.isFinite(pick) && pick > 0 ? pick : 0
+        if (hasPuuid && pickId > 0) picks.push({ puuid, championId: pickId })
         if (Number.isFinite(Number(cell?.cellId))) {
           cellMeta.set(Number(cell.cellId), {
-            team: side, position: normPosition(cell?.assignedPosition), puuid: hasPuuid ? puuid : null,
+            team: side, position: normPosition(cell?.assignedPosition), puuid: hasPuuid ? puuid : null, pick: pickId,
           })
         }
       }
@@ -144,6 +144,7 @@ export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData
             puuid: meta?.puuid ?? null,
             team: meta?.team ?? (a?.isAllyAction ? 'my' : 'their'),
             position: meta?.position ?? '',
+            casterPick: meta?.pick ?? 0,
           })
         }
       }
@@ -156,9 +157,10 @@ export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData
 
 /** A player as seen in the in-game Live Client Data API (only up once loaded in). */
 export interface LivePlayer {
-  riotId: string    // "gameName#tagLine" (or summoner name on older clients)
-  team: string      // "ORDER" | "CHAOS"
-  position: string  // normalized lowercase role, or '' (e.g. ARAM)
+  riotId: string        // "gameName#tagLine" (or summoner name on older clients)
+  team: string          // "ORDER" | "CHAOS"
+  position: string      // normalized lowercase role, or '' (e.g. customs/ARAM)
+  championName: string  // the champion they locked — unique per draft, so a stable key
 }
 
 /**
@@ -183,6 +185,7 @@ export function fetchLiveClientPlayers(): Promise<LivePlayer[]> {
               riotId: (typeof p?.riotId === 'string' && p.riotId) ? p.riotId : String(p?.summonerName ?? ''),
               team: String(p?.team ?? ''),
               position: normPosition(p?.position),
+              championName: String(p?.championName ?? ''),
             })).filter((p) => p.riotId))
           } catch { resolve([]) }
         })
