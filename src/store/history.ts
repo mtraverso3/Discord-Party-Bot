@@ -178,6 +178,47 @@ export async function listSessions(
   }))
 }
 
+export interface UserHistorySession extends HistorySession {
+  gameCount: number
+  wasOwner: boolean    // did the user own the party (finally) in this session
+  firstSeenAt: number  // their earliest event in the session
+  lastSeenAt: number   // their latest event in the session
+}
+
+/**
+ * Every session a user took part in, newest first. "Took part" means they
+ * appear as the subject of at least one event (created/joined/queued/…), which
+ * also covers owners. Includes their first/last activity timestamps within the
+ * session so the profile can show when they were around.
+ */
+export async function listSessionsForUser(
+  db: D1Database, guildId: string, userId: string, limit = 200,
+): Promise<UserHistorySession[]> {
+  const { results } = await db.prepare(`
+    SELECT h.*,
+      (SELECT COUNT(*) FROM party_games g WHERE g.history_id = h.history_id) AS game_count,
+      ue.first_ts, ue.last_ts
+    FROM party_history h
+    JOIN (
+      SELECT history_id, MIN(ts) AS first_ts, MAX(ts) AS last_ts
+      FROM party_history_events WHERE user_id = ?2
+      GROUP BY history_id
+    ) ue ON ue.history_id = h.history_id
+    WHERE h.guild_id = ?1
+    ORDER BY h.history_id DESC
+    LIMIT ?3
+  `).bind(guildId, userId, limit).all<SessionRow & {
+    game_count: number; first_ts: number; last_ts: number
+  }>()
+  return results.map(r => ({
+    ...toSession(r),
+    gameCount: r.game_count,
+    wasOwner: r.owner_id === userId,
+    firstSeenAt: r.first_ts,
+    lastSeenAt: r.last_ts,
+  }))
+}
+
 export async function getSession(
   db: D1Database, guildId: string, historyId: number,
 ): Promise<HistorySession | null> {
