@@ -1,7 +1,10 @@
 name: Deploy
 
-# Manual deploys only — trigger from the Actions tab ("Run workflow").
+# Manual deploys — trigger from the Actions tab ("Run workflow").
 # Optionally re-registers the Discord slash commands in the same run.
+#
+# Also deploys automatically when a pull request is merged with the
+# "deploy-on-merge" label attached.
 #
 # Required repository secrets:
 #   CLOUDFLARE_API_TOKEN    — API token with the "Edit Cloudflare Workers" template
@@ -21,12 +24,20 @@ on:
         description: Re-register Discord slash commands (global)
         type: boolean
         default: false
+  pull_request:
+    types: [closed]
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'deploy-on-merge'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
