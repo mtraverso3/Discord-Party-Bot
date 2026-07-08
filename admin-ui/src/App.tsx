@@ -28,7 +28,9 @@ function currentTab(): string {
   let h = location.hash || ''
   if (h.startsWith('#/')) h = h.slice(2)
   else if (h.startsWith('#')) h = h.slice(1)
-  return TABS.some(t => t.id === h) ? h : 'dashboard'
+  // Keep the tab active for sub-routes like #/parties/<id>.
+  const seg = h.split('/')[0]!
+  return TABS.some(t => t.id === seg) ? seg : 'dashboard'
 }
 
 export function App() {
