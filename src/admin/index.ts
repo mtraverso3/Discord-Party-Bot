@@ -3,6 +3,16 @@ import { verifyAccessJwt } from './access'
 import { handleAdminApi } from './api'
 
 export async function handleAdmin(req: Request, env: AppBindings): Promise<Response> {
+  const url = new URL(req.url)
+
+  // Landing target for the magic-link flow. It can be fronted by its own
+  // single-IdP Access app (which skips the provider chooser) whose token has a
+  // different AUD than the main app, so we don't verify it here — we just
+  // bounce to /admin, which is itself Access-protected. See the README.
+  if (url.pathname === '/admin/continue') {
+    return new Response(null, { status: 302, headers: { Location: '/admin', 'Cache-Control': 'no-store' } })
+  }
+
   const team = env.CF_ACCESS_TEAM
   const aud = env.CF_ACCESS_AUD
   if (!team || !aud) {
@@ -17,7 +27,6 @@ export async function handleAdmin(req: Request, env: AppBindings): Promise<Respo
   const verify = await verifyAccessJwt(jwt, team, aud)
   if (!verify.ok) return new Response('Forbidden — invalid Access token', { status: 403 })
 
-  const url = new URL(req.url)
   if (url.pathname.startsWith('/admin/api/')) {
     return handleAdminApi(req, env, url, verify.email)
   }

@@ -4,8 +4,9 @@ import {
   addAdmin, consumeAdminLinkToken, generateAdminToken, isAdmin, listAdmins,
   removeAdmin, writeAdminLinkToken,
 } from '../src/store/adminAuth'
-import { handleAuth, signSession, SESSION_COOKIE } from '../src/auth/session'
+import { CONTINUE_PATH, handleAuth, normalizeBaseUrl, signSession, SESSION_COOKIE } from '../src/auth/session'
 import { handleOidc } from '../src/auth/oidc'
+import { handleAdmin } from '../src/admin'
 import { sha256B64url } from '../src/lib/jwt'
 import type { AppBindings } from '../src/types'
 
@@ -102,7 +103,7 @@ describe('/auth/login', () => {
     const res = await handleAuth(new Request(u, { redirect: 'manual' }), oidcEnv, u)
 
     expect(res.status).toBe(302)
-    expect(res.headers.get('Location')).toBe('/admin')
+    expect(res.headers.get('Location')).toBe(CONTINUE_PATH)
     expect(res.headers.get('Set-Cookie')).toContain(`${SESSION_COOKIE}=`)
   })
 
@@ -222,5 +223,28 @@ describe('OIDC provider', () => {
     const cookie = await cookieFor('555555555555555555', 'Removed') // valid signature, not on the list
     const res = await authorize(cookie)
     expect(res.status).toBe(403)
+  })
+
+  it('derives the issuer with an https scheme even if the base omits one', async () => {
+    const u = new URL(`${BASE}/.well-known/openid-configuration`)
+    const disc = await (await handleOidc(new Request(u), { ...oidcEnv, PUBLIC_BASE_URL: 'bot.test' } as AppBindings, u)).json<any>()
+    expect(disc.issuer).toBe('https://bot.test')
+  })
+})
+
+describe('normalizeBaseUrl', () => {
+  it('adds https:// when missing and strips trailing slashes', () => {
+    expect(normalizeBaseUrl('bot.test')).toBe('https://bot.test')
+    expect(normalizeBaseUrl('https://bot.test/')).toBe('https://bot.test')
+    expect(normalizeBaseUrl('http://localhost:8787')).toBe('http://localhost:8787')
+  })
+})
+
+describe('/admin/continue', () => {
+  it('bounces to /admin without needing the main app JWT', async () => {
+    const u = new URL(`${BASE}/admin/continue`)
+    const res = await handleAdmin(new Request(u, { redirect: 'manual' }), oidcEnv)
+    expect(res.status).toBe(302)
+    expect(res.headers.get('Location')).toBe('/admin')
   })
 })

@@ -105,7 +105,7 @@ To hack on the UI itself: run `wrangler dev` in the repo root and `npm run dev` 
 
 Lets you allow specific **Discord users** into the admin UI without giving them an email in the Access policy — and without any Discord OAuth. Cloudflare Access still fronts `/admin*`; the difference is only *how* a session is obtained.
 
-**How it works.** An allow-listed user runs `/party admin` and gets a single-use link. Opening it drops a signed 24h session cookie (the Discord slash-command interaction *is* the proof of identity). From there the Worker acts as a small OIDC identity provider: hitting `/admin` bounces through Cloudflare Access → the Worker's `/oidc/authorize`, which reads that cookie and issues Access an identity of `<discordId>@<domain>`. Access mints its own JWT as usual, so the existing in-Worker verification and audit trail are unchanged — actions are attributed to the Discord user (shown by name on the **Admins**/**Audit** pages). Email SSO keeps working alongside this. The OIDC and login endpoints (`/oidc/*`, `/auth/*`, `/.well-known/openid-configuration`) live **outside** the Access application so the browser and Access can reach them; keep the Access app scoped to `/admin*` only.
+**How it works.** An allow-listed user runs `/party admin` and gets a single-use link. Opening it drops a signed 24h session cookie (the Discord slash-command interaction *is* the proof of identity) and lands on `/admin/continue`. From there the Worker acts as a small OIDC identity provider: Cloudflare Access → the Worker's `/oidc/authorize`, which reads that cookie and issues Access an identity of `<discordId>@<domain>`. Access mints its own JWT as usual, so the existing in-Worker verification and audit trail are unchanged — actions are attributed to the Discord user (shown by name on the **Admins**/**Audit** pages). Email SSO keeps working alongside this. The OIDC and login endpoints (`/oidc/*`, `/auth/*`, `/.well-known/openid-configuration`) live **outside** the Access application so the browser and Access can reach them; keep the main Access app scoped to `/admin*` only.
 
 **Setup:**
 
@@ -115,7 +115,7 @@ Lets you allow specific **Discord users** into the admin UI without giving them 
    ```
 2. Set the remaining secrets (pick your own client id/secret — they just have to match what you enter in Access next):
    ```
-   wrangler secret put PUBLIC_BASE_URL        # e.g. https://partybot.example.com (no trailing slash)
+   wrangler secret put PUBLIC_BASE_URL        # e.g. https://partybot.example.com (scheme optional — https assumed)
    wrangler secret put ADMIN_SESSION_SECRET   # any long random string
    wrangler secret put OIDC_CLIENT_ID
    wrangler secret put OIDC_CLIENT_SECRET
@@ -136,6 +136,14 @@ Lets you allow specific **Discord users** into the admin UI without giving them 
 6. Run `/party admin` in Discord and open the link. Manage the allow-list afterward from the admin UI's **Admins** page.
 
 Removing a user from the allow-list cuts them off at their next Access re-auth (the `/oidc/authorize` step re-checks the list even against a still-valid cookie). All the login credentials are short-lived and swept by the existing cron.
+
+**Skipping the provider chooser (optional).** With both email SSO and Discord OIDC enabled on the `/admin*` app, Cloudflare shows a login-method chooser. To let magic-link users skip it, give the landing path its own Access application with a single login method (Cloudflare only auto-skips the chooser for single-IdP apps):
+
+1. Create a second self-hosted Access application scoped to just `<your-domain>/admin/continue`. Because it's a more specific path, Access routes `/admin/continue` to it and everything else under `/admin*` to the main app.
+2. Set its **only** login method to the Discord OIDC provider and turn on **Instant Auth**. Policy: allow everyone (the Worker's allow-list is the gate).
+3. On the **main** `/admin*` app, make sure the Discord OIDC provider is also an allowed login method. After `/admin/continue` establishes the session, the bounce to `/admin` reuses it — no second chooser.
+
+The magic link always lands on `/admin/continue`, so this degrades gracefully: without the second app the flow still works, users just see the chooser once.
 
 ## Desktop client (optional)
 
