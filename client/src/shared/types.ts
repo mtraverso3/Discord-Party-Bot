@@ -25,6 +25,7 @@ export interface SessionMember {
   ign: string | null
   isOwner: boolean
   assignedBan: string | null  // champion this member was assigned to ban (/party banlist)
+  avatarUrl: string | null    // Discord avatar CDN URL, or null for a default avatar
 }
 
 export interface SessionParty {

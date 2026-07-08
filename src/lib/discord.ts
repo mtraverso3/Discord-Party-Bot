@@ -63,10 +63,46 @@ export async function getGuildMember(
   token: string,
   guildId: string,
   userId: string,
-): Promise<{ user: { id: string; username: string; global_name?: string }; nick?: string }> {
+): Promise<{ user: { id: string; username: string; global_name?: string; avatar?: string | null }; nick?: string; avatar?: string | null }> {
   const res = await discordFetch(token, `/guilds/${guildId}/members/${userId}`)
   if (!res.ok) throw new Error(`getGuildMember failed: ${res.status}`)
   return res.json<any>()
+}
+
+/** CDN URL for a member's avatar (guild-specific first, then their global one),
+ *  or null when they use a default avatar. `.png` renders animated ones static. */
+function memberAvatarUrl(
+  guildId: string,
+  userId: string,
+  member: { user?: { avatar?: string | null }; avatar?: string | null },
+): string | null {
+  if (member.avatar) {
+    return `https://cdn.discordapp.com/guilds/${guildId}/users/${userId}/avatars/${member.avatar}.png?size=64`
+  }
+  if (member.user?.avatar) {
+    return `https://cdn.discordapp.com/avatars/${userId}/${member.user.avatar}.png?size=64`
+  }
+  return null
+}
+
+/** Resolve (and cache) a member's avatar URL. Cached for 6h — the session
+ *  polls frequently, so this keeps Discord calls to roughly one per user. An
+ *  empty cached string means "resolved, but no custom avatar" (→ null). */
+export async function getMemberAvatarUrl(
+  kv: KVNamespace,
+  token: string,
+  guildId: string,
+  userId: string,
+): Promise<string | null> {
+  const key = `avatar:${guildId}:${userId}`
+  const cached = await kv.get(key)
+  if (cached !== null) return cached || null
+  let url: string | null = null
+  try {
+    url = memberAvatarUrl(guildId, userId, await getGuildMember(token, guildId, userId))
+  } catch { /* leave null; client falls back to initials */ }
+  await kv.put(key, url ?? '', { expirationTtl: 6 * 60 * 60 })
+  return url
 }
 
 // Global user lookup — works even for someone who has left the guild, so we can

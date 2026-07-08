@@ -465,7 +465,8 @@ function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion, ban }: {
   return (
     <div className="flex items-center gap-2.5 border-b py-2 last:border-b-0">
       <Avatar name={m.displayName} highlight={isSelf}
-        imageUrl={champion?.iconUrl} title={champion ? `Picked ${champion.name}` : undefined} />
+        imageUrl={champion?.iconUrl ?? m.avatarUrl}
+        title={champion ? `Picked ${champion.name}` : undefined} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate text-[0.8rem] font-medium">
           <span className="truncate">{m.displayName}{isSelf ? ' (you)' : ''}</span>
