@@ -145,8 +145,26 @@ export function EmptyState({ icon, title, children }: { icon?: ReactNode; title:
   )
 }
 
-export function Avatar({ name, highlight }: { name: string; highlight?: boolean }) {
+export function Avatar({ name, highlight, imageUrl, title }: {
+  name: string
+  highlight?: boolean
+  imageUrl?: string | null
+  title?: string
+}) {
   const initials = name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('') || '?'
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={title ?? name}
+        title={title}
+        className={cn(
+          'size-8 shrink-0 rounded-full object-cover',
+          highlight && 'ring-2 ring-primary/50',
+        )}
+      />
+    )
+  }
   return (
     <span className={cn(
       'grid size-8 shrink-0 place-items-center rounded-full text-[0.7rem] font-semibold',

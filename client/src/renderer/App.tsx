@@ -431,19 +431,6 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
   )
 }
 
-/* A champion pick chip: square portrait + name. Falls back to just the name
-   when Data Dragon didn't resolve an icon. */
-function ChampionBadge({ champion }: { champion: ChampionPick }) {
-  return (
-    <Badge variant="secondary" className="max-w-36 gap-1.5 pl-1" title={`Picked ${champion.name}`}>
-      {champion.iconUrl && (
-        <img src={champion.iconUrl} alt="" className="size-4 shrink-0 rounded-full object-cover" />
-      )}
-      <span className="truncate">{champion.name}</span>
-    </Badge>
-  )
-}
-
 function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion }: {
   member: SessionMember
   isSelf: boolean
@@ -451,16 +438,16 @@ function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion }: {
   inLobby: boolean
   champion: ChampionPick | null
 }) {
-  // Champion pick takes precedence over lobby presence — it's the more specific
-  // signal once a game is underway. One status chip per row otherwise.
-  const chip = champion ? <ChampionBadge champion={champion} />
-    : !m.ign ? <Badge variant="warning">no IGN</Badge>
+  // One status chip per row, and only when it says something useful. The
+  // champion pick, when present, is shown as the member's avatar instead.
+  const chip = !m.ign ? <Badge variant="warning">no IGN</Badge>
     : lobbyExists ? (inLobby ? <Badge variant="success"><StatusDot />in lobby</Badge> : <Badge variant="outline">not in lobby</Badge>)
     : null
 
   return (
     <div className="flex items-center gap-2.5 border-b py-2 last:border-b-0">
-      <Avatar name={m.displayName} highlight={isSelf} />
+      <Avatar name={m.displayName} highlight={isSelf}
+        imageUrl={champion?.iconUrl} title={champion ? `Picked ${champion.name}` : undefined} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 truncate text-[0.8rem] font-medium">
           <span className="truncate">{m.displayName}{isSelf ? ' (you)' : ''}</span>
@@ -493,12 +480,12 @@ function GuestRow({ row: r, champion, setTagFor, showToast }: {
   return (
     <div className="border-b last:border-b-0">
       <div className="flex items-center gap-2.5 py-2">
-        <Avatar name={r.riotId} />
+        <Avatar name={r.riotId} imageUrl={champion?.iconUrl}
+          title={champion ? `Picked ${champion.name}` : undefined} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[0.8rem] font-medium">{r.riotId}</p>
           {r.known && <p className="truncate text-[0.7rem] text-muted-foreground">{r.known.displayName} on Discord</p>}
         </div>
-        {champion && <ChampionBadge champion={champion} />}
         {r.status === 'tagged'
           ? <Badge variant="secondary">{r.tag}</Badge>
           : <Badge variant="destructive">not in party</Badge>}
