@@ -20,7 +20,7 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "partybot"
-database_id = "00000000-0000-0000-0000-000000000000" # replace with `wrangler d1 create partybot` output
+database_id = "81fb42ec-e425-4c49-bb92-dc8efc921fae"
 migrations_dir = "migrations"
 
 # Legacy KV namespace — kept only so POST /admin/api/import-kv can copy the
