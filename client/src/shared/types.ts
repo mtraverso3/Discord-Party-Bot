@@ -130,9 +130,11 @@ export type GamePhase = 'none' | 'champ-select' | 'in-game'
 export interface BanCheck {
   assigned: string             // champion the member was told to ban
   assignedIcon: string | null  // icon for `assigned`, when resolvable
-  actual: string | null        // champion they actually banned (null until banned)
+  actual: string | null        // champion they actually banned (null until banned / when inferred-miss)
   actualIcon: string | null    // icon for `actual`, when known
-  ok: boolean                  // actual matches assigned
+  ok: boolean                  // assigned was banned
+  inferred: boolean            // true when derived from ban presence, not confirmed by caster
+                               // (the client can't identify who cast non-group bans)
 }
 
 /** Champion picks for the current champ select or live game, cross-referenced

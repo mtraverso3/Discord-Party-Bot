@@ -494,7 +494,25 @@ async function enrichBansAtLoadIn(
     const pick = pickFor(bannedId)
     s.bans[m.userId] = {
       ...cur, actual: pick.name, actualIcon: pick.iconUrl,
-      ok: normalizeChamp(pick.name) === normalizeChamp(cur.assigned),
+      ok: normalizeChamp(pick.name) === normalizeChamp(cur.assigned), inferred: false,
+    }
+  }
+
+  // Presence fallback: for members the client never de-anonymized (bans with no
+  // puuid/pick — everyone outside the local player's game-group), we can't know
+  // WHO cast which ban, only the full set of champions banned. Since the inhouse
+  // assigns each member a specific champion, treat "assigned champ is among the
+  // bans" as compliance and "absent" as a miss. Marked inferred so the UI shows
+  // it's not caster-confirmed.
+  const bannedIds = new Set(s.rawBans.map(b => b.championId))
+  for (const m of s.members) {
+    const cur = s.bans[m.userId]
+    if (!cur || cur.actual != null) continue
+    const assignedId = championIdForName(cur.assigned)
+    if (assignedId !== undefined && bannedIds.has(assignedId)) {
+      s.bans[m.userId] = { ...cur, actual: cur.assigned, actualIcon: cur.assignedIcon, ok: true, inferred: true }
+    } else {
+      s.bans[m.userId] = { ...cur, ok: false, inferred: true }  // definitely not banned
     }
   }
 
@@ -570,6 +588,7 @@ async function gameChampions(): Promise<GameView> {
         actual: actualPick?.name ?? null,
         actualIcon: actualPick?.iconUrl ?? null,
         ok: actualPick !== null && normalizeChamp(actualPick.name) === normalizeChamp(m.assignedBan),
+        inferred: false,
       }
       members.push({ userId: m.userId, ign: m.ign })
     }))
