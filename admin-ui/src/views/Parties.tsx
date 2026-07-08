@@ -399,13 +399,13 @@ function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
 
   return (
     <div className="space-y-4">
-      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <button type="button" className="cursor-pointer transition-colors hover:text-foreground" onClick={goToList}>
-          Parties
-        </button>
-        <ChevronRight className="size-3.5" />
-        <span className="font-medium text-foreground">{p.name}</span>
-      </nav>
+      {/*<nav className="flex items-center gap-1.5 text-sm text-muted-foreground">*/}
+      {/*  <button type="button" className="cursor-pointer transition-colors hover:text-foreground" onClick={goToList}>*/}
+      {/*    Parties*/}
+      {/*  </button>*/}
+      {/*  <ChevronRight className="size-3.5" />*/}
+      {/*  <span className="font-medium text-foreground">{p.name}</span>*/}
+      {/*</nav>*/}
 
       <Button variant="ghost" size="sm" className="-ml-2" onClick={goToList}><ArrowLeft />Back to parties</Button>
 
