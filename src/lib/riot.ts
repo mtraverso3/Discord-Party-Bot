@@ -119,12 +119,107 @@ const REGION_CLUSTER: Record<string, string> = {
   KR: 'asia', JP: 'asia', PH: 'asia', SG: 'asia', TH: 'asia', TW: 'asia', VN: 'asia',
 }
 
+// Match-v5 uses its own regional routing (americas/asia/europe/sea) — SEA
+// regions that Account-v1 lumps under asia are a separate cluster here.
+const MATCH_CLUSTER: Record<string, string> = {
+  NA: 'americas', BR: 'americas', LAN: 'americas', LAS: 'americas', PBE: 'americas',
+  EUW: 'europe', EUNE: 'europe', TR: 'europe', RU: 'europe',
+  KR: 'asia', JP: 'asia',
+  OCE: 'sea', PH: 'sea', SG: 'sea', TH: 'sea', TW: 'sea', VN: 'sea',
+}
+
 export function platformForRegion(region: string): string | null {
   return REGION_PLATFORM[region.toUpperCase()] ?? null
 }
 
 export function clusterForRegion(region: string): string | null {
   return REGION_CLUSTER[region.toUpperCase()] ?? null
+}
+
+export function matchClusterForRegion(region: string): string | null {
+  return MATCH_CLUSTER[region.toUpperCase()] ?? null
+}
+
+/** The public match-v5 match ID for a game, e.g. "NA1_4812345678". */
+export function matchIdForGame(region: string, gameId: string): string | null {
+  const platform = platformForRegion(region)
+  return platform ? `${platform.toUpperCase()}_${gameId}` : null
+}
+
+// ── Completed-match lookup (Match-v5) ────────────────────────────────────────
+
+export interface MatchParticipant {
+  puuid: string
+  riotId: string      // "gameName#tagLine", best-effort
+  championId: number
+  championName: string
+  teamId: number
+  win: boolean
+}
+
+export interface MatchDetails {
+  matchId: string
+  queueId: number
+  gameCreation: number
+  gameDuration: number
+  participants: MatchParticipant[]
+}
+
+/**
+ * Fetch a finished match from Match-v5, or null if it isn't available yet (a
+ * game still in progress, or too old to be indexed, both return 404). Throws on
+ * unexpected upstream failures so the caller can retry rather than give up.
+ */
+export async function fetchMatch(
+  token: string, region: string, matchId: string,
+): Promise<MatchDetails | null> {
+  const cluster = matchClusterForRegion(region)
+  if (!cluster) throw new Error(`unsupported region ${region}`)
+
+  const res = await fetch(
+    `https://${cluster}.api.riotgames.com/lol/match/v5/matches/${encodeURIComponent(matchId)}`,
+    { headers: { 'X-Riot-Token': token.trim() } },
+  )
+  if (res.status === 404) return null
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`match ${res.status}: ${detail.slice(0, 300)}`)
+  }
+  const body = (await res.json()) as {
+    info?: {
+      queueId?: number
+      gameCreation?: number
+      gameDuration?: number
+      participants?: {
+        puuid?: string
+        riotIdGameName?: string
+        riotIdTagline?: string
+        championId?: number
+        championName?: string
+        teamId?: number
+        win?: boolean
+      }[]
+    }
+  }
+  const info = body.info ?? {}
+  return {
+    matchId,
+    queueId: info.queueId ?? 0,
+    gameCreation: info.gameCreation ?? 0,
+    gameDuration: info.gameDuration ?? 0,
+    participants: (info.participants ?? []).map(p => {
+      const name = p.riotIdGameName ?? ''
+      const tag = p.riotIdTagline ?? ''
+      return {
+        puuid: p.puuid ?? '',
+        riotId: name ? (tag ? `${name}#${tag}` : name) : '',
+        championId: p.championId ?? 0,
+        championName: p.championName ?? '',
+        teamId: p.teamId ?? 0,
+        win: !!p.win,
+      }
+    }).filter(p => p.puuid),
+  }
 }
 
 /** Resolve a Riot ID to its public encrypted puuid via Account-v1, or null. */

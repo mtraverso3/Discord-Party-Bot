@@ -5,12 +5,13 @@ import { GAMES } from '../games'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { Avatar } from '../components/Avatar'
+import { GameList } from '../components/GameList'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
 import { ChannelSelect } from '../components/ChannelSelect'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorNote, Input, Label, Mono, Segmented, Select, Spinner, StatusDot, Switch, Textarea } from '../components/ui'
 import { useGuildData } from '../lib/guildData'
 import { deadlineOf, fmtAbs, relTime } from '../lib/time'
-import type { ChannelInfo, GuildSettings, Party, PartyMember, QueueEntry, VoiceStatus } from '../types'
+import type { ChannelInfo, GuildSettings, Party, PartyGamesResponse, PartyMember, QueueEntry, VoiceStatus } from '../types'
 
 type SortMode = 'newest' | 'oldest' | 'fullest' | 'expiring'
 type Avatars = Record<string, string | null>
@@ -361,7 +362,7 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
 
 // ── Detail page ──────────────────────────────────────────────────────────────
 
-type Section = 'people' | 'settings' | 'banlist'
+type Section = 'people' | 'settings' | 'banlist' | 'games'
 
 function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
   party: Party
@@ -393,6 +394,7 @@ function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
     ['people', `People (${p.members.length + p.queue.length})`],
     ['settings', 'Settings'],
     ['banlist', 'Banlist' + (p.banlist ? ` (${p.banlist.source.length})` : '')],
+    ['games', 'Games'],
   ]
 
   return (
@@ -429,6 +431,31 @@ function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
       {section === 'people' && <PeopleSection p={p} avatars={avatars} onUpdate={onUpdate} />}
       {section === 'settings' && <SettingsSection p={p} voiceChannels={voiceChannels} onUpdate={onUpdate} onRemove={onRemove} />}
       {section === 'banlist' && <BanlistSection p={p} onUpdate={onUpdate} />}
+      {section === 'games' && <GamesSection partyId={p.id} />}
+    </div>
+  )
+}
+
+function GamesSection({ partyId }: { partyId: string }) {
+  const [data, setData] = useState<PartyGamesResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    api<PartyGamesResponse>('/parties/' + partyId + '/games')
+      .then(d => { if (alive) setData(d) })
+      .catch(e => { if (alive) setError((e as Error).message) })
+    return () => { alive = false }
+  }, [partyId])
+
+  if (error) return <ErrorNote>Error: {error}</ErrorNote>
+  if (!data) return <Spinner />
+  return (
+    <div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        League games party members reported through the desktop client. Champions fill in once each match finishes.
+      </p>
+      <GameList games={data.games} />
     </div>
   )
 }

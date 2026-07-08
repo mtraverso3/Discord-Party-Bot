@@ -143,6 +143,21 @@ export async function fetchGameflowPhase(creds: LcuCreds): Promise<string> {
   }
 }
 
+/**
+ * The numeric gameId of the game currently in progress, or 0 when there isn't
+ * one. It's populated on `gameData.gameId` once the match starts (0 in lobby /
+ * champ select), which is what pairs with the region to form a Match-v5 id.
+ */
+export async function fetchGameId(creds: LcuCreds): Promise<number> {
+  try {
+    const res = await lcuRequest(creds, 'GET', '/lol-gameflow/v1/session')
+    const id = Number(res.body?.gameData?.gameId ?? 0)
+    return res.status === 200 && Number.isFinite(id) ? id : 0
+  } catch {
+    return 0
+  }
+}
+
 export function lcuRequest(
   creds: LcuCreds,
   method: string,

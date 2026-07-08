@@ -10,6 +10,7 @@ import { handleClientApi } from './client-api'
 import { tryMarkDisbanded } from './lib/party'
 import { sweepInactiveParties } from './store/parties'
 import { sweepExpiredAuth } from './store/clientAuth'
+import { resolvePendingGames } from './store/games'
 
 const inner = new DiscordHono<AppEnv>()
   .command('party', handleParty)
@@ -88,6 +89,10 @@ export default {
         await tryMarkDisbanded(env.DISCORD_BOT_TOKEN, party, reason)
       }
       await sweepExpiredAuth(env.DB)
+      // Fill in participants for League games the desktop client reported once
+      // the matches have finished and Match-v5 can return them.
+      const resolved = await resolvePendingGames(env.DB, env.RIOT_API_KEY)
+      if (resolved > 0) console.log(`Resolved ${resolved} pending League game(s)`)
     })().catch(e => console.error('scheduled sweep failed:', e)))
   },
 }
