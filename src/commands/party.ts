@@ -564,7 +564,7 @@ async function adminLink(c: CommandContext<AppEnv>, userId: string) {
   const url = `${normalizeBaseUrl(base)}/auth/login?token=${token}`
 
   return c.followup({
-    content: `**Admin panel login:** ${url}\n\nThis link is single-use and expires in 24 hours. Opening it signs you in for 24 hours. Don't share it — anyone who opens it signs in as you.`,
+    content: `**Admin panel login:** ${url}\n\nThis link is single-use and expires in 24 hours. Don't share it — anyone who opens it signs in as you.`,
     flags: 64,
   })
 }
