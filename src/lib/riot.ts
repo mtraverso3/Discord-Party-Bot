@@ -26,10 +26,11 @@ export interface ChampionCatalog {
   champions: Record<string, ChampionInfo>  // keyed by stringified numeric id
 }
 
-const CATALOG_KV_KEY = 'riot:champion-catalog'
 const CATALOG_TTL_SECONDS = 24 * 60 * 60   // refresh the catalog daily
+// Synthetic key for the Workers Cache API (public Data Dragon data, no auth).
+const CATALOG_CACHE_URL = 'https://cache.partybot.internal/riot/champion-catalog'
 
-// Warm in-memory cache so repeated requests in the same isolate skip KV.
+// Warm in-memory cache so repeated requests in the same isolate skip the Cache API.
 let memoryCatalog: { at: number; value: ChampionCatalog } | null = null
 const MEMORY_TTL_MS = 60 * 60 * 1000
 
@@ -62,21 +63,24 @@ async function buildCatalog(): Promise<ChampionCatalog> {
   return { version, champions }
 }
 
-/** The champion catalog, served from memory → KV → Data Dragon, in that order. */
-export async function getChampionCatalog(env: AppBindings): Promise<ChampionCatalog> {
+/** The champion catalog, served from memory → Cache API → Data Dragon, in that order. */
+export async function getChampionCatalog(_env: AppBindings): Promise<ChampionCatalog> {
   const now = Date.now()
   if (memoryCatalog && now - memoryCatalog.at < MEMORY_TTL_MS) return memoryCatalog.value
 
-  const cached = await env.PARTY_KV.get(CATALOG_KV_KEY)
-  if (cached) {
-    const value = JSON.parse(cached) as ChampionCatalog
+  const cache = await caches.open('riot')
+  const hit = await cache.match(CATALOG_CACHE_URL).catch(() => null)
+  if (hit) {
+    const value = (await hit.json()) as ChampionCatalog
     memoryCatalog = { at: now, value }
     return value
   }
 
   const value = await buildCatalog()
   memoryCatalog = { at: now, value }
-  await env.PARTY_KV.put(CATALOG_KV_KEY, JSON.stringify(value), { expirationTtl: CATALOG_TTL_SECONDS })
+  await cache.put(CATALOG_CACHE_URL, new Response(JSON.stringify(value), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${CATALOG_TTL_SECONDS}` },
+  })).catch(() => {})
   return value
 }
 

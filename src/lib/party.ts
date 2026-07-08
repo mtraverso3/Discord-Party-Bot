@@ -1,167 +1,11 @@
-import type { AppBindings, PartyData, PartyIndexEntry, UserProfile } from '../types'
+import type { AppBindings, PartyData } from '../types'
+import { createParty, disbandParty, setEmbedMessage } from '../store/parties'
+import { randomId } from './id'
 import { deleteMessage, editMessage, postMessage } from './discord'
 import { buildDisbandedEmbed, buildPartyComponents, buildPartyEmbed } from './embeds'
 
-// ── KV helpers ──────────────────────────────────────────────────────────────
-
-export async function getPartyIndex(kv: KVNamespace, guildId: string): Promise<PartyIndexEntry[]> {
-  const raw = await kv.get(`guild:${guildId}:parties`)
-  return raw ? (JSON.parse(raw) as PartyIndexEntry[]) : []
-}
-
-async function savePartyIndex(kv: KVNamespace, guildId: string, index: PartyIndexEntry[]): Promise<void> {
-  await kv.put(`guild:${guildId}:parties`, JSON.stringify(index))
-}
-
-export async function addToIndex(kv: KVNamespace, guildId: string, entry: PartyIndexEntry): Promise<void> {
-  const index = await getPartyIndex(kv, guildId)
-  index.push(entry)
-  await savePartyIndex(kv, guildId, index)
-}
-
-export async function removeFromIndex(kv: KVNamespace, guildId: string, partyId: string): Promise<void> {
-  const index = await getPartyIndex(kv, guildId)
-  await savePartyIndex(kv, guildId, index.filter(e => e.id !== partyId))
-}
-
-export async function updateIndexEntry(
-  kv: KVNamespace,
-  guildId: string,
-  partyId: string,
-  updates: Partial<PartyIndexEntry>,
-): Promise<void> {
-  const index = await getPartyIndex(kv, guildId)
-  const idx = index.findIndex(e => e.id === partyId)
-  if (idx === -1) return
-  index[idx] = { ...index[idx]!, ...updates }
-  await savePartyIndex(kv, guildId, index)
-}
-
-export async function getUserPartyId(kv: KVNamespace, guildId: string, userId: string): Promise<string | null> {
-  return kv.get(`user:${guildId}:${userId}`)
-}
-
-export async function setUserPartyId(kv: KVNamespace, guildId: string, userId: string, partyId: string | null): Promise<void> {
-  if (partyId) {
-    await kv.put(`user:${guildId}:${userId}`, partyId)
-  } else {
-    await kv.delete(`user:${guildId}:${userId}`)
-  }
-}
-
-export async function findParty(kv: KVNamespace, guildId: string, nameOrId: string): Promise<PartyIndexEntry | null> {
-  const index = await getPartyIndex(kv, guildId)
-  const upper = nameOrId.toUpperCase()
-  return index.find(
-    p => p.id === upper || p.name.toLowerCase() === nameOrId.toLowerCase()
-  ) ?? null
-}
-
-export async function findPartyById(kv: KVNamespace, guildId: string, partyId: string): Promise<PartyIndexEntry | null> {
-  const index = await getPartyIndex(kv, guildId)
-  return index.find(e => e.id === partyId) ?? null
-}
-
-// ── User profiles ────────────────────────────────────────────────────────────
-
-export async function getUserProfile(kv: KVNamespace, userId: string): Promise<UserProfile> {
-  const raw = await kv.get(`profile:${userId}`)
-  return raw ? JSON.parse(raw) as UserProfile : { igns: {} }
-}
-
-export async function saveUserProfile(kv: KVNamespace, userId: string, profile: UserProfile): Promise<void> {
-  await kv.put(`profile:${userId}`, JSON.stringify(profile))
-}
-
-// ── Reverse Riot ID lookup ───────────────────────────────────────────────────
-// Lets the desktop client recognize a player it finds in a live League lobby
-// as a Discord user who just isn't in the current party yet, so it can offer
-// to add them. Keyed by game since the same Riot ID can mean different people
-// across different titles' profiles.
-
-function normalizeIgnPart(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
-function parseIgnForIndex(raw: string): { name: string; tag: string | null } | null {
-  const s = raw.trim()
-  if (!s) return null
-  const hash = s.indexOf('#')
-  if (hash === -1) return { name: s, tag: null }
-  const name = s.slice(0, hash).trim()
-  const tag = s.slice(hash + 1).trim()
-  return name ? { name, tag: tag || null } : null
-}
-
-function ignIndexKey(game: string, name: string, tag: string | null): string {
-  return `ign-index:${game}:${normalizeIgnPart(name)}:${tag ? normalizeIgnPart(tag) : ''}`
-}
-
-export async function saveUserIgn(kv: KVNamespace, userId: string, game: string, ign: string): Promise<void> {
-  const profile = await getUserProfile(kv, userId)
-  const prevParsed = profile.igns[game] ? parseIgnForIndex(profile.igns[game]!) : null
-  if (prevParsed) await kv.delete(ignIndexKey(game, prevParsed.name, prevParsed.tag))
-
-  const trimmed = ign.trim()
-  if (trimmed) {
-    profile.igns[game] = trimmed
-    const parsed = parseIgnForIndex(trimmed)
-    if (parsed) await kv.put(ignIndexKey(game, parsed.name, parsed.tag), userId)
-  } else {
-    delete profile.igns[game]
-  }
-  await saveUserProfile(kv, userId, profile)
-}
-
-/** Which Discord user (if any) has registered this Riot ID for the given
- *  game. A registration saved without a tagline matches any tagline — same
- *  "no tag = wildcard" rule the client itself uses to match IGNs. */
-export async function findUserIdByRiotId(
-  kv: KVNamespace, game: string, gameName: string, tagLine: string,
-): Promise<string | null> {
-  const exact = await kv.get(ignIndexKey(game, gameName, tagLine || null))
-  if (exact) return exact
-  if (!tagLine) return null
-  return kv.get(ignIndexKey(game, gameName, null))
-}
-
-// ── Durable Object routing ───────────────────────────────────────────────────
-
-export function getPartyStub(env: AppBindings, guildId: string, partyId: string): DurableObjectStub {
-  const doId = env.PARTY_STATE.idFromName(`party-${guildId}-${partyId}`)
-  return env.PARTY_STATE.get(doId)
-}
-
-// Lease length for the per-owner create lock. Comfortably longer than a normal
-// create (which posts a Discord embed), short enough to self-heal after a crash.
-const OWNER_LOCK_TTL_MS = 15_000
-
-/**
- * A PartyState DO addressed by an owner-scoped name, used purely as a mutex
- * around party creation. The `ownerlock-` prefix can't collide with a real
- * party stub (those use `party-`), and it's never added to the guild index.
- */
-function ownerLockStub(env: AppBindings, guildId: string, ownerId: string): DurableObjectStub {
-  const doId = env.PARTY_STATE.idFromName(`ownerlock-${guildId}-${ownerId}`)
-  return env.PARTY_STATE.get(doId)
-}
-
-export async function callParty<T>(
-  stub: DurableObjectStub,
-  action: string,
-  body?: unknown,
-): Promise<T> {
-  const res = await stub.fetch(`http://do/${action}`, {
-    method: body !== undefined ? 'POST' : 'GET',
-    headers: { 'Content-Type': 'application/json' },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  if (!res.ok) {
-    const err = await res.json<{ error: string }>().catch(() => null)
-    throw new Error(err?.error ?? `DO request failed (${res.status})`)
-  }
-  return res.json<T>()
-}
+// Orchestration that spans the store and the Discord API: posting/refreshing
+// party embeds and the create-party flow.
 
 // ── Embed sync ───────────────────────────────────────────────────────────────
 
@@ -173,7 +17,8 @@ export async function syncEmbed(token: string, party: PartyData): Promise<void> 
   })
 }
 
-export async function trySyncEmbed(token: string, party: PartyData): Promise<void> {
+export async function trySyncEmbed(token: string, party: PartyData | undefined): Promise<void> {
+  if (!party) return
   try { await syncEmbed(token, party) } catch (e) {
     // Usually the message was deleted manually; log so persistent failures show up.
     console.warn(`syncEmbed failed for party ${party.id} in guild ${party.guildId}:`, e)
@@ -199,6 +44,12 @@ export async function markDisbanded(token: string, party: PartyData, reason?: st
   })
 }
 
+export async function tryMarkDisbanded(token: string, party: PartyData, reason?: string): Promise<void> {
+  try { await markDisbanded(token, party, reason) } catch (e) {
+    console.warn(`markDisbanded failed for party ${party.id} in guild ${party.guildId}:`, e)
+  }
+}
+
 // ── Party lifecycle (shared by slash commands and the admin API) ─────────────
 
 export interface CreatePartyOpts {
@@ -216,66 +67,54 @@ export async function createPartyAndEmbed(
   env: AppBindings,
   opts: CreatePartyOpts,
 ): Promise<{ ok: true; party: PartyData } | { ok: false; error: string }> {
-  // Serialize creation per owner so two concurrent requests (e.g. a double-
-  // clicked "Create party") can't both slip past the "already in a party"
-  // check and spawn duplicate parties. Fail-open if the lock itself errors —
-  // it's a safety net, not a hard gate, and shouldn't take down creation.
-  const lock = ownerLockStub(env, opts.guildId, opts.owner.id)
-  const claimed = await callParty<{ ok: boolean }>(lock, 'claim', { ttl: OWNER_LOCK_TTL_MS })
-    .catch(() => ({ ok: true }))
-  if (!claimed.ok) {
-    return { ok: false, error: 'A party for this owner is already being created — try again in a moment.' }
-  }
-
-  try {
-    // Authoritative duplicate guard, now behind the lock: callers pre-check this
-    // too, but only here is it race-free against a concurrent create.
-    const existing = await getUserPartyId(env.PARTY_KV, opts.guildId, opts.owner.id)
-    if (existing) return { ok: false, error: `Owner is already in party ${existing}.` }
-
-    const index = await getPartyIndex(env.PARTY_KV, opts.guildId)
-    const partyId = uniquePartyId(index)
-    const stub = getPartyStub(env, opts.guildId, partyId)
-
-    const party = await callParty<PartyData>(stub, 'create', {
-      id: partyId,
+  // The store enforces the real invariants atomically: the party_members
+  // primary key rejects an owner who's already in a party (even against a
+  // concurrent create), and an ID collision rolls the whole insert back.
+  let created: Awaited<ReturnType<typeof createParty>> | null = null
+  for (let attempt = 0; attempt < 5; attempt++) {
+    created = await createParty(env.DB, {
+      id: randomId(),
       guildId: opts.guildId,
       name: opts.name,
       description: opts.description,
       game: opts.game,
-      ownerId: opts.owner.id,
-      ownerUsername: opts.owner.username,
-      ownerName: opts.owner.displayName,
-      ownerIgn: opts.owner.ign,
+      owner: {
+        userId: opts.owner.id,
+        username: opts.owner.username,
+        displayName: opts.owner.displayName,
+        ign: opts.owner.ign,
+      },
       maxSize: opts.maxSize,
       voiceChannelId: opts.voiceChannelId,
     })
-
-    // If the embed can't be posted (e.g. missing channel permissions), tear the
-    // party back down — otherwise it lingers as an unlisted DO whose cleanup
-    // alarm later wipes the owner's user→party mapping.
-    let msg: { id: string }
-    try {
-      msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, opts.channelId, party)
-    } catch (e) {
-      console.error('postPartyEmbed failed:', e)
-      await callParty(stub, 'forcedisband', {}).catch(() => {})
-      return { ok: false, error: "Couldn't post the party message in that channel — check the bot's permissions there." }
-    }
-    const final = await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId: opts.channelId })
-
-    await addToIndex(env.PARTY_KV, opts.guildId, { id: partyId, name: party.name, game: party.game })
-    await setUserPartyId(env.PARTY_KV, opts.guildId, opts.owner.id, partyId)
-    return { ok: true, party: final }
-  } finally {
-    await callParty(lock, 'release').catch(() => {})
+    if (created.ok || created.error !== 'id_taken') break
   }
+  if (!created || !created.ok) {
+    if (created && created.error === 'owner_in_party') {
+      return { ok: false, error: 'Owner is already in a party.' }
+    }
+    return { ok: false, error: created?.message ?? 'Could not create the party.' }
+  }
+  const party = created.party
+
+  // If the embed can't be posted (e.g. missing channel permissions), tear the
+  // party back down — otherwise it lingers until the inactivity sweep.
+  let msg: { id: string }
+  try {
+    msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, opts.channelId, party)
+  } catch (e) {
+    console.error('postPartyEmbed failed:', e)
+    await disbandParty(env.DB, opts.guildId, party.id).catch(() => {})
+    return { ok: false, error: "Couldn't post the party message in that channel — check the bot's permissions there." }
+  }
+
+  const final = await setEmbedMessage(env.DB, opts.guildId, party.id, msg.id, opts.channelId)
+  return { ok: true, party: final ?? party }
 }
 
 /** Delete the old embed (if any) and post a fresh one in the given channel. */
 export async function repostPartyEmbed(
   env: AppBindings,
-  stub: DurableObjectStub,
   party: PartyData,
   channelId: string,
 ): Promise<void> {
@@ -283,29 +122,10 @@ export async function repostPartyEmbed(
     try { await deleteMessage(env.DISCORD_BOT_TOKEN, party.embedChannelId, party.embedMessageId) } catch { /* already gone */ }
   }
   const msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, party)
-  await callParty<PartyData>(stub, 'setmessage', { messageId: msg.id, channelId })
+  await setEmbedMessage(env.DB, party.guildId, party.id, msg.id, channelId)
 }
 
-// ── Misc ─────────────────────────────────────────────────────────────────────
-
-const ID_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-
-export function randomId(): string {
-  const buf = new Uint8Array(6)
-  crypto.getRandomValues(buf)
-  let out = ''
-  for (const b of buf) out += ID_ALPHABET[b % ID_ALPHABET.length]
-  return out
-}
-
-/** Generate a party ID that doesn't collide with any party in the guild index. */
-export function uniquePartyId(index: PartyIndexEntry[]): string {
-  for (let i = 0; i < 10; i++) {
-    const id = randomId()
-    if (!index.some(e => e.id === id)) return id
-  }
-  throw new Error('Could not generate a unique party ID')
-}
+// ── Interaction helpers ──────────────────────────────────────────────────────
 
 export function extractMemberInfo(interaction: any): {
   userId: string

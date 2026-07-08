@@ -1,9 +1,8 @@
 import type { ComponentContext } from 'discord-hono'
-import type { AppEnv, PartyData, ToggleAwayResult } from '../types'
-import {
-  callParty, extractMemberInfo, findPartyById, getPartyStub,
-  getUserPartyId, getUserProfile, setUserPartyId, trySyncEmbed,
-} from '../lib/party'
+import type { AppEnv } from '../types'
+import { extractMemberInfo, trySyncEmbed } from '../lib/party'
+import * as parties from '../store/parties'
+import { getUserIgn } from '../store/profiles'
 import { HELP_PAGES, buildHelpComponents, buildHelpEmbed } from '../lib/embeds'
 
 // ── Help paging (help_page;<n>) ───────────────────────────────────────────────
@@ -17,97 +16,62 @@ export async function handleHelpPage(c: ComponentContext<AppEnv>) {
   })
 }
 
-// ── Join button (party_join;<partyId>) ────────────────────────────────────────
+// ── Join / Join Queue buttons (party_join;<id>, party_queue;<id>) ─────────────
+// One handler: both buttons attempt a join, and the store decides member vs
+// queue atomically based on capacity and closed state at insert time.
 
-export async function handleJoinButton(c: ComponentContext<AppEnv>) {
-  return c.ephemeral().resDefer(async (c) => {
-    const partyId = (c.interaction.data as any).custom_id as string
-    const guildId = c.interaction.guild_id!
-    const { userId, username, displayName } = extractMemberInfo(c.interaction)
+async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boolean) {
+  const partyId = (c.interaction.data as any).custom_id as string
+  const guildId = c.interaction.guild_id!
+  const { userId, username, displayName } = extractMemberInfo(c.interaction)
 
-    try {
-      const currentParty = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
-      if (currentParty) {
-        return c.followup({
-          content: currentParty === partyId
-            ? "You're already in this party."
-            : `You're in party \`${currentParty}\`. Leave it first.`,
-          flags: 64,
-        })
-      }
-
-      const [indexEntry, profile] = await Promise.all([
-        findPartyById(c.env.PARTY_KV, guildId, partyId),
-        getUserProfile(c.env.PARTY_KV, userId),
-      ])
-
-      const stub = getPartyStub(c.env, guildId, partyId)
-      const ign = indexEntry ? profile.igns[indexEntry.game] : undefined
-      const result = await callParty<{ status: string; data: PartyData }>(stub, 'join', { userId, username, displayName, ign }).catch(() => null)
-
-      if (!result) return c.followup({ content: "This party no longer exists.", flags: 64 })
-      if (result.status === 'already_member') return c.followup({ content: "You're already in this party.", flags: 64 })
-      if (result.status === 'already_queued') return c.followup({ content: "You're already in the queue for this party.", flags: 64 })
-
-      await setUserPartyId(c.env.PARTY_KV, guildId, userId, partyId)
-      await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-
-      const msg = result.status === 'joined'
-        ? `You joined **${result.data.name}**!`
-        : `**${result.data.name}** is ${result.data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${result.data.queue.length}.`
-      return c.followup({ content: msg, flags: 64 })
-    } catch (e) {
-      console.error(`party button error (party ${partyId}):`, e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+  try {
+    const currentParty = await parties.getUserPartyId(c.env.DB, guildId, userId)
+    if (currentParty && currentParty !== partyId) {
+      return c.followup({ content: `You're in party \`${currentParty}\`. Leave it first.`, flags: 64 })
     }
-  })
+
+    const party = await parties.getParty(c.env.DB, guildId, partyId)
+    if (!party) return c.followup({ content: 'This party no longer exists.', flags: 64 })
+
+    const ign = await getUserIgn(c.env.DB, userId, party.game)
+    const result = await parties.joinParty(c.env.DB, guildId, partyId, { userId, username, displayName, ign })
+
+    if (result.status === 'not_found')      return c.followup({ content: 'This party no longer exists.', flags: 64 })
+    if (result.status === 'in_other_party') return c.followup({ content: "You're already in another party. Leave it first.", flags: 64 })
+    if (result.status === 'already_member') return c.followup({ content: "You're already in this party.", flags: 64 })
+    if (result.status === 'already_queued') return c.followup({ content: "You're already in the queue for this party.", flags: 64 })
+
+    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+
+    const data = result.data!
+    if (result.status === 'joined') {
+      return c.followup({
+        content: fromQueueButton
+          ? `A spot was open — you joined **${data.name}** directly!`
+          : `You joined **${data.name}**!`,
+        flags: 64,
+      })
+    }
+    const pos = data.queue.findIndex(q => q.userId === userId) + 1
+    return c.followup({
+      content: fromQueueButton
+        ? `You're in the queue for **${data.name}** at position ${pos}.`
+        : `**${data.name}** is ${data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${pos}.`,
+      flags: 64,
+    })
+  } catch (e) {
+    console.error(`party button error (party ${partyId}):`, e)
+    return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+  }
 }
 
-// ── Join Queue button (party_queue;<partyId>) ─────────────────────────────────
+export async function handleJoinButton(c: ComponentContext<AppEnv>) {
+  return c.ephemeral().resDefer(async (c) => joinViaButton(c, false))
+}
 
 export async function handleQueueButton(c: ComponentContext<AppEnv>) {
-  return c.ephemeral().resDefer(async (c) => {
-    const partyId = (c.interaction.data as any).custom_id as string
-    const guildId = c.interaction.guild_id!
-    const { userId, username, displayName } = extractMemberInfo(c.interaction)
-
-    try {
-      const currentParty = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
-      if (currentParty) {
-        return c.followup({
-          content: currentParty === partyId
-            ? "You're already in this party or queue."
-            : `You're in party \`${currentParty}\`. Leave it first.`,
-          flags: 64,
-        })
-      }
-
-      const [indexEntry, profile] = await Promise.all([
-        findPartyById(c.env.PARTY_KV, guildId, partyId),
-        getUserProfile(c.env.PARTY_KV, userId),
-      ])
-
-      const stub = getPartyStub(c.env, guildId, partyId)
-      const ign = indexEntry ? profile.igns[indexEntry.game] : undefined
-      const result = await callParty<{ status: string; data: PartyData }>(stub, 'join', { userId, username, displayName, ign }).catch(() => null)
-
-      if (!result) return c.followup({ content: "This party no longer exists.", flags: 64 })
-      if (result.status === 'already_member') return c.followup({ content: "You're already in this party.", flags: 64 })
-      if (result.status === 'already_queued') return c.followup({ content: "You're already in the queue for this party.", flags: 64 })
-
-      await setUserPartyId(c.env.PARTY_KV, guildId, userId, partyId)
-      await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-
-      const pos = result.data.queue.findIndex(q => q.userId === userId) + 1
-      const msg = result.status === 'joined'
-        ? `A spot was open — you joined **${result.data.name}** directly!`
-        : `You're in the queue for **${result.data.name}** at position ${pos}.`
-      return c.followup({ content: msg, flags: 64 })
-    } catch (e) {
-      console.error(`party button error (party ${partyId}):`, e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
-    }
-  })
+  return c.ephemeral().resDefer(async (c) => joinViaButton(c, true))
 }
 
 // ── BRB button (party_away;<partyId>) ─────────────────────────────────────────
@@ -119,10 +83,9 @@ export async function handleAwayButton(c: ComponentContext<AppEnv>) {
     const { userId } = extractMemberInfo(c.interaction)
 
     try {
-      const stub = getPartyStub(c.env, guildId, partyId)
-      const result = await callParty<ToggleAwayResult>(stub, 'toggleaway', { userId }).catch(() => null)
+      const result = await parties.toggleAway(c.env.DB, guildId, partyId, userId)
 
-      if (!result) return c.followup({ content: 'This party no longer exists.', flags: 64 })
+      if (result.status === 'not_found') return c.followup({ content: 'This party no longer exists.', flags: 64 })
       if (result.status === 'not_in') {
         return c.followup({ content: 'Only party members can set a BRB marker — join first.', flags: 64 })
       }
@@ -149,16 +112,9 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
     const { userId } = extractMemberInfo(c.interaction)
 
     try {
-      const currentParty = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
-      if (!currentParty || currentParty !== partyId) {
-        return c.followup({ content: "You're not in this party.", flags: 64 })
-      }
+      const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId)
 
-      const stub = getPartyStub(c.env, guildId, partyId)
-      const result = await callParty<{ status: string; data: PartyData; promoted?: string }>(stub, 'leave', { userId }).catch(() => null)
-
-      if (!result) return c.followup({ content: "This party no longer exists.", flags: 64 })
-
+      if (result.status === 'not_found') return c.followup({ content: 'This party no longer exists.', flags: 64 })
       if (result.status === 'is_owner') {
         return c.followup({ content: "You're the party owner — use `/party disband` to end it.", flags: 64 })
       }
@@ -166,16 +122,11 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
         return c.followup({ content: "You're not in this party.", flags: 64 })
       }
 
-      await setUserPartyId(c.env.PARTY_KV, guildId, userId, null)
       await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
-      if (result.promoted) {
-        await setUserPartyId(c.env.PARTY_KV, guildId, result.promoted, partyId)
-      }
-
       const msg = result.status === 'left'
-        ? `You left **${result.data.name}**.`
-        : `You left the queue for **${result.data.name}**.`
+        ? `You left **${result.data!.name}**.`
+        : `You left the queue for **${result.data!.name}**.`
       return c.followup({ content: msg, flags: 64 })
     } catch (e) {
       console.error(`party button error (party ${partyId}):`, e)

@@ -15,17 +15,34 @@ directory = "admin-ui/dist"
 binding = "ASSETS"
 run_worker_first = true
 
-[[durable_objects.bindings]]
-name = "PARTY_STATE"
-class_name = "PartyState"
+# All bot state lives in D1 (schema in migrations/). Apply with:
+#   wrangler d1 migrations apply partybot --remote
+[[d1_databases]]
+binding = "DB"
+database_name = "partybot"
+database_id = "00000000-0000-0000-0000-000000000000" # replace with `wrangler d1 create partybot` output
+migrations_dir = "migrations"
 
+# Legacy KV namespace — kept only so POST /admin/api/import-kv can copy the
+# durable data (profiles, settings, templates, client tokens) into D1.
+# Remove this binding once the import has been run.
+[[kv_namespaces]]
+binding = "PARTY_KV"
+id = "32fff28077814cbcac824ebd05c0ce66"
+
+# Replaces the old Durable Object inactivity alarm: sweeps idle parties,
+# expired link codes/client tokens, and trims audit logs.
+[triggers]
+crons = ["*/15 * * * *"]
+
+# The PartyState Durable Object is retired — state moved to D1.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PartyState"]
 
-[[kv_namespaces]]
-binding = "PARTY_KV"
-id = "32fff28077814cbcac824ebd05c0ce66"
+[[migrations]]
+tag = "v2"
+deleted_classes = ["PartyState"]
 
 [observability.logs]
 enabled = true

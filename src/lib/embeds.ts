@@ -131,7 +131,7 @@ export function buildHelpEmbed(page: number) {
   return {
     title: 'PartyBot — About',
     color: 0x5865f2,
-    description: 'Runs on Cloudflare Workers + Durable Objects. Open source.',
+    description: 'Runs on Cloudflare Workers + D1. Open source.',
     fields: [
       {
         name: 'Source code',

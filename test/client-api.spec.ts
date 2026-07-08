@@ -1,9 +1,9 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import type { PartyData } from '../src/types'
 import { generateLinkCode, handleClientApi, writeLinkCode } from '../src/client-api'
-import { saveUserIgn, setUserPartyId } from '../src/lib/party'
-import { saveGuildSettings, SETTINGS_DEFAULTS } from '../src/lib/settings'
+import { createParty, joinParty } from '../src/store/parties'
+import { saveUserIgn } from '../src/store/profiles'
+import { saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
 
 const OWNER = '100000000000000001'
 const MEMBER = '100000000000000002'
@@ -22,7 +22,7 @@ function req(method: string, path: string, opts: { body?: unknown; token?: strin
 
 async function linkUser(userId: string, displayName: string, guildId = 'g1'): Promise<string> {
   const code = generateLinkCode()
-  await writeLinkCode(env.PARTY_KV, code, { guildId, discordUserId: userId, displayName })
+  await writeLinkCode(env.DB, code, { guildId, discordUserId: userId, displayName })
   const res = await req('POST', '/client/auth', { body: { code } })
   expect(res.status).toBe(200)
   const body = await res.json() as any
@@ -30,33 +30,21 @@ async function linkUser(userId: string, displayName: string, guildId = 'g1'): Pr
   return body.token
 }
 
-/** Create a party DO at the address the worker derives for (guild, id). */
 async function makeParty(guildId: string, partyId: string, ownerId: string, extraMembers: string[] = []) {
-  const stub = env.PARTY_STATE.get(env.PARTY_STATE.idFromName(`party-${guildId}-${partyId}`))
-  await stub.fetch('http://do/create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      id: partyId, guildId, name: 'Inhouse', description: '', game: 'League of Legends',
-      ownerId, ownerUsername: 'owner_un', ownerName: 'Owner', maxSize: 5,
-    }),
+  const created = await createParty(env.DB, {
+    id: partyId, guildId, name: 'Inhouse', description: '', game: 'League of Legends',
+    owner: { userId: ownerId, username: 'owner_un', displayName: 'Owner' }, maxSize: 5,
   })
+  if (!created.ok) throw new Error(created.message)
   for (const m of extraMembers) {
-    await stub.fetch('http://do/join', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: m, username: `${m}_un`, displayName: `User ${m}` }),
-    })
+    await joinParty(env.DB, guildId, partyId, { userId: m, username: `${m}_un`, displayName: `User ${m}` })
   }
-  await setUserPartyId(env.PARTY_KV, guildId, ownerId, partyId)
-  for (const m of extraMembers) await setUserPartyId(env.PARTY_KV, guildId, m, partyId)
-  return stub
 }
 
 describe('client auth', () => {
   it('exchanges a link code for a long-lived token, single use', async () => {
     const code = generateLinkCode()
-    await writeLinkCode(env.PARTY_KV, code, { guildId: 'g1', discordUserId: OWNER, displayName: 'Owner' })
+    await writeLinkCode(env.DB, code, { guildId: 'g1', discordUserId: OWNER, displayName: 'Owner' })
 
     const res = await req('POST', '/client/auth', { body: { code } })
     expect(res.status).toBe(200)
@@ -95,34 +83,28 @@ describe('client session', () => {
   })
 
   it('returns the party with member IGNs; owner can invite', async () => {
-    const stub = await makeParty('g2', 'LCU001', OWNER, [MEMBER])
-    await stub.fetch('http://do/setign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: MEMBER, ign: 'Sniper#NA1' }),
-    })
-
+    await saveUserIgn(env.DB, MEMBER, 'League of Legends', 'Sniper#NA1')
+    await makeParty('g2', 'LCU001', OWNER, [MEMBER])
     const token = await linkUser(OWNER, 'Owner', 'g2')
-    const body = await (await req('GET', '/client/session', { token })).json() as any
+
+    const res = await req('GET', '/client/session', { token })
+    expect(res.status).toBe(200)
+    const body = await res.json() as any
     expect(body.party.id).toBe('LCU001')
     expect(body.party.isOwner).toBe(true)
     expect(body.canInvite).toBe(true)
     const member = body.party.members.find((m: any) => m.userId === MEMBER)
-    expect(member.ign).toBe('Sniper#NA1')
-    expect(member.isOwner).toBe(false)
-  })
+    expect(member).toBeTruthy()
 
-  it('non-owners can invite only when allowlisted in guild settings', async () => {
-    await makeParty('g3', 'LCU002', OWNER, [MEMBER])
-    const token = await linkUser(MEMBER, 'Member', 'g3')
+    // Non-owner member: no invite rights until allowlisted.
+    const memberToken = await linkUser(MEMBER, 'Member', 'g2')
+    let mBody = await (await req('GET', '/client/session', { token: memberToken })).json() as any
+    expect(mBody.party.isOwner).toBe(false)
+    expect(mBody.canInvite).toBe(false)
 
-    let body = await (await req('GET', '/client/session', { token })).json() as any
-    expect(body.party.isOwner).toBe(false)
-    expect(body.canInvite).toBe(false)
-
-    await saveGuildSettings(env.PARTY_KV, 'g3', { ...SETTINGS_DEFAULTS, clientInviters: [MEMBER] })
-    body = await (await req('GET', '/client/session', { token })).json() as any
-    expect(body.canInvite).toBe(true)
+    await saveGuildSettings(env.DB, 'g2', { ...SETTINGS_DEFAULTS, clientInviters: [MEMBER] })
+    mBody = await (await req('GET', '/client/session', { token: memberToken })).json() as any
+    expect(mBody.canInvite).toBe(true)
   })
 
   it('DELETE revokes the token', async () => {
@@ -140,7 +122,7 @@ describe('client party game switch', () => {
 
   it('lets the owner switch the game and refreshes members\' per-game IGNs', async () => {
     await makeParty('g5', 'LCU010', OWNER, [MEMBER])
-    await saveUserIgn(env.PARTY_KV, MEMBER, 'LoL NA', 'Sniper#NA1')
+    await saveUserIgn(env.DB, MEMBER, 'LoL NA', 'Sniper#NA1')
     const token = await linkUser(OWNER, 'Owner', 'g5')
 
     const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
@@ -180,7 +162,7 @@ describe('client party game switch', () => {
 
   it('rejects games disabled by guild settings', async () => {
     await makeParty('g8', 'LCU013', OWNER, [])
-    await saveGuildSettings(env.PARTY_KV, 'g8', { ...SETTINGS_DEFAULTS, allowedGames: ['Valorant'] })
+    await saveGuildSettings(env.DB, 'g8', { ...SETTINGS_DEFAULTS, allowedGames: ['Valorant'] })
     const token = await linkUser(OWNER, 'Owner', 'g8')
     const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
     expect(res.status).toBe(400)

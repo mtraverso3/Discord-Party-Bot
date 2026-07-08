@@ -41,9 +41,18 @@ export interface BanList {
   assignments: Record<string, string>    // userId -> assigned ban
 }
 
+export interface UserRef {
+  userId: string
+  username: string
+  displayName: string
+  ign?: string
+}
+
 export interface AppBindings extends Record<string, unknown> {
-  PARTY_STATE: DurableObjectNamespace
-  PARTY_KV: KVNamespace
+  DB: D1Database
+  // Legacy KV — only used by POST /admin/api/import-kv to migrate old data
+  // into D1. Optional so the binding can be removed after the import.
+  PARTY_KV?: KVNamespace
   DISCORD_PUBLIC_KEY: string
   DISCORD_BOT_TOKEN: string
   DISCORD_APPLICATION_ID: string
@@ -60,90 +69,83 @@ export interface AppBindings extends Record<string, unknown> {
 
 export type AppEnv = { Bindings: AppBindings }
 
-export interface PartyIndexEntry {
-  id: string
-  name: string
-  game: string
-}
-
 export type JoinResult = {
-  status: 'joined' | 'queued' | 'already_member' | 'already_queued'
-  data: PartyData
-  promoted?: string
+  status: 'joined' | 'queued' | 'already_member' | 'already_queued' | 'in_other_party' | 'not_found'
+  data?: PartyData
 }
 
 export type LeaveResult = {
-  status: 'left' | 'dequeued' | 'not_in' | 'is_owner'
-  data: PartyData
+  status: 'left' | 'dequeued' | 'not_in' | 'is_owner' | 'not_found'
+  data?: PartyData
   promoted?: string
 }
 
 export type ApproveResult = {
-  status: 'approved' | 'not_queued' | 'full' | 'unauthorized'
-  data: PartyData
+  status: 'approved' | 'not_queued' | 'full' | 'unauthorized' | 'not_found'
+  data?: PartyData
 }
 
 export type DenyResult = {
-  status: 'denied' | 'not_queued' | 'unauthorized'
-  data: PartyData
+  status: 'denied' | 'not_queued' | 'unauthorized' | 'not_found'
+  data?: PartyData
 }
 
 export type RemoveResult = {
-  status: 'removed' | 'not_in' | 'unauthorized' | 'is_owner'
-  data: PartyData
+  status: 'removed' | 'not_in' | 'unauthorized' | 'is_owner' | 'not_found'
+  data?: PartyData
   promoted?: string
 }
 
 export type CloseResult = {
-  status: 'closed' | 'already_closed' | 'unauthorized'
-  data: PartyData
+  status: 'closed' | 'already_closed' | 'unauthorized' | 'not_found'
+  data?: PartyData
 }
 
 export type OpenResult = {
-  status: 'opened' | 'already_open' | 'unauthorized'
-  data: PartyData
+  status: 'opened' | 'already_open' | 'unauthorized' | 'not_found'
+  data?: PartyData
   promoted: string[]
 }
 
 export type SetIgnResult = {
-  status: 'updated' | 'not_in'
-  data: PartyData
+  status: 'updated' | 'not_in' | 'not_found'
+  data?: PartyData
 }
 
 export type ToggleAwayResult = {
-  status: 'toggled' | 'not_in'
-  data: PartyData
+  status: 'toggled' | 'not_in' | 'not_found'
+  data?: PartyData
   away: boolean
 }
 
 export type DisbandResult = {
-  status: 'disbanded' | 'unauthorized'
-  data: PartyData
+  status: 'disbanded' | 'unauthorized' | 'not_found'
+  data?: PartyData
 }
 
 export type ForceAddResult = {
-  status: 'added' | 'already_member' | 'full' | 'unauthorized'
-  data: PartyData
+  status: 'added' | 'already_member' | 'full' | 'unauthorized' | 'in_other_party' | 'not_found'
+  data?: PartyData
 }
 
 export type PromoteResult = {
-  status: 'promoted' | 'unauthorized' | 'not_in' | 'already_owner'
-  data: PartyData
+  status: 'promoted' | 'unauthorized' | 'not_in' | 'already_owner' | 'not_found'
+  data?: PartyData
 }
 
 export type MoveQueueResult = {
-  status: 'moved' | 'noop' | 'not_queued' | 'unauthorized'
-  data: PartyData
+  status: 'moved' | 'noop' | 'not_queued' | 'unauthorized' | 'not_found'
+  data?: PartyData
 }
 
 export type SetBanlistResult = {
-  status: 'updated' | 'unauthorized'
-  data: PartyData
+  status: 'updated' | 'unauthorized' | 'not_found'
+  data?: PartyData
 }
 
 export type UpdateResult = {
-  status: 'updated' | 'unauthorized' | 'invalid'
-  data: PartyData
+  status: 'updated' | 'unauthorized' | 'invalid' | 'not_found'
+  data?: PartyData
   promoted: string[]
   nameChanged: boolean
   gameChanged: boolean
