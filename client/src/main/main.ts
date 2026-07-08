@@ -9,7 +9,7 @@ import {
   getTaggedPlayers, linkState, linkWithCode, lookupPlayers, setAutoJoinSettings, setPartyGame,
   setTaggedPlayers, type ChampionCatalog,
 } from './bot'
-import { crossReference, formatRiotId, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
+import { crossReference, formatRiotId, ignMatches, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
 import type {
   AutoJoinSettings, ChampionPick, GamePhase, GameView, InviteOutcome, InviteResult, LcuStatus, LobbyMode,
   LobbyView, Session, SessionResult, SummonerInfo, TaggedPlayer,
@@ -401,10 +401,13 @@ const EMPTY_GAME: GameView = { phase: 'none', byUserId: {}, byRiotId: {} }
 /**
  * Champion picks for the party's current champ select or live game.
  *
- * The local champ-select session is the primary source — it covers every lobby
- * type (customs included) and updates live as members lock in. Once the match
- * actually starts the session is gone, so for matchmade games we fall back to
- * the Worker's Spectator-backed lookup keyed by the leader's puuid.
+ * Two independent sources, because they speak different identifiers:
+ *   • Champ select (LCU) — keyed by the LCU's local puuid. Covers every lobby
+ *     type (customs included) and updates live as members lock in.
+ *   • Live game (Worker → Riot Spectator) — keyed by public Riot ID, since the
+ *     LCU's puuid is obfuscated and unusable against the public Riot API. Only
+ *     available once a matchmade game is actually in progress.
+ * Live data wins when both exist (it's the final locked champion).
  */
 async function gameChampions(): Promise<GameView> {
   if (!creds) return EMPTY_GAME
@@ -413,17 +416,20 @@ async function gameChampions(): Promise<GameView> {
 
   const phase = await fetchGameflowPhase(creds)
 
-  // Merge picks from both sources, keyed by puuid. Live-game data wins since
-  // it reflects the final locked champion.
-  const byPuuid = new Map<string, number>()
-  for (const p of await fetchChampSelectPicks(creds)) byPuuid.set(p.puuid, p.championId)
+  // Champ select: championId by LCU puuid.
+  const csByPuuid = new Map<string, number>()
+  for (const p of await fetchChampSelectPicks(creds)) csByPuuid.set(p.puuid, p.championId)
 
+  // Live game: championId by normalized public Riot ID.
+  const liveByRiotId = new Map<string, number>()
   if (phase === 'InProgress' && summoner) {
-    const live = await fetchLiveChampions(region ?? '', summoner.puuid)
-    for (const p of live.participants) byPuuid.set(p.puuid, p.championId)
+    const live = await fetchLiveChampions(region ?? '', summoner.gameName, summoner.tagLine)
+    for (const p of live.participants) {
+      if (p.riotId) liveByRiotId.set(normalizeRiotId(p.riotId), p.championId)
+    }
   }
 
-  if (byPuuid.size === 0) {
+  if (csByPuuid.size === 0 && liveByRiotId.size === 0) {
     return { ...EMPTY_GAME, phase: phase === 'InProgress' ? 'in-game' : phase === 'ChampSelect' ? 'champ-select' : 'none' }
   }
 
@@ -432,28 +438,48 @@ async function gameChampions(): Promise<GameView> {
     const info = catalog?.champions[String(championId)]
     return { championId, name: info?.name ?? `Champion ${championId}`, iconUrl: info?.iconUrl ?? null }
   }
+  // Look up a live pick for a party member's IGN (tagline optional in the IGN),
+  // returning the matched map key so it can be excluded from the guest list.
+  const livePickForIgn = (ign: string | null): { championId: number; key: string } | undefined => {
+    if (!parseRiotId(ign)) return undefined
+    for (const [key, championId] of liveByRiotId) {
+      const [gameName, tagLine = ''] = key.split('#')
+      if (ignMatches(ign, gameName ?? '', tagLine)) return { championId, key }
+    }
+    return undefined
+  }
 
-  // Party members: match by their resolved puuid.
+  // Party members: prefer the live pick (matched by Riot ID), else champ select
+  // (matched by resolved LCU puuid).
   const byUserId: Record<string, ChampionPick> = {}
   const claimedPuuids = new Set<string>()
+  const claimedRiotIds = new Set<string>()
   await Promise.all(party.members.map(async (m) => {
     if (!m.ign) return
+    const live = livePickForIgn(m.ign)
+    if (live !== undefined) {
+      byUserId[m.userId] = pickFor(live.championId)
+      claimedRiotIds.add(live.key)
+      return
+    }
     const resolved = await resolveIgn(m.ign)
-    if (!resolved) return
-    const championId = byPuuid.get(resolved.puuid)
-    if (championId !== undefined) {
-      byUserId[m.userId] = pickFor(championId)
+    if (resolved && csByPuuid.has(resolved.puuid)) {
+      byUserId[m.userId] = pickFor(csByPuuid.get(resolved.puuid)!)
       claimedPuuids.add(resolved.puuid)
     }
   }))
 
-  // Everyone else in the game/lobby: expose by (normalized) Riot ID so the
+  // Everyone else in the game/lobby: expose by normalized Riot ID so the
   // renderer can annotate lobby guests too.
   const byRiotId: Record<string, ChampionPick> = {}
-  await Promise.all([...byPuuid.entries()].map(async ([puuid, championId]) => {
+  for (const [key, championId] of liveByRiotId) {
+    if (!claimedRiotIds.has(key)) byRiotId[key] = pickFor(championId)
+  }
+  await Promise.all([...csByPuuid.entries()].map(async ([puuid, championId]) => {
     if (claimedPuuids.has(puuid)) return
     const name = await riotIdForPuuid(puuid)
-    byRiotId[normalizeRiotId(formatRiotId(name.gameName, name.tagLine))] = pickFor(championId)
+    const key = normalizeRiotId(formatRiotId(name.gameName, name.tagLine))
+    if (!(key in byRiotId)) byRiotId[key] = pickFor(championId)
   }))
 
   const phaseOut: GamePhase = phase === 'InProgress' ? 'in-game' : 'champ-select'

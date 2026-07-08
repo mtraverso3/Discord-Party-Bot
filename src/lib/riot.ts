@@ -80,10 +80,16 @@ export async function getChampionCatalog(env: AppBindings): Promise<ChampionCata
   return value
 }
 
-// ── Live-game lookup (Spectator-v5) ──────────────────────────────────────────
+// ── Live-game lookup (Account-v1 → Spectator-v5) ─────────────────────────────
+//
+// The desktop client can only read locally-obfuscated puuids from the League
+// client (LCU) — internally consistent, but not the public encrypted puuid the
+// Riot API can decrypt. So we resolve the real puuid here from the player's
+// Riot ID via Account-v1, then hand it to Spectator. Participants are returned
+// with their Riot ID so the client can match them without any puuid at all.
 
 export interface LiveParticipant {
-  puuid: string
+  riotId: string     // "gameName#tagLine" as Riot reports it
   championId: number
   teamId: number
 }
@@ -93,8 +99,8 @@ export interface LiveGame {
   participants: LiveParticipant[]
 }
 
-// Short region codes as reported by the Riot Client's /riotclient/region-locale
-// mapped to the platform routing value Spectator-v5 expects in the host.
+// Short region codes (from /riotclient/region-locale) → the platform routing
+// value Spectator-v5 expects in the host (e.g. na1.api.riotgames.com).
 const REGION_PLATFORM: Record<string, string> = {
   NA: 'na1', EUW: 'euw1', EUNE: 'eun1', KR: 'kr', BR: 'br1',
   LAN: 'la1', LAS: 'la2', OCE: 'oc1', TR: 'tr1', RU: 'ru',
@@ -102,40 +108,77 @@ const REGION_PLATFORM: Record<string, string> = {
   TW: 'tw2', VN: 'vn2',
 }
 
+// Same codes → the regional cluster Account-v1 expects (americas/asia/europe).
+const REGION_CLUSTER: Record<string, string> = {
+  NA: 'americas', BR: 'americas', LAN: 'americas', LAS: 'americas', OCE: 'americas', PBE: 'americas',
+  EUW: 'europe', EUNE: 'europe', TR: 'europe', RU: 'europe',
+  KR: 'asia', JP: 'asia', PH: 'asia', SG: 'asia', TH: 'asia', TW: 'asia', VN: 'asia',
+}
+
 export function platformForRegion(region: string): string | null {
   return REGION_PLATFORM[region.toUpperCase()] ?? null
 }
 
+export function clusterForRegion(region: string): string | null {
+  return REGION_CLUSTER[region.toUpperCase()] ?? null
+}
+
+/** Resolve a Riot ID to its public encrypted puuid via Account-v1, or null. */
+async function resolvePuuid(
+  token: string,
+  cluster: string,
+  gameName: string,
+  tagLine: string,
+): Promise<string | null> {
+  const res = await fetch(
+    `https://${cluster}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`,
+    { headers: { 'X-Riot-Token': token.trim() } },
+  )
+  if (res.status === 404) return null
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`account ${res.status}: ${detail.slice(0, 300)}`)
+  }
+  const body = (await res.json()) as { puuid?: string }
+  return typeof body.puuid === 'string' && body.puuid ? body.puuid : null
+}
+
 /**
- * The active game for a player, or null when they aren't in one (or the game is
- * a type Spectator doesn't expose, e.g. customs). Throws only on unexpected
- * upstream failures so the caller can distinguish "not in a game" (null) from
- * "lookup broke".
+ * The active game for the player identified by `gameName`/`tagLine`, or null
+ * when they aren't in a spectatable game (customs aren't exposed by Spectator).
+ * Throws only on unexpected upstream failures so the caller can tell "not in a
+ * game" (null) apart from "lookup broke".
  */
 export async function fetchLiveGame(
   token: string,
-  platform: string,
-  puuid: string,
+  region: string,
+  gameName: string,
+  tagLine: string,
 ): Promise<LiveGame | null> {
+  const platform = platformForRegion(region)
+  const cluster = clusterForRegion(region)
+  if (!platform || !cluster) throw new Error(`unsupported region ${region}`)
+
+  const puuid = await resolvePuuid(token, cluster, gameName, tagLine)
+  if (!puuid) return null
+
   const res = await fetch(
     `https://${platform}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/${encodeURIComponent(puuid)}`,
     { headers: { 'X-Riot-Token': token.trim() } },
   )
   if (res.status === 404) return null      // not currently in a (spectatable) game
   if (!res.ok) {
-    // Surface Riot's own error text — a 400 here is usually "Exception
-    // decrypting <puuid>" (wrong/malformed puuid), which is otherwise opaque.
     const detail = await res.text().catch(() => '')
     throw new Error(`spectator ${res.status}: ${detail.slice(0, 300)}`)
   }
   const body = (await res.json()) as {
     gameId: number
-    participants: { puuid?: string; championId: number; teamId: number }[]
+    participants: { riotId?: string; championId: number; teamId: number }[]
   }
   return {
     gameId: body.gameId,
     participants: (body.participants ?? [])
-      .filter(p => typeof p.puuid === 'string' && p.puuid)
-      .map(p => ({ puuid: p.puuid as string, championId: p.championId, teamId: p.teamId })),
+      .filter(p => typeof p.riotId === 'string' && p.riotId)
+      .map(p => ({ riotId: p.riotId as string, championId: p.championId, teamId: p.teamId })),
   }
 }

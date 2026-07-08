@@ -152,16 +152,20 @@ export async function fetchChampionCatalog(): Promise<ChampionCatalog | null> {
   }
 }
 
-export interface LiveParticipant { puuid: string; championId: number; teamId: number }
+export interface LiveParticipant { riotId: string; championId: number; teamId: number }
 
+// The Worker resolves the public puuid from the Riot ID (the LCU's own puuid is
+// obfuscated and can't be used with the public Riot API), so we pass the
+// leader's Riot ID rather than a puuid.
 export async function fetchLiveChampions(
   region: string,
-  puuid: string,
+  gameName: string,
+  tagLine: string,
 ): Promise<{ live: boolean; participants: LiveParticipant[] }> {
   const token = loadConfig().token
-  if (!token) return { live: false, participants: [] }
+  if (!token || !gameName || !tagLine) return { live: false, participants: [] }
   try {
-    const res = await botFetch('POST', '/client/champions/live', { region, puuid }, token)
+    const res = await botFetch('POST', '/client/champions/live', { region, gameName, tagLine }, token)
     if (res.status !== 200 || !res.body?.ok) return { live: false, participants: [] }
     return { live: !!res.body.live, participants: res.body.participants ?? [] }
   } catch {
