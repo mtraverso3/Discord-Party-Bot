@@ -24,6 +24,7 @@ export interface SessionMember {
   displayName: string
   ign: string | null
   isOwner: boolean
+  assignedBan: string | null  // champion this member was assigned to ban (/party banlist)
 }
 
 export interface SessionParty {
@@ -121,11 +122,23 @@ export interface ChampionPick {
 
 export type GamePhase = 'none' | 'champ-select' | 'in-game'
 
+/** Whether a member banned the champion they were assigned. `actual` is the
+ *  champion they actually banned (null until they've banned during the ban
+ *  phase); `ok` is true when it matches `assigned`. Only present during champ
+ *  select — per-player ban attribution isn't available once the game starts. */
+export interface BanCheck {
+  assigned: string
+  actual: string | null
+  ok: boolean
+}
+
 /** Champion picks for the current champ select or live game, cross-referenced
  *  against the party. `byUserId` covers party members; `byRiotId` (normalized,
- *  lowercase "name#tag") covers everyone else in the game/lobby. */
+ *  lowercase "name#tag") covers everyone else in the game/lobby. `bansByUserId`
+ *  reports each assigned member's ban vs. what they actually banned. */
 export interface GameView {
   phase: GamePhase
   byUserId: Record<string, ChampionPick>
   byRiotId: Record<string, ChampionPick>
+  bansByUserId: Record<string, BanCheck>
 }

@@ -194,6 +194,7 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
           displayName: m.displayName,
           ign: m.ign ?? null,
           isOwner: m.userId === data.ownerId,
+          assignedBan: data.banlist?.assignments[m.userId] ?? null,
         })),
       }
     }

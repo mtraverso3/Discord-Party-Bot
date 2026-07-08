@@ -1,13 +1,13 @@
 import {
-  ArrowLeft, ChevronDown, Crown, Gamepad2, Link2, PartyPopper, Send, Settings as SettingsIcon,
+  ArrowLeft, Ban, Check, ChevronDown, Crown, Gamepad2, Link2, PartyPopper, Send, Settings as SettingsIcon,
   Swords, Tag as TagIcon, TriangleAlert, WifiOff, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PartyBotBridge } from '../preload'
 import type {
-  AutoJoinSettings, ChampionPick, GameView, LcuStatus, LinkState, LobbyMode, LobbyRow, LobbyView, Session,
-  SessionMember, TaggedPlayer,
+  AutoJoinSettings, BanCheck, ChampionPick, GameView, LcuStatus, LinkState, LobbyMode, LobbyRow, LobbyView,
+  Session, SessionMember, TaggedPlayer,
 } from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
 import { Avatar, Badge, Button, Card, EmptyState, Input, Select, StatusDot, Switch } from './ui'
@@ -18,7 +18,7 @@ declare global {
 const pb = window.pb
 
 const EMPTY_LOBBY: LobbyView = { exists: false, rows: [], missing: [], intruders: 0 }
-const EMPTY_GAME: GameView = { phase: 'none', byUserId: {}, byRiotId: {} }
+const EMPTY_GAME: GameView = { phase: 'none', byUserId: {}, byRiotId: {}, bansByUserId: {} }
 
 function normalizeRiotId(riotId: string): string {
   return riotId.toLowerCase().replace(/\s+/g, ' ').trim()
@@ -400,6 +400,7 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
         {party.members.map(m => (
           <MemberRow key={m.userId} member={m} isSelf={m.userId === session.userId}
             lobbyExists={lobby.exists} champion={game.byUserId[m.userId] ?? null}
+            ban={game.bansByUserId[m.userId] ?? null}
             inLobby={m.userId === session.userId || inLobbyNames.has(m.displayName)} />
         ))}
       </div>
@@ -431,16 +432,33 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
   )
 }
 
-function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion }: {
+function BanChip({ ban }: { ban: BanCheck }) {
+  if (ban.actual === null) {
+    return <Badge variant="outline" title={`Assigned to ban ${ban.assigned}`}><Ban className="size-3" />{ban.assigned}</Badge>
+  }
+  if (ban.ok) {
+    return <Badge variant="success" title={`Banned ${ban.assigned} as assigned`}><Check className="size-3" />{ban.assigned}</Badge>
+  }
+  return (
+    <Badge variant="destructive" title={`Assigned ${ban.assigned}, but banned ${ban.actual}`}>
+      <TriangleAlert className="size-3" />{ban.actual}, not {ban.assigned}
+    </Badge>
+  )
+}
+
+function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion, ban }: {
   member: SessionMember
   isSelf: boolean
   lobbyExists: boolean
   inLobby: boolean
   champion: ChampionPick | null
+  ban: BanCheck | null
 }) {
-  // One status chip per row, and only when it says something useful. The
-  // champion pick, when present, is shown as the member's avatar instead.
-  const chip = !m.ign ? <Badge variant="warning">no IGN</Badge>
+  // One status chip per row, and only when it says something useful. Ban
+  // compliance takes precedence during champ select; the champion pick, when
+  // present, is shown as the member's avatar instead of a chip.
+  const chip = ban ? <BanChip ban={ban} />
+    : !m.ign ? <Badge variant="warning">no IGN</Badge>
     : lobbyExists ? (inLobby ? <Badge variant="success"><StatusDot />in lobby</Badge> : <Badge variant="outline">not in lobby</Badge>)
     : null
 

@@ -69,36 +69,67 @@ export async function fetchFriends(creds: LcuCreds): Promise<unknown[]> {
   }
 }
 
-/** A champion pick keyed by the player's puuid. championId 0 means "no pick yet". */
+/** A champion keyed by the player's puuid. championId 0 means "none". */
 export interface ChampSelectPick {
   puuid: string
   championId: number
 }
 
+export interface ChampSelectData {
+  picks: ChampSelectPick[]      // hovered/locked champions, both teams
+  allyBans: ChampSelectPick[]   // completed bans by ally (party) players
+}
+
 /**
- * Champion picks from the local champ-select session, covering both teams.
- * Works for every lobby type (customs included, unlike the Spectator API) and
- * updates live as players hover/lock. Empty when not in champ select.
+ * Picks and ally bans from the local champ-select session. Works for every
+ * lobby type (customs included, unlike the Spectator API) and updates live as
+ * players hover/lock/ban. Empty when not in champ select.
+ *
+ * Bans are attributed to the player who cast them via actorCellId → puuid;
+ * this attribution only exists while the champ-select session is live (it's
+ * gone once the game starts).
  */
-export async function fetchChampSelectPicks(creds: LcuCreds): Promise<ChampSelectPick[]> {
+export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData> {
+  const empty: ChampSelectData = { picks: [], allyBans: [] }
   try {
     const res = await lcuRequest(creds, 'GET', '/lol-champ-select/v1/session')
-    if (res.status !== 200) return []
-    const teams = [res.body?.myTeam, res.body?.theirTeam]
+    if (res.status !== 200) return empty
+    const body = res.body
+
     const picks: ChampSelectPick[] = []
-    for (const team of teams) {
+    const cellToPuuid = new Map<number, string>()
+    for (const team of [body?.myTeam, body?.theirTeam]) {
       if (!Array.isArray(team)) continue
       for (const cell of team) {
         const puuid: unknown = cell?.puuid
+        if (typeof puuid !== 'string' || !puuid) continue
         const championId = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
-        if (typeof puuid === 'string' && puuid && Number.isFinite(championId) && championId > 0) {
-          picks.push({ puuid, championId })
+        if (Number.isFinite(championId) && championId > 0) picks.push({ puuid, championId })
+      }
+    }
+    if (Array.isArray(body?.myTeam)) {
+      for (const cell of body.myTeam) {
+        if (typeof cell?.puuid === 'string' && Number.isFinite(Number(cell?.cellId))) {
+          cellToPuuid.set(Number(cell.cellId), cell.puuid)
         }
       }
     }
-    return picks
+
+    const allyBans: ChampSelectPick[] = []
+    if (Array.isArray(body?.actions)) {
+      for (const phase of body.actions) {
+        if (!Array.isArray(phase)) continue
+        for (const a of phase) {
+          if (a?.type !== 'ban' || !a?.completed || !a?.isAllyAction) continue
+          const championId = Number(a?.championId ?? 0)
+          const puuid = cellToPuuid.get(Number(a?.actorCellId))
+          if (puuid && championId > 0) allyBans.push({ puuid, championId })
+        }
+      }
+    }
+    return { picks, allyBans }
   } catch {
-    return []
+    return empty
   }
 }
 
