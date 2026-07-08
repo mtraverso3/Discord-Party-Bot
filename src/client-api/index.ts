@@ -3,6 +3,8 @@ import { GAMES } from '../lib/games'
 import * as parties from '../store/parties'
 import { findUserIdByRiotId, getIgnMap, getUserIgn } from '../store/profiles'
 import { consumeLinkCode, createClientToken, deleteClientToken, resolveClientToken, type TokenRecord } from '../store/clientAuth'
+import { activeSessionId } from '../store/history'
+import { reportGame } from '../store/games'
 import { gameAllowed, getGuildSettings } from '../store/settings'
 import { trySyncEmbed } from '../lib/party'
 import { getGuildMember, getMemberAvatarUrl } from '../lib/discord'
@@ -20,6 +22,7 @@ const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 //   POST   /client/party/game  (Bearer) { game } -> { ok, game? } | { ok: false, error }
 //   POST   /client/lookup      (Bearer) { riotIds } -> { players: Record<riotId, { userId, displayName } | null> }
 //   POST   /client/party/add   (Bearer) { userId } -> { ok, party? } | { ok: false, error }
+//   POST   /client/party/game-report (Bearer) { region, gameId } -> { ok, status, matchId } | { ok: false, error }
 //   GET    /client/champions/catalog (Bearer) -> { version, champions: Record<id, { id, name, iconUrl }> }
 //   POST   /client/champions/live    (Bearer) { region, gameName, tagLine } -> { ok, configured, live, participants: [{ riotId, championId, teamId }] }
 //
@@ -52,6 +55,9 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
   }
   if (url.pathname === '/client/party/add' && req.method === 'POST') {
     return await addPartyMember(req, env)
+  }
+  if (url.pathname === '/client/party/game-report' && req.method === 'POST') {
+    return await reportPartyGame(req, env)
   }
   if (url.pathname === '/client/champions/catalog' && req.method === 'GET') {
     return await championCatalog(req, env)
@@ -299,6 +305,38 @@ async function addPartyMember(req: Request, env: AppBindings): Promise<Response>
 
   await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
   return json({ ok: true })
+}
+
+// Records a League match the client detected starting for the caller's party.
+// The match isn't queryable from Riot until the game ends, so this just files
+// the gameId against the party's active history session; a cron sweep later
+// resolves it to participants + champions via Match-v5.
+async function reportPartyGame(req: Request, env: AppBindings): Promise<Response> {
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ ok: false, error: 'Not linked.' }, 401)
+  const { rec } = auth
+
+  let body: { region?: unknown; gameId?: unknown }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ ok: false, error: 'Invalid JSON body.' }, 400)
+  }
+  const region = typeof body.region === 'string' ? body.region.trim() : ''
+  const gameId = body.gameId != null ? String(body.gameId).trim() : ''
+  if (!region || !gameId) return json({ ok: false, error: 'region and gameId are required.' }, 400)
+  if (!platformForRegion(region)) return json({ ok: false, error: `Unsupported region "${region}".` }, 400)
+
+  const partyId = await parties.getUserPartyId(env.DB, rec.guildId, rec.userId)
+  if (!partyId) return json({ ok: false, error: 'You are not in a party.' }, 404)
+  const historyId = await activeSessionId(env.DB, rec.guildId, partyId)
+  if (historyId == null) return json({ ok: false, error: 'No active party session.' }, 404)
+
+  const result = await reportGame(env.DB, {
+    historyId, guildId: rec.guildId, partyId, region, gameId, reportedBy: rec.userId,
+  })
+  if (!result.ok) return json({ ok: false, error: result.error }, 400)
+  return json({ ok: true, status: result.status, matchId: result.matchId })
 }
 
 // Serves the Data Dragon champion catalog (id -> name + icon URL) so the client

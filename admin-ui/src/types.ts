@@ -102,3 +102,74 @@ export interface VoiceStatus {
   voiceChannelId: string | null
   states: { userId: string; channelId: string | null }[]
 }
+
+// ── Party history + League games ──────────────────────────────────────────────
+
+export interface HistorySession {
+  historyId: number
+  guildId: string
+  partyId: string
+  name: string
+  game: string
+  ownerId: string
+  ownerName: string
+  maxSize: number
+  createdAt: number
+  endedAt?: number
+  endReason?: string
+}
+
+export interface HistorySummary extends HistorySession {
+  eventCount: number
+  gameCount: number
+  participantCount: number
+}
+
+export type HistoryEventKind =
+  | 'created' | 'joined' | 'queued' | 'left' | 'dequeued' | 'removed'
+  | 'promoted' | 'approved' | 'denied' | 'owner_changed'
+  | 'closed' | 'opened' | 'game_changed' | 'banlist_set' | 'disbanded'
+
+export interface HistoryEvent {
+  ts: number
+  event: HistoryEventKind
+  userId?: string
+  displayName?: string
+  detail?: Record<string, unknown>
+}
+
+export interface GameParticipant {
+  puuid: string
+  riotId: string
+  championId: number
+  championName: string
+  teamId: number
+  win: boolean | null
+}
+
+export interface PartyGame {
+  id: number
+  matchId: string
+  region: string | null
+  gameId: string
+  reportedBy: string
+  reportedAt: number
+  status: 'pending' | 'resolved' | 'failed'
+  resolvedAt?: number
+  queueId?: number
+  gameCreation?: number
+  gameDuration?: number
+  error?: string
+  participants: GameParticipant[]
+}
+
+export interface HistoryDetail {
+  session: HistorySession
+  events: HistoryEvent[]
+  games: PartyGame[]
+}
+
+export interface PartyGamesResponse {
+  historyId: number | null
+  games: PartyGame[]
+}

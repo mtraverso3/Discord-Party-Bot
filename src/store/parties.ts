@@ -4,6 +4,7 @@ import type {
   PromoteResult, QueueEntry, RemoveResult, SetBanlistResult, SetIgnResult,
   ToggleAwayResult, UpdateResult, UserRef,
 } from '../types'
+import * as history from './history'
 
 // All party state lives in D1 (see migrations/0001_init.sql). Mutations follow
 // a read → compute → guarded batch → re-read pattern: the batch statements
@@ -301,6 +302,7 @@ export async function createParty(db: D1Database, input: CreatePartyInput): Prom
   }
 
   const party = await getParty(db, input.guildId, input.id)
+  if (party) await history.openSession(db, party)
   return party ? { ok: true, party } : { ok: false, error: 'invalid', message: 'Party vanished after create.' }
 }
 
@@ -341,8 +343,14 @@ export async function joinParty(db: D1Database, guildId: string, partyId: string
 
   const after = await getParty(db, guildId, partyId)
   if (!after) return { status: 'not_found' }
-  if (after.members.some(m => m.userId === user.userId)) return { status: 'joined', data: after }
-  if (after.queue.some(q => q.userId === user.userId)) return { status: 'queued', data: after }
+  if (after.members.some(m => m.userId === user.userId)) {
+    await history.logEvent(db, guildId, partyId, 'joined', { userId: user.userId, displayName: user.displayName })
+    return { status: 'joined', data: after }
+  }
+  if (after.queue.some(q => q.userId === user.userId)) {
+    await history.logEvent(db, guildId, partyId, 'queued', { userId: user.userId, displayName: user.displayName })
+    return { status: 'queued', data: after }
+  }
   return { status: 'not_found' }  // INSERT..SELECT matched no party row
 }
 
@@ -383,12 +391,18 @@ export async function forceAdd(
 
   const after = await getParty(db, guildId, partyId)
   if (!after) return { status: 'not_found' }
-  return after.members.some(m => m.userId === user.userId)
-    ? { status: 'added', data: after }
-    : { status: 'full', data: after }
+  if (after.members.some(m => m.userId === user.userId)) {
+    await history.logEvent(db, guildId, partyId, 'joined',
+      { userId: user.userId, displayName: user.displayName, detail: { addedBy: requesterId } })
+    return { status: 'added', data: after }
+  }
+  return { status: 'full', data: after }
 }
 
-export async function leaveParty(db: D1Database, guildId: string, partyId: string, userId: string): Promise<LeaveResult> {
+export async function leaveParty(
+  db: D1Database, guildId: string, partyId: string, userId: string,
+  logAs: 'left' | 'removed' = 'left',
+): Promise<LeaveResult> {
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
   if (userId === party.ownerId) return { status: 'is_owner', data: party }
@@ -396,6 +410,7 @@ export async function leaveParty(db: D1Database, guildId: string, partyId: strin
   const wasMember = party.members.some(m => m.userId === userId)
   const wasQueued = party.queue.some(q => q.userId === userId)
   if (!wasMember && !wasQueued) return { status: 'not_in', data: party }
+  const subject = party.members.find(m => m.userId === userId) ?? party.queue.find(q => q.userId === userId)
 
   const now = Date.now()
   const stmts = [
@@ -416,6 +431,9 @@ export async function leaveParty(db: D1Database, guildId: string, partyId: strin
     await db.batch(promoted.map(uid => assignBanStmt(db, guildId, partyId, uid)))
     after = (await getParty(db, guildId, partyId)) ?? after
   }
+  await history.logEvent(db, guildId, partyId, wasMember ? logAs : 'dequeued',
+    { userId, displayName: subject?.displayName })
+  await history.logPromotions(db, guildId, partyId, promoted, after)
   return { status: wasMember ? 'left' : 'dequeued', data: after, promoted: promoted[0] }
 }
 
@@ -428,7 +446,7 @@ export async function removeMember(
   if (userId === party.ownerId) return { status: 'is_owner', data: party }
   if (!party.members.some(m => m.userId === userId)) return { status: 'not_in', data: party }
 
-  const result = await leaveParty(db, guildId, partyId, userId)
+  const result = await leaveParty(db, guildId, partyId, userId, 'removed')
   if (result.status !== 'left') return { status: 'not_in', data: result.data ?? party }
   return { status: 'removed', data: result.data, promoted: result.promoted }
 }
@@ -456,9 +474,12 @@ export async function approveQueued(
 
   const after = await getParty(db, guildId, partyId)
   if (!after) return { status: 'not_found' }
-  return after.members.some(m => m.userId === userId)
-    ? { status: 'approved', data: after }
-    : { status: 'full', data: after }
+  if (after.members.some(m => m.userId === userId)) {
+    await history.logEvent(db, guildId, partyId, 'approved',
+      { userId, displayName: after.members.find(m => m.userId === userId)?.displayName })
+    return { status: 'approved', data: after }
+  }
+  return { status: 'full', data: after }
 }
 
 export async function denyQueued(
@@ -467,13 +488,15 @@ export async function denyQueued(
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
   if (party.ownerId !== requesterId) return { status: 'unauthorized', data: party }
-  if (!party.queue.some(q => q.userId === userId)) return { status: 'not_queued', data: party }
+  const subject = party.queue.find(q => q.userId === userId)
+  if (!subject) return { status: 'not_queued', data: party }
 
   await db.batch([
     db.prepare("DELETE FROM party_members WHERE guild_id = ?1 AND party_id = ?2 AND user_id = ?3 AND role = 'queued'")
       .bind(guildId, partyId, userId),
     touchStmt(db, guildId, partyId, Date.now()),
   ])
+  await history.logEvent(db, guildId, partyId, 'denied', { userId, displayName: subject.displayName })
   const after = await getParty(db, guildId, partyId)
   return { status: 'denied', data: after ?? undefined }
 }
@@ -530,6 +553,12 @@ export async function promoteOwner(
     `).bind(guildId, partyId, userId, Date.now()),
   ])
   const after = await getParty(db, guildId, partyId)
+  if (after?.ownerId === userId) {
+    await history.logEvent(db, guildId, partyId, 'owner_changed', {
+      userId, displayName: after.members.find(m => m.userId === userId)?.displayName,
+      detail: { from: party.ownerId, to: userId },
+    })
+  }
   return { status: 'promoted', data: after ?? undefined }
 }
 
@@ -543,6 +572,7 @@ export async function closeParty(db: D1Database, guildId: string, partyId: strin
 
   await db.prepare('UPDATE parties SET is_closed = 1, last_activity_at = ?3 WHERE guild_id = ?1 AND id = ?2')
     .bind(guildId, partyId, Date.now()).run()
+  await history.logEvent(db, guildId, partyId, 'closed', { userId: requesterId })
   const after = await getParty(db, guildId, partyId)
   return { status: 'closed', data: after ?? undefined }
 }
@@ -567,6 +597,8 @@ export async function openParty(db: D1Database, guildId: string, partyId: string
     await db.batch(promoted.map(uid => assignBanStmt(db, guildId, partyId, uid)))
     after = (await getParty(db, guildId, partyId)) ?? after
   }
+  await history.logEvent(db, guildId, partyId, 'opened', { userId: requesterId })
+  await history.logPromotions(db, guildId, partyId, promoted, after)
   return { status: 'opened', data: after, promoted }
 }
 
@@ -624,6 +656,8 @@ export async function setBanlist(
     touchStmt(db, guildId, partyId, now),
   ]
   await db.batch(stmts)
+  await history.logEvent(db, guildId, partyId, 'banlist_set',
+    { userId: requesterId, detail: { count: source.length } })
   const after = await getParty(db, guildId, partyId)
   return { status: 'updated', data: after ?? undefined }
 }
@@ -703,6 +737,11 @@ export async function updateParty(db: D1Database, guildId: string, partyId: stri
     await db.batch(promoted.map(uid => assignBanStmt(db, guildId, partyId, uid)))
     after = (await getParty(db, guildId, partyId)) ?? after
   }
+  if (gameChanged) {
+    await history.logEvent(db, guildId, partyId, 'game_changed',
+      { userId: input.requesterId, detail: { from: party.game, to: after.game } })
+  }
+  await history.logPromotions(db, guildId, partyId, promoted, after)
   return { status: 'updated', data: after, promoted, nameChanged, gameChanged }
 }
 
@@ -726,6 +765,7 @@ export async function disbandParty(
   if (requesterId !== undefined && party.ownerId !== requesterId) {
     return { status: 'unauthorized', data: party }
   }
+  await history.closeSession(db, guildId, partyId, 'disbanded')
   // ON DELETE CASCADE clears members and bans.
   await db.prepare('DELETE FROM parties WHERE guild_id = ?1 AND id = ?2').bind(guildId, partyId).run()
   return { status: 'disbanded', data: party }
@@ -734,6 +774,7 @@ export async function disbandParty(
 export async function disbandAllParties(db: D1Database, guildId: string): Promise<PartyData[]> {
   const parties = await listParties(db, guildId)
   if (parties.length > 0) {
+    for (const p of parties) await history.closeSession(db, guildId, p.id, 'cleared')
     await db.prepare('DELETE FROM parties WHERE guild_id = ?1').bind(guildId).run()
   }
   return parties
@@ -772,6 +813,7 @@ export async function sweepInactiveParties(db: D1Database, now = Date.now()): Pr
     if (now - row.last_activity_at < threshold) continue
     const party = await getParty(db, row.guild_id, row.id)
     if (!party) continue
+    await history.closeSession(db, row.guild_id, row.id, `inactive ${Math.round(threshold / HOUR)}h`)
     await db.prepare('DELETE FROM parties WHERE guild_id = ?1 AND id = ?2').bind(row.guild_id, row.id).run()
     out.push({ party, thresholdMs: threshold })
   }

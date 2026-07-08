@@ -1,4 +1,4 @@
-import { ArrowLeftRight, LayoutDashboard, Moon, ScrollText, Settings as SettingsIcon, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
+import { ArrowLeftRight, History as HistoryIcon, LayoutDashboard, Moon, ScrollText, Settings as SettingsIcon, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, guildId, onSessionExpired } from './api'
 import type { GuildInfo } from './types'
@@ -12,6 +12,7 @@ import { Dashboard } from './views/Dashboard'
 import { Parties } from './views/Parties'
 import { Templates } from './views/Templates'
 import { Users } from './views/Users'
+import { History } from './views/History'
 import { Audit } from './views/Audit'
 import { Settings } from './views/Settings'
 
@@ -19,6 +20,7 @@ const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard />, desc: 'Live overview of parties in this server.' },
   { id: 'parties', label: 'Parties', icon: <Swords />, desc: 'Create, inspect, and manage active parties.' },
   { id: 'templates', label: 'Templates', icon: <FileStack />, desc: 'Reusable party blueprints — build one, then spin up a party for any member.' },
+  { id: 'history', label: 'History', icon: <HistoryIcon />, desc: 'Past and present parties — who joined, who left, and League games played.' },
   { id: 'users', label: 'Users', icon: <User />, desc: 'Look up a member to inspect their IGN profile and party state.' },
   { id: 'audit', label: 'Audit log', icon: <ScrollText />, desc: 'Every admin action taken through this panel.' },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon />, desc: 'Guild-wide limits enforced by the bot.' },
@@ -240,6 +242,7 @@ function TabView({ tab }: { tab: string }) {
   switch (tab) {
     case 'parties': return <Parties />
     case 'templates': return <Templates />
+    case 'history': return <History />
     case 'users': return <Users />
     case 'audit': return <Audit />
     case 'settings': return <Settings />

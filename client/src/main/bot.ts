@@ -173,6 +173,21 @@ export async function fetchLiveChampions(
   }
 }
 
+// Tells the Worker a League match just started for the linked party, so it can
+// record it and later fetch who played + their champions from the Riot API. The
+// server dedupes per match, so it's safe to call more than once for one game.
+export async function reportGame(region: string, gameId: string): Promise<{ ok: boolean; error?: string }> {
+  const token = loadConfig().token
+  if (!token || !region || !gameId) return { ok: false, error: 'Not linked.' }
+  try {
+    const res = await botFetch('POST', '/client/party/game-report', { region, gameId }, token)
+    if (res.status !== 200 || !res.body?.ok) return { ok: false, error: res.body?.error ?? `PartyBot returned ${res.status}.` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: `Could not reach PartyBot: ${(e as Error).message}` }
+  }
+}
+
 export async function addToParty(userId: string): Promise<{ ok: boolean; error?: string }> {
   const token = loadConfig().token
   if (!token) return { ok: false, error: 'Not linked.' }

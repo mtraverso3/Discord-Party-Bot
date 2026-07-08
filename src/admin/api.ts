@@ -6,6 +6,8 @@ import { GAMES } from '../lib/games'
 import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings } from '../store/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../store/templates'
 import { appendAudit, getAudit } from '../store/audit'
+import * as history from '../store/history'
+import * as games from '../store/games'
 import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 import { importFromKv } from './import'
 
@@ -34,6 +36,9 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path === '/guilds' && method === 'GET') return await listGuilds(env)
     if (path === '/import-kv' && method === 'POST') return await importFromKv(env)
     if (path === '/log' && method === 'GET') return json(await getAudit(env.DB, guildId!))
+    if (path === '/history' && method === 'GET') return await listHistory(env, guildId!, url.searchParams)
+    const hm = path.match(/^\/history\/([^/]+)$/)
+    if (hm && method === 'GET') return await getHistoryDetail(env, guildId!, hm[1]!)
     if (path === '/parties' && method === 'GET') return json(await parties.listParties(env.DB, guildId!))
     if (path === '/parties' && method === 'POST') return await createOne(env, guildId!, body)
     if (path === '/channels' && method === 'GET') return await listChannels(env, guildId!, url.searchParams.get('kind'))
@@ -68,6 +73,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
       if (sub === '/open'  && method === 'POST') return await openOne(env, G, partyId)
       if (sub === '/bump'  && method === 'POST') return await bumpOne(env, G, partyId, body)
       if (sub === '/voice' && method === 'GET')  return await voiceStatus(env, G, partyId)
+      if (sub === '/games' && method === 'GET')  return await partyGames(env, G, partyId)
       if (sub === '/banlist' && method === 'PATCH') return await setBanlistRoute(env, G, partyId, body)
       if (sub === '/members' && method === 'POST') return await addMember(env, G, partyId, body)
 
@@ -136,6 +142,33 @@ async function patchSettings(env: AppBindings, guildId: string, body: any): Prom
   const settings = sanitizeSettings({ ...current, ...body })
   await saveGuildSettings(env.DB, guildId, settings)
   return json(settings)
+}
+
+// ── Party history ─────────────────────────────────────────────────────────────
+
+async function listHistory(env: AppBindings, guildId: string, params: URLSearchParams): Promise<Response> {
+  const limit = Math.min(Math.max(Number(params.get('limit')) || 100, 1), 200)
+  const offset = Math.max(Number(params.get('offset')) || 0, 0)
+  return json(await history.listSessions(env.DB, guildId, limit, offset))
+}
+
+async function getHistoryDetail(env: AppBindings, guildId: string, idRaw: string): Promise<Response> {
+  const historyId = Number(idRaw)
+  if (!Number.isInteger(historyId)) return json({ error: 'Invalid history id' }, 400)
+  const session = await history.getSession(env.DB, guildId, historyId)
+  if (!session) return json({ error: 'History not found' }, 404)
+  const [events, gameList] = await Promise.all([
+    history.getSessionEvents(env.DB, historyId),
+    games.listGamesForHistory(env.DB, historyId),
+  ])
+  return json({ session, events, games: gameList })
+}
+
+/** Games recorded for a live party's current session (empty if none). */
+async function partyGames(env: AppBindings, guildId: string, partyId: string): Promise<Response> {
+  const historyId = await history.activeSessionId(env.DB, guildId, partyId)
+  if (historyId == null) return json({ historyId: null, games: [] })
+  return json({ historyId, games: await games.listGamesForHistory(env.DB, historyId) })
 }
 
 async function listGuilds(env: AppBindings): Promise<Response> {

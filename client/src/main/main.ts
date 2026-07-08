@@ -1,12 +1,12 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import {
-  discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchRegion, lcuRequest,
+  discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchGameId, fetchRegion, lcuRequest,
   type LcuCreds,
 } from './lcu'
 import {
   addToParty, clearLink, fetchChampionCatalog, fetchLiveChampions, fetchSession, getAutoJoinSettings,
-  getTaggedPlayers, linkState, linkWithCode, lookupPlayers, setAutoJoinSettings, setPartyGame,
+  getTaggedPlayers, linkState, linkWithCode, lookupPlayers, reportGame, setAutoJoinSettings, setPartyGame,
   setTaggedPlayers, type ChampionCatalog,
 } from './bot'
 import { crossReference, formatRiotId, ignMatches, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
@@ -194,6 +194,27 @@ setInterval(() => { void pollAutoJoin() }, 5000)
 // ── Session cache (main is authoritative; renderer only renders) ────────────
 
 let lastSession: Session | null = null
+
+// ── League game reporting ─────────────────────────────────────────────────────
+//
+// When a match starts we tell the Worker the gameId + region so it can record
+// which games this party played and later pull the champions from the Riot API.
+// One report per gameId (server dedupes anyway); only reports while linked to a
+// party, since a game with no party to attach to is nothing to record.
+
+let lastReportedGameId = 0
+
+async function pollGameReport(): Promise<void> {
+  if (!creds || !region || !lastSession?.party) return
+  const phase = await fetchGameflowPhase(creds)
+  if (phase !== 'InProgress') return
+  const gameId = await fetchGameId(creds)
+  if (!gameId || gameId === lastReportedGameId) return
+  const res = await reportGame(region, String(gameId)).catch(() => ({ ok: false }))
+  if (res.ok) lastReportedGameId = gameId  // only latch on success, so a failed send retries next tick
+}
+
+setInterval(() => { void pollGameReport() }, 5000)
 
 // ── Riot ID resolution via the local client ─────────────────────────────────
 

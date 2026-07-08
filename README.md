@@ -12,6 +12,8 @@ Runs entirely on **Cloudflare Workers** — no persistent server. All state live
 - Queue system: close a party to funnel joiners to queue, approve/deny individually or re-open to auto-promote
 - Per-user IGN profiles stored globally (set once, auto-filled on join/create)
 - Parties auto-disband when idle (2h solo / 6h partial / 12h full or with queue)
+- Party history: every party is recorded — who joined, left, or was promoted, plus close/open/game/owner changes — and browsable in the admin UI long after it's disbanded
+- League game history: the desktop client reports each match a party plays; the bot fills in the participants and champions from the Riot API
 
 ## Commands
 
@@ -81,6 +83,7 @@ Older deployments stored state in KV + Durable Objects. After deploying the D1 v
 - **Dashboard** — party/member/queue stats, per-game breakdown, upcoming auto-disbands
 - **Parties** — everything the owner commands can do (edit, close/open, members, queue, banlist, disband) plus search/sort, auto-refresh, queue reordering, embed bumping, and creating parties on a member's behalf
 - **Templates** — save reusable party blueprints (title, description, game, player cap, voice channel, banlist) and spin up a party for any member in one form, without re-entering everything each time
+- **History** — every past and present party session, with a timeline of who came and went and the League games played in it (champions, teams, win/loss)
 - **Users** — inspect and edit any member's per-game IGN profile
 - **Audit log** — the last 200 admin actions with the acting admin's email
 - **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games, desktop client inviters
@@ -99,5 +102,7 @@ To hack on the UI itself: run `wrangler dev` in the repo root and `npm run dev` 
 ## Desktop client (optional)
 
 A portable Windows app (`client/`) for party leaders running League of Legends. It links to your Discord identity once via `/party link`, then lets the party owner (or admin-allowlisted members) create a League lobby and invite every party member by their IGN in one click — members don't install anything. It also cross-references the live League lobby against the party roster and flags anyone in the lobby who isn't in the party.
+
+When a linked member starts a League match, the client also reports the game (its ID + region) to the bot, which records it against the party and — with `RIOT_API_KEY` set — resolves the participants and champions from the Riot Match-v5 API on the next cron sweep. Those games show up under the party's **Games** tab and in the **History** view.
 
 Built as a single portable `.exe` (Electron) by the **Desktop client** GitHub Actions workflow — run it manually or push a `client-v*` tag to publish a release. See [client/README.md](client/README.md).
