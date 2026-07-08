@@ -2,7 +2,7 @@
 
 A Discord bot for managing inhouse gaming lobbies. Create parties with a player cap, game label, and optional voice channel. Members join via slash command or button. When full or closed, new joiners enter a queue. The embed updates live in the channel on every state change.
 
-Runs entirely on **Cloudflare Workers** — no persistent server, no database. State lives in Durable Objects (per party) and KV (guild index + user profiles).
+Runs entirely on **Cloudflare Workers** — no persistent server. All state lives in a **Cloudflare D1** (SQLite) database: parties, members and queues, banlists, per-user IGN profiles, guild settings, templates, the admin audit log, and desktop-client auth. Invariants like "one party per user per guild" are database constraints, and a cron trigger sweeps idle parties.
 
 ## Features
 
@@ -42,13 +42,17 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 
 - **Runtime**: Cloudflare Workers (TypeScript via Wrangler)
 - **Framework**: `discord-hono`
-- **State**: Cloudflare Durable Objects + KV
+- **State**: Cloudflare D1 (schema in `migrations/`, data access in `src/store/`)
 
 ## Setup
 
 1. Install dependencies: `npm install`
 2. Create a Discord application and bot at [discord.com/developers](https://discord.com/developers/applications)
-3. Create a KV namespace via Wrangler and paste the ID into `wrangler.toml`
+3. Create the D1 database and apply the schema:
+   ```
+   wrangler d1 create partybot        # paste the database_id into wrangler.toml
+   wrangler d1 migrations apply partybot --remote
+   ```
 4. Set secrets:
    ```
    wrangler secret put DISCORD_PUBLIC_KEY
@@ -65,6 +69,10 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
    ```
 7. Set the deployed Worker URL as your Discord app's **Interactions Endpoint URL**
 
+### Migrating from the KV/Durable Object version
+
+Older deployments stored state in KV + Durable Objects. After deploying the D1 version, hit `POST /admin/api/import-kv` (through the Access-protected admin API) once to copy the durable data — user IGN profiles, guild settings, templates, and desktop-client tokens — into D1. Live parties are ephemeral and start fresh. Once verified, remove the `PARTY_KV` binding from `wrangler.toml` and delete `src/admin/import.ts`.
+
 ## Admin UI (optional)
 
 `/admin` serves a private web app for managing the bot — protected by Cloudflare Zero Trust (Access). It's a React + Vite SPA (`admin-ui/`) built to static assets and served by the Worker through the Workers static-assets binding; `npm run deploy` builds it automatically. Every request still goes through the Worker first (`run_worker_first`), so the Access JWT check gates the UI and its assets.
@@ -73,7 +81,7 @@ Runs entirely on **Cloudflare Workers** — no persistent server, no database. S
 - **Dashboard** — party/member/queue stats, per-game breakdown, upcoming auto-disbands
 - **Parties** — everything the owner commands can do (edit, close/open, members, queue, banlist, disband) plus search/sort, auto-refresh, queue reordering, embed bumping, and creating parties on a member's behalf
 - **Templates** — save reusable party blueprints (title, description, game, player cap, voice channel, banlist) and spin up a party for any member in one form, without re-entering everything each time
-- **Users** — inspect and edit any member's per-game IGN profile, and repair stale user→party mappings
+- **Users** — inspect and edit any member's per-game IGN profile
 - **Audit log** — the last 200 admin actions with the acting admin's email
 - **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games, desktop client inviters
 

@@ -11,7 +11,7 @@
 
 import type { GuildSettings, PartyData } from '../types'
 import { GAMES } from './games'
-import { gameAllowed } from './settings'
+import { gameAllowed } from '../store/settings'
 
 export const CREATE_MODAL_PREFIX = 'party_create'
 export const EDIT_MODAL_PREFIX = 'party_edit'

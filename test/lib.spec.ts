@@ -1,16 +1,14 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import { canBump, gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/lib/settings'
-import { appendAudit, getAudit } from '../src/lib/audit'
-import {
-  addToIndex, findParty, getPartyIndex, getUserPartyId, getUserProfile,
-  randomId, removeFromIndex, saveUserIgn, setUserPartyId, uniquePartyId, updateIndexEntry,
-} from '../src/lib/party'
+import { canBump, gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
+import { appendAudit, getAudit } from '../src/store/audit'
+import { findUserIdByRiotId, getUserProfile, saveUserIgn } from '../src/store/profiles'
+import { randomId } from '../src/lib/id'
 import { parseCreateModalSubmit } from '../src/lib/modal'
 import {
   createTemplate, deleteTemplate, getTemplate, getTemplates,
   sanitizeTemplateInput, updateTemplate,
-} from '../src/lib/templates'
+} from '../src/store/templates'
 
 describe('settings', () => {
   it('clamps numbers and filters unknown games', () => {
@@ -26,16 +24,17 @@ describe('settings', () => {
     expect(gameAllowed({ ...SETTINGS_DEFAULTS, allowedGames: ['Other'] }, 'Other')).toBe(true)
   })
 
-  it('falls back to defaults on missing or corrupt KV data', async () => {
-    expect(await getGuildSettings(env.PARTY_KV, 'g-none')).toEqual(SETTINGS_DEFAULTS)
-    await env.PARTY_KV.put('guild:g-bad:settings', 'not json{')
-    expect(await getGuildSettings(env.PARTY_KV, 'g-bad')).toEqual(SETTINGS_DEFAULTS)
+  it('falls back to defaults for guilds with no stored settings', async () => {
+    expect(await getGuildSettings(env.DB, 'g-none')).toEqual(SETTINGS_DEFAULTS)
   })
 
-  it('round-trips through KV', async () => {
+  it('round-trips through the database', async () => {
     const s = { maxParties: 5, defaultCap: 4, allowedGames: ['Other'], clientInviters: ['123456789012345678'], partyBumpers: ['234567890123456789'] }
-    await saveGuildSettings(env.PARTY_KV, 'g1', s)
-    expect(await getGuildSettings(env.PARTY_KV, 'g1')).toEqual(s)
+    await saveGuildSettings(env.DB, 'g1', s)
+    expect(await getGuildSettings(env.DB, 'g1')).toEqual(s)
+    // and an update overwrites, not duplicates
+    await saveGuildSettings(env.DB, 'g1', { ...s, maxParties: 7 })
+    expect((await getGuildSettings(env.DB, 'g1')).maxParties).toBe(7)
   })
 
   it('sanitizes client inviters to unique valid Discord IDs', () => {
@@ -76,34 +75,34 @@ describe('party templates', () => {
   })
 
   it('rejects a template without a label', async () => {
-    const res = await createTemplate(env.PARTY_KV, 'gt', { label: '   ', game: 'Valorant' })
+    const res = await createTemplate(env.DB, 'gt', { label: '   ', game: 'Valorant' })
     expect(res.ok).toBe(false)
   })
 
   it('creates, lists, fetches, updates, and deletes', async () => {
-    const created = await createTemplate(env.PARTY_KV, 'gt2', {
+    const created = await createTemplate(env.DB, 'gt2', {
       label: 'Inhouse', name: 'Inhouse 5s', game: 'Valorant', maxSize: 10,
     })
     expect(created.ok).toBe(true)
     const id = (created as any).template.id
 
-    expect(await getTemplates(env.PARTY_KV, 'gt2')).toHaveLength(1)
-    expect((await getTemplate(env.PARTY_KV, 'gt2', id))!.label).toBe('Inhouse')
+    expect(await getTemplates(env.DB, 'gt2')).toHaveLength(1)
+    expect((await getTemplate(env.DB, 'gt2', id))!.label).toBe('Inhouse')
 
-    const updated = await updateTemplate(env.PARTY_KV, 'gt2', id, { label: 'Inhouse v2', game: 'Overwatch', maxSize: 6 })
+    const updated = await updateTemplate(env.DB, 'gt2', id, { label: 'Inhouse v2', game: 'Overwatch', maxSize: 6 })
     expect(updated.ok).toBe(true)
-    const after = (await getTemplate(env.PARTY_KV, 'gt2', id))!
+    const after = (await getTemplate(env.DB, 'gt2', id))!
     expect(after.label).toBe('Inhouse v2')
     expect(after.game).toBe('Overwatch')
     expect(after.maxSize).toBe(6)
 
-    expect(await deleteTemplate(env.PARTY_KV, 'gt2', id)).toBe(true)
-    expect(await deleteTemplate(env.PARTY_KV, 'gt2', id)).toBe(false)
-    expect(await getTemplates(env.PARTY_KV, 'gt2')).toHaveLength(0)
+    expect(await deleteTemplate(env.DB, 'gt2', id)).toBe(true)
+    expect(await deleteTemplate(env.DB, 'gt2', id)).toBe(false)
+    expect(await getTemplates(env.DB, 'gt2')).toHaveLength(0)
   })
 
   it('updating a missing template fails', async () => {
-    const res = await updateTemplate(env.PARTY_KV, 'gt3', 'nope', { label: 'x' })
+    const res = await updateTemplate(env.DB, 'gt3', 'nope', { label: 'x' })
     expect(res.ok).toBe(false)
   })
 })
@@ -111,17 +110,21 @@ describe('party templates', () => {
 describe('audit log', () => {
   it('stores newest entries first and trims to 200', async () => {
     for (let i = 0; i < 205; i++) {
-      await appendAudit(env.PARTY_KV, 'g1', { ts: i, email: 'a@b.c', method: 'POST', path: `/n/${i}` })
+      await appendAudit(env.DB, 'g1', { ts: i, email: 'a@b.c', method: 'POST', path: `/n/${i}` })
     }
-    const log = await getAudit(env.PARTY_KV, 'g1')
+    const log = await getAudit(env.DB, 'g1')
     expect(log).toHaveLength(200)
     expect(log[0]!.path).toBe('/n/204')
     expect(log[199]!.path).toBe('/n/5')
   })
 
-  it('returns an empty array for corrupt data', async () => {
-    await env.PARTY_KV.put('guild:g-bad:audit', '{nope')
-    expect(await getAudit(env.PARTY_KV, 'g-bad')).toEqual([])
+  it('trims per guild, not globally', async () => {
+    await appendAudit(env.DB, 'g-a', { ts: 1, method: 'POST', path: '/a' })
+    for (let i = 0; i < 201; i++) {
+      await appendAudit(env.DB, 'g-b', { ts: i, method: 'POST', path: `/b/${i}` })
+    }
+    expect(await getAudit(env.DB, 'g-a')).toHaveLength(1)
+    expect(await getAudit(env.DB, 'g-b')).toHaveLength(200)
   })
 })
 
@@ -129,46 +132,37 @@ describe('party IDs', () => {
   it('generates 6-char uppercase alphanumeric IDs', () => {
     for (let i = 0; i < 50; i++) expect(randomId()).toMatch(/^[0-9A-Z]{6}$/)
   })
-
-  it('never returns an ID already in the index', () => {
-    for (let i = 0; i < 50; i++) {
-      const index = [{ id: 'AAAAAA', name: 'x', game: 'Other' }]
-      const id = uniquePartyId(index)
-      expect(id).not.toBe('AAAAAA')
-      expect(id).toMatch(/^[0-9A-Z]{6}$/)
-    }
-  })
 })
 
-describe('guild index', () => {
-  it('adds, updates, finds (case-insensitive), and removes entries', async () => {
-    await addToIndex(env.PARTY_KV, 'g1', { id: 'ABC123', name: 'My Party', game: 'Other' })
+describe('user profiles and Riot ID lookup', () => {
+  it('stores IGNs per game and clears them on empty input', async () => {
+    await saveUserIgn(env.DB, 'u1', 'Valorant', 'Shooty#NA1')
+    await saveUserIgn(env.DB, 'u1', 'Other', 'just-me')
+    expect((await getUserProfile(env.DB, 'u1')).igns).toEqual({ Valorant: 'Shooty#NA1', Other: 'just-me' })
 
-    expect((await findParty(env.PARTY_KV, 'g1', 'abc123'))?.id).toBe('ABC123')
-    expect((await findParty(env.PARTY_KV, 'g1', 'MY PARTY'))?.id).toBe('ABC123')
-    expect(await findParty(env.PARTY_KV, 'g1', 'nope')).toBeNull()
-
-    await updateIndexEntry(env.PARTY_KV, 'g1', 'ABC123', { name: 'Renamed' })
-    expect((await getPartyIndex(env.PARTY_KV, 'g1'))[0]!.name).toBe('Renamed')
-
-    await removeFromIndex(env.PARTY_KV, 'g1', 'ABC123')
-    expect(await getPartyIndex(env.PARTY_KV, 'g1')).toEqual([])
-  })
-})
-
-describe('user mappings and profiles', () => {
-  it('sets and clears user→party mappings', async () => {
-    await setUserPartyId(env.PARTY_KV, 'g1', 'u1', 'ABC123')
-    expect(await getUserPartyId(env.PARTY_KV, 'g1', 'u1')).toBe('ABC123')
-    await setUserPartyId(env.PARTY_KV, 'g1', 'u1', null)
-    expect(await getUserPartyId(env.PARTY_KV, 'g1', 'u1')).toBeNull()
+    await saveUserIgn(env.DB, 'u1', 'Other', '  ')
+    expect((await getUserProfile(env.DB, 'u1')).igns).toEqual({ Valorant: 'Shooty#NA1' })
   })
 
-  it('stores IGNs per game', async () => {
-    await saveUserIgn(env.PARTY_KV, 'u1', 'Valorant', 'Shooty#NA1')
-    await saveUserIgn(env.PARTY_KV, 'u1', 'Other', 'just-me')
-    const profile = await getUserProfile(env.PARTY_KV, 'u1')
-    expect(profile.igns).toEqual({ Valorant: 'Shooty#NA1', Other: 'just-me' })
+  it('reverse-resolves Riot IDs case-insensitively with tag wildcards', async () => {
+    await saveUserIgn(env.DB, 'u-tagged', 'LoL NA', 'Faker#KR1')
+    await saveUserIgn(env.DB, 'u-untagged', 'LoL NA', 'Chovy')
+
+    // Exact match, any casing.
+    expect(await findUserIdByRiotId(env.DB, 'LoL NA', 'faker', 'kr1')).toBe('u-tagged')
+    // Wrong tag → no match for a tagged registration.
+    expect(await findUserIdByRiotId(env.DB, 'LoL NA', 'Faker', 'NA1')).toBeNull()
+    // Untagged registration matches any tagline.
+    expect(await findUserIdByRiotId(env.DB, 'LoL NA', 'CHOVY', 'KR2')).toBe('u-untagged')
+    // Different game → no crossover.
+    expect(await findUserIdByRiotId(env.DB, 'Valorant', 'Faker', 'KR1')).toBeNull()
+  })
+
+  it('re-registering an IGN moves the reverse index', async () => {
+    await saveUserIgn(env.DB, 'u2', 'LoL NA', 'OldName#NA1')
+    await saveUserIgn(env.DB, 'u2', 'LoL NA', 'NewName#NA1')
+    expect(await findUserIdByRiotId(env.DB, 'LoL NA', 'OldName', 'NA1')).toBeNull()
+    expect(await findUserIdByRiotId(env.DB, 'LoL NA', 'NewName', 'NA1')).toBe('u2')
   })
 })
 

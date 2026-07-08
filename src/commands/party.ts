@@ -1,16 +1,16 @@
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
-import type { AppBindings, AppEnv, PartyData, UpdateResult } from '../types'
+import type { AppBindings, AppEnv } from '../types'
 import {
-  callParty, createPartyAndEmbed, extractMemberInfo, extractResolvedUser, findParty,
-  getPartyIndex, getPartyStub, getUserPartyId, getUserProfile, isGuildAdmin,
-  markDisbanded, removeFromIndex, repostPartyEmbed,
-  saveUserIgn, setUserPartyId, trySyncEmbed, updateIndexEntry,
+  createPartyAndEmbed, extractMemberInfo, extractResolvedUser, isGuildAdmin,
+  repostPartyEmbed, tryMarkDisbanded, trySyncEmbed,
 } from '../lib/party'
+import * as parties from '../store/parties'
+import { getIgnMap, getUserIgn, saveUserIgn } from '../store/profiles'
+import { canBump, gameAllowed, getGuildSettings } from '../store/settings'
+import { generateLinkCode, writeLinkCode } from '../store/clientAuth'
 import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
-import { canBump, gameAllowed, getGuildSettings } from '../lib/settings'
-import { generateLinkCode, writeLinkCode } from '../client-api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -85,16 +85,16 @@ async function openCreateModal(c: CommandContext<AppEnv>) {
   const guildId = c.interaction.guild_id!
   const { userId, displayName } = extractMemberInfo(c.interaction)
 
-  const [existingPartyId, index, settings] = await Promise.all([
-    getUserPartyId(c.env.PARTY_KV, guildId, userId),
-    getPartyIndex(c.env.PARTY_KV, guildId),
-    getGuildSettings(c.env.PARTY_KV, guildId),
+  const [existingPartyId, partyCount, settings] = await Promise.all([
+    parties.getUserPartyId(c.env.DB, guildId, userId),
+    parties.countParties(c.env.DB, guildId),
+    getGuildSettings(c.env.DB, guildId),
   ])
 
   if (existingPartyId) {
     return c.ephemeral().res({ content: `You're already in party \`${existingPartyId}\`. Leave it or disband it first.`, flags: 64 })
   }
-  if (index.length >= settings.maxParties) {
+  if (partyCount >= settings.maxParties) {
     return c.ephemeral().res({ content: `There are already ${settings.maxParties} active parties. Wait for one to disband.`, flags: 64 })
   }
 
@@ -121,14 +121,14 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     if (!fields.voiceChannelId) return reply('Please pick a voice channel.')
 
     // Re-check eligibility — state may have changed while the modal was open.
-    const [existingPartyId, index, profile, settings] = await Promise.all([
-      getUserPartyId(env.PARTY_KV, guildId, userId),
-      getPartyIndex(env.PARTY_KV, guildId),
-      getUserProfile(env.PARTY_KV, userId),
-      getGuildSettings(env.PARTY_KV, guildId),
+    // (The store re-enforces "one party per owner" atomically at insert time.)
+    const [existingPartyId, partyCount, settings] = await Promise.all([
+      parties.getUserPartyId(env.DB, guildId, userId),
+      parties.countParties(env.DB, guildId),
+      getGuildSettings(env.DB, guildId),
     ])
     if (existingPartyId) return reply(`You're already in party \`${existingPartyId}\`. Leave it or disband it first.`)
-    if (index.length >= settings.maxParties) return reply(`There are already ${settings.maxParties} active parties. Wait for one to disband.`)
+    if (partyCount >= settings.maxParties) return reply(`There are already ${settings.maxParties} active parties. Wait for one to disband.`)
 
     const game = fields.game || 'Other'
     if (!gameAllowed(settings, game)) return reply(`**${game}** is not enabled on this server.`)
@@ -137,7 +137,7 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     const result = await createPartyAndEmbed(env, {
       guildId,
       channelId,
-      owner: { id: userId, username, displayName, ign: profile.igns[game] },
+      owner: { id: userId, username, displayName, ign: await getUserIgn(env.DB, userId, game) },
       name,
       description: fields.description,
       game,
@@ -163,33 +163,34 @@ async function join(
   displayName: string,
   opts: Record<string, any>,
 ) {
-  const [currentPartyId, entry, profile] = await Promise.all([
-    getUserPartyId(c.env.PARTY_KV, guildId, userId),
-    findParty(c.env.PARTY_KV, guildId, opts['party'] as string),
-    getUserProfile(c.env.PARTY_KV, userId),
+  const [currentPartyId, targetId] = await Promise.all([
+    parties.getUserPartyId(c.env.DB, guildId, userId),
+    parties.findPartyId(c.env.DB, guildId, (opts['party'] as string) ?? ''),
   ])
 
   if (currentPartyId) {
     return c.followup({ content: `You're already in party \`${currentPartyId}\`. Leave it first.`, flags: 64 })
   }
-  if (!entry) {
+  if (!targetId) {
     return c.followup({ content: 'Party not found. Use `/party list` to see active parties.', flags: 64 })
   }
 
-  const stub = getPartyStub(c.env, guildId, entry.id)
-  const result = await callParty<{ status: string; data: PartyData }>(stub, 'join', {
-    userId, username, displayName, ign: profile.igns[entry.game],
-  })
+  const target = await parties.getParty(c.env.DB, guildId, targetId)
+  if (!target) return c.followup({ content: 'Party not found. Use `/party list` to see active parties.', flags: 64 })
 
+  const ign = await getUserIgn(c.env.DB, userId, target.game)
+  const result = await parties.joinParty(c.env.DB, guildId, targetId, { userId, username, displayName, ign })
+
+  if (result.status === 'not_found')      return c.followup({ content: 'Party not found.', flags: 64 })
+  if (result.status === 'in_other_party') return c.followup({ content: "You're already in another party. Leave it first.", flags: 64 })
   if (result.status === 'already_member') return c.followup({ content: "You're already in that party.", flags: 64 })
   if (result.status === 'already_queued') return c.followup({ content: "You're already queued for that party.", flags: 64 })
 
-  await setUserPartyId(c.env.PARTY_KV, guildId, userId, entry.id)
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
   const msg = result.status === 'joined'
-    ? `You joined **${result.data.name}**!`
-    : `**${result.data.name}** is ${result.data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${result.data.queue.length}.`
+    ? `You joined **${result.data!.name}**!`
+    : `**${result.data!.name}** is ${result.data!.isClosed ? 'closed' : 'full'} — you're in the queue at position ${result.data!.queue.length}.`
 
   return c.followup({ content: msg, flags: 64 })
 }
@@ -197,27 +198,23 @@ async function join(
 // ── /party leave ──────────────────────────────────────────────────────────────
 
 async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData; promoted?: string }>(stub, 'leave', { userId })
+  const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId)
 
   if (result.status === 'is_owner') {
     return c.followup({ content: "You're the party owner — use `/party disband` to end it.", flags: 64 })
   }
-  if (result.status === 'not_in') return c.followup({ content: "You're not in that party.", flags: 64 })
-
-  await setUserPartyId(c.env.PARTY_KV, guildId, userId, null)
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-
-  if (result.promoted) {
-    await setUserPartyId(c.env.PARTY_KV, guildId, result.promoted, partyId)
+  if (result.status === 'not_in' || result.status === 'not_found') {
+    return c.followup({ content: "You're not in that party.", flags: 64 })
   }
 
+  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+
   const msg = result.status === 'left'
-    ? `You left **${result.data.name}**.`
-    : `You left the queue for **${result.data.name}**.`
+    ? `You left **${result.data!.name}**.`
+    : `You left the queue for **${result.data!.name}**.`
   return c.followup({ content: msg, flags: 64 })
 }
 
@@ -226,17 +223,16 @@ async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string)
 async function info(c: CommandContext<AppEnv>, guildId: string, userId: string, opts: Record<string, any>) {
   let partyId = opts['party'] as string | undefined
   if (!partyId) {
-    const kv = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
-    if (!kv) return c.followup({ content: "You're not in a party. Use `/party list` to browse, or pass a party name/ID.", flags: 64 })
-    partyId = kv
+    const current = await parties.getUserPartyId(c.env.DB, guildId, userId)
+    if (!current) return c.followup({ content: "You're not in a party. Use `/party list` to browse, or pass a party name/ID.", flags: 64 })
+    partyId = current
   } else {
-    const entry = await findParty(c.env.PARTY_KV, guildId, partyId)
-    if (!entry) return c.followup({ content: 'Party not found. Use `/party list` to see active parties.', flags: 64 })
-    partyId = entry.id
+    const resolved = await parties.findPartyId(c.env.DB, guildId, partyId)
+    if (!resolved) return c.followup({ content: 'Party not found. Use `/party list` to see active parties.', flags: 64 })
+    partyId = resolved
   }
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const party = await callParty<PartyData | null>(stub, 'get')
+  const party = await parties.getParty(c.env.DB, guildId, partyId)
   if (!party) return c.followup({ content: 'Party not found.', flags: 64 })
 
   return c.followup({ embeds: [buildPartyEmbed(party)], flags: 64 })
@@ -245,27 +241,21 @@ async function info(c: CommandContext<AppEnv>, guildId: string, userId: string, 
 // ── /party list ───────────────────────────────────────────────────────────────
 
 async function list(c: CommandContext<AppEnv>, guildId: string) {
-  const index = await getPartyIndex(c.env.PARTY_KV, guildId)
-  if (index.length === 0) {
+  const all = await parties.listParties(c.env.DB, guildId)
+  if (all.length === 0) {
     return c.followup({ content: 'No active parties. Create one with `/party create`!', flags: 64 })
   }
 
-  const lines = await Promise.all(
-    index.map(async (entry: { id: string; name: string; game: string }) => {
-      const stub = getPartyStub(c.env, guildId, entry.id)
-      const party = await callParty<PartyData | null>(stub, 'get').catch(() => null)
-      if (!party) return null
-      const status = party.isClosed ? '🔒' : party.members.length >= party.maxSize ? '🟡' : '🟢'
-      const queueNote = party.queue.length > 0 ? ` *(${party.queue.length} queued)*` : ''
-      return `${status} **${party.name}** \`${party.id}\` — ${party.game} — ${party.members.length}/${party.maxSize}${queueNote}`
-    }),
-  )
+  const lines = all.map(party => {
+    const status = party.isClosed ? '🔒' : party.members.length >= party.maxSize ? '🟡' : '🟢'
+    const queueNote = party.queue.length > 0 ? ` *(${party.queue.length} queued)*` : ''
+    return `${status} **${party.name}** \`${party.id}\` — ${party.game} — ${party.members.length}/${party.maxSize}${queueNote}`
+  })
 
-  const valid = lines.filter(Boolean).join('\n')
   return c.followup({
     embeds: [{
       title: 'Active Parties',
-      description: valid || 'No parties found.',
+      description: lines.join('\n'),
       color: 0x5865f2,
       footer: { text: 'Use /party join <name or ID> to join · 🟢 open · 🟡 full · 🔒 closed' },
     }],
@@ -279,17 +269,15 @@ async function ign(c: CommandContext<AppEnv>, guildId: string, userId: string, o
   const game = opts['game'] as string
   const ignValue = opts['name'] as string
 
-  const [partyId] = await Promise.all([
-    getUserPartyId(c.env.PARTY_KV, guildId, userId),
-    saveUserIgn(c.env.PARTY_KV, userId, game, ignValue),
+  const [membership] = await Promise.all([
+    parties.getUserMembership(c.env.DB, guildId, userId),
+    saveUserIgn(c.env.DB, userId, game, ignValue),
   ])
 
-  if (partyId) {
-    const index = await getPartyIndex(c.env.PARTY_KV, guildId)
-    const currentEntry = index.find(e => e.id === partyId)
-    if (currentEntry && currentEntry.game === game) {
-      const stub = getPartyStub(c.env, guildId, partyId)
-      const result = await callParty<{ status: string; data: PartyData }>(stub, 'setign', { userId, ign: ignValue })
+  if (membership) {
+    const party = await parties.getParty(c.env.DB, guildId, membership.partyId)
+    if (party && party.game === game) {
+      const result = await parties.setMemberIgn(c.env.DB, guildId, membership.partyId, userId, ignValue)
       if (result.status === 'updated') await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
     }
   }
@@ -303,15 +291,14 @@ async function openEditModal(c: CommandContext<AppEnv>) {
   const guildId = c.interaction.guild_id!
   const { userId } = extractMemberInfo(c.interaction)
 
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) {
     return c.ephemeral().res({ content: "You're not in a party.", flags: 64 })
   }
 
-  const stub = getPartyStub(c.env, guildId, partyId)
   const [party, settings] = await Promise.all([
-    callParty<PartyData | null>(stub, 'get').catch(() => null),
-    getGuildSettings(c.env.PARTY_KV, guildId),
+    parties.getParty(c.env.DB, guildId, partyId),
+    getGuildSettings(c.env.DB, guildId),
   ])
   if (!party) return c.ephemeral().res({ content: 'Party not found.', flags: 64 })
   if (party.ownerId !== userId) {
@@ -334,27 +321,21 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
     const { userId } = extractMemberInfo(interaction)
 
     const fields = parseEditModalSubmit(interaction)
-    const stub = getPartyStub(env, guildId, partyId)
 
-    // If the game changed, fetch every member's & queued user's profile so the DO
-    // can refresh IGNs for the new game in a single atomic write.
-    const current = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+    // If the game changed, fetch every member's & queued user's IGN for the
+    // new game so they refresh in the same write.
+    const current = await parties.getParty(env.DB, guildId, partyId)
     if (!current) return reply('Party not found.')
 
     let ignMap: Record<string, string> | undefined
     if (fields.game && current.game !== fields.game) {
-      const settings = await getGuildSettings(env.PARTY_KV, guildId)
+      const settings = await getGuildSettings(env.DB, guildId)
       if (!gameAllowed(settings, fields.game)) return reply(`**${fields.game}** is not enabled on this server.`)
       const ids = [...current.members.map(m => m.userId), ...current.queue.map(q => q.userId)]
-      const profiles = await Promise.all(ids.map(uid => getUserProfile(env.PARTY_KV, uid)))
-      ignMap = {}
-      ids.forEach((uid, i) => {
-        const ign = profiles[i]!.igns[fields.game]
-        if (ign) ignMap![uid] = ign
-      })
+      ignMap = await getIgnMap(env.DB, ids, fields.game)
     }
 
-    const result = await callParty<UpdateResult>(stub, 'update', {
+    const result = await parties.updateParty(env.DB, guildId, partyId, {
       requesterId: userId,
       name: fields.name,
       description: fields.description,
@@ -362,18 +343,11 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
       game: fields.game,
       voiceChannelId: fields.voiceChannelId || undefined,
       ignMap,
-    }).catch(() => null)
+    })
 
-    if (!result) return reply('Party not found.')
+    if (result.status === 'not_found')    return reply('Party not found.')
     if (result.status === 'unauthorized') return reply('Only the party owner can edit the party.')
     if (result.status === 'invalid')      return reply(result.message ?? 'Invalid input.')
-
-    const indexPatch: { name?: string; game?: string } = {}
-    if (result.nameChanged) indexPatch.name = result.data.name
-    if (result.gameChanged) indexPatch.game = result.data.game
-    if (indexPatch.name || indexPatch.game) {
-      await updateIndexEntry(env.PARTY_KV, guildId, partyId, indexPatch)
-    }
 
     await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
 
@@ -390,12 +364,12 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
 // ── /party close ──────────────────────────────────────────────────────────────
 
 async function closeParty(c: CommandContext<AppEnv>, guildId: string, userId: string) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData }>(stub, 'close', { requesterId: userId })
+  const result = await parties.closeParty(c.env.DB, guildId, partyId, userId)
 
+  if (result.status === 'not_found')      return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can close the party.', flags: 64 })
   if (result.status === 'already_closed') return c.followup({ content: 'The party is already closed.', flags: 64 })
 
@@ -406,12 +380,12 @@ async function closeParty(c: CommandContext<AppEnv>, guildId: string, userId: st
 // ── /party open ───────────────────────────────────────────────────────────────
 
 async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: string) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData; promoted: string[] }>(stub, 'open', { requesterId: userId })
+  const result = await parties.openParty(c.env.DB, guildId, partyId, userId)
 
+  if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can open the party.', flags: 64 })
   if (result.status === 'already_open') return c.followup({ content: 'The party is already open.', flags: 64 })
 
@@ -426,7 +400,7 @@ async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: str
 // ── /party adduser ────────────────────────────────────────────────────────────
 
 async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, requesterId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
@@ -435,27 +409,27 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   const resolved = extractResolvedUser(c.interaction, targetId)
   if (!resolved) return c.followup({ content: "Couldn't resolve that user.", flags: 64 })
 
-  const [targetParty, indexEntry, profile] = await Promise.all([
-    getUserPartyId(c.env.PARTY_KV, guildId, targetId),
-    findParty(c.env.PARTY_KV, guildId, partyId),
-    getUserProfile(c.env.PARTY_KV, targetId),
+  const [targetParty, party] = await Promise.all([
+    parties.getUserPartyId(c.env.DB, guildId, targetId),
+    parties.getParty(c.env.DB, guildId, partyId),
   ])
+  if (!party) return c.followup({ content: 'Party not found.', flags: 64 })
 
   if (targetParty && targetParty !== partyId) {
     return c.followup({ content: `<@${targetId}> is already in party \`${targetParty}\`.`, flags: 64 })
   }
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const ign = indexEntry ? profile.igns[indexEntry.game] : undefined
-  const result = await callParty<{ status: string; data: PartyData }>(stub, 'forceadd', {
-    requesterId, userId: targetId, username: resolved.username, displayName: resolved.displayName, ign,
+  const ign = await getUserIgn(c.env.DB, targetId, party.game)
+  const result = await parties.forceAdd(c.env.DB, guildId, partyId, requesterId, {
+    userId: targetId, username: resolved.username, displayName: resolved.displayName, ign,
   })
 
+  if (result.status === 'not_found')      return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can add members directly.', flags: 64 })
   if (result.status === 'already_member') return c.followup({ content: `<@${targetId}> is already in the party.`, flags: 64 })
+  if (result.status === 'in_other_party') return c.followup({ content: `<@${targetId}> is already in another party.`, flags: 64 })
   if (result.status === 'full')           return c.followup({ content: 'The party is full. Raise the cap or remove someone first.', flags: 64 })
 
-  await setUserPartyId(c.env.PARTY_KV, guildId, targetId, partyId)
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
   return c.followup({ content: `<@${targetId}> added to the party.`, flags: 64 })
@@ -464,18 +438,17 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
 // ── /party approve ────────────────────────────────────────────────────────────
 
 async function approve(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, requesterId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData }>(stub, 'approve', { requesterId, userId: targetId })
+  const result = await parties.approveQueued(c.env.DB, guildId, partyId, requesterId, targetId)
 
+  if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can approve members.', flags: 64 })
   if (result.status === 'not_queued')   return c.followup({ content: 'That user is not in the queue.', flags: 64 })
   if (result.status === 'full')         return c.followup({ content: "The party is full.", flags: 64 })
 
-  await setUserPartyId(c.env.PARTY_KV, guildId, targetId, partyId)
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
   return c.followup({ content: `<@${targetId}> approved into the party.`, flags: 64 })
@@ -484,17 +457,16 @@ async function approve(c: CommandContext<AppEnv>, guildId: string, requesterId: 
 // ── /party deny ───────────────────────────────────────────────────────────────
 
 async function deny(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, requesterId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData }>(stub, 'deny', { requesterId, userId: targetId })
+  const result = await parties.denyQueued(c.env.DB, guildId, partyId, requesterId, targetId)
 
+  if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can deny members.', flags: 64 })
   if (result.status === 'not_queued')   return c.followup({ content: 'That user is not in the queue.', flags: 64 })
 
-  await setUserPartyId(c.env.PARTY_KV, guildId, targetId, null)
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
   return c.followup({ content: `<@${targetId}> removed from the queue.`, flags: 64 })
@@ -503,22 +475,16 @@ async function deny(c: CommandContext<AppEnv>, guildId: string, requesterId: str
 // ── /party remove ───────────────────────────────────────────────────────────────
 
 async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, requesterId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData; promoted?: string }>(stub, 'remove', { requesterId, userId: targetId })
+  const result = await parties.removeMember(c.env.DB, guildId, partyId, requesterId, targetId)
 
+  if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can remove members.', flags: 64 })
   if (result.status === 'is_owner')     return c.followup({ content: "You can't remove yourself. Use `/party disband` to end the party.", flags: 64 })
   if (result.status === 'not_in')       return c.followup({ content: 'That user is not in the party.', flags: 64 })
-
-  await setUserPartyId(c.env.PARTY_KV, guildId, targetId, null)
-
-  if (result.promoted) {
-    await setUserPartyId(c.env.PARTY_KV, guildId, result.promoted, partyId)
-  }
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
   return c.followup({ content: `<@${targetId}> removed from the party.${result.promoted ? ` <@${result.promoted}> promoted from queue.` : ''}`, flags: 64 })
@@ -527,13 +493,13 @@ async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, r
 // ── /party promote ────────────────────────────────────────────────────────────
 
 async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: string, opts: Record<string, any>) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, requesterId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, requesterId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData }>(stub, 'promote', { requesterId, userId: targetId })
+  const result = await parties.promoteOwner(c.env.DB, guildId, partyId, requesterId, targetId)
 
+  if (result.status === 'not_found')     return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized')  return c.followup({ content: 'Only the party owner can transfer ownership.', flags: 64 })
   if (result.status === 'already_owner') return c.followup({ content: "You're already the owner.", flags: 64 })
   if (result.status === 'not_in')        return c.followup({ content: 'That user is not in the party.', flags: 64 })
@@ -546,18 +512,17 @@ async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: 
 // ── /party bump ───────────────────────────────────────────────────────────────
 
 async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: string, userId: string) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const party = await callParty<PartyData | null>(stub, 'get')
+  const party = await parties.getParty(c.env.DB, guildId, partyId)
   if (!party) return c.followup({ content: 'Party not found.', flags: 64 })
-  const settings = await getGuildSettings(c.env.PARTY_KV, guildId)
+  const settings = await getGuildSettings(c.env.DB, guildId)
   if (!canBump(settings, party, userId)) {
     return c.followup({ content: 'Only the party owner or a designated bumper can bump the party.', flags: 64 })
   }
 
-  await repostPartyEmbed(c.env, stub, party, channelId)
+  await repostPartyEmbed(c.env, party, channelId)
 
   return c.followup({ content: 'Party bumped!', flags: 64 })
 }
@@ -568,7 +533,7 @@ async function link(c: CommandContext<AppEnv>, guildId: string, userId: string) 
   const { displayName } = extractMemberInfo(c.interaction)
 
   const code = generateLinkCode()
-  await writeLinkCode(c.env.PARTY_KV, code, { guildId, discordUserId: userId, displayName })
+  await writeLinkCode(c.env.DB, code, { guildId, discordUserId: userId, displayName })
 
   return c.followup({
     content: `Your link code: \`${code}\` — enter it in the PartyBot desktop app to link your account. The code expires in 10 minutes; the link itself stays active.`,
@@ -583,29 +548,12 @@ async function clearAll(c: CommandContext<AppEnv>, guildId: string) {
     return c.followup({ content: 'Only server admins can clear all parties.', flags: 64 })
   }
 
-  const index = await getPartyIndex(c.env.PARTY_KV, guildId)
-  if (index.length === 0) return c.followup({ content: 'No active parties to clear.', flags: 64 })
+  const cleared = await parties.disbandAllParties(c.env.DB, guildId)
+  if (cleared.length === 0) return c.followup({ content: 'No active parties to clear.', flags: 64 })
 
-  let cleared = 0
-  await Promise.all(index.map(async (entry) => {
-    const stub = getPartyStub(c.env, guildId, entry.id)
-    const result = await callParty<{ status: string; data?: PartyData }>(stub, 'forcedisband').catch(() => null)
-    if (!result || result.status === 'gone' || !result.data) return
-    cleared++
-    const party = result.data
+  await Promise.all(cleared.map(party => tryMarkDisbanded(c.env.DISCORD_BOT_TOKEN, party)))
 
-    await Promise.all([
-      ...party.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
-      ...party.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
-      markDisbanded(c.env.DISCORD_BOT_TOKEN, party)
-        .catch(e => console.warn(`markDisbanded failed for party ${entry.id}:`, e)),
-    ])
-  }))
-
-  // Reset the guild index in one shot
-  await c.env.PARTY_KV.put(`guild:${guildId}:parties`, JSON.stringify([]))
-
-  return c.followup({ content: `Cleared ${cleared} ${cleared === 1 ? 'party' : 'parties'}.`, flags: 64 })
+  return c.followup({ content: `Cleared ${cleared.length} ${cleared.length === 1 ? 'party' : 'parties'}.`, flags: 64 })
 }
 
 // ── /party banlist (modal) ────────────────────────────────────────────────────
@@ -614,13 +562,12 @@ async function openBanlistModal(c: CommandContext<AppEnv>) {
   const guildId = c.interaction.guild_id!
   const { userId } = extractMemberInfo(c.interaction)
 
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) {
     return c.ephemeral().res({ content: "You're not in a party.", flags: 64 })
   }
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const party = await callParty<PartyData | null>(stub, 'get').catch(() => null)
+  const party = await parties.getParty(c.env.DB, guildId, partyId)
   if (!party) return c.ephemeral().res({ content: 'Party not found.', flags: 64 })
   if (party.ownerId !== userId) {
     return c.ephemeral().res({ content: 'Only the party owner can set the banlist.', flags: 64 })
@@ -647,18 +594,15 @@ export async function handleBanlistModal(c: ModalContext<AppEnv>) {
     if (!partyId) return c.followup({ content: 'Missing party context.', flags: 64 })
 
     const banlist = ((c as any).get('banlist') as string | undefined) ?? ''
-    const stub = getPartyStub(c.env, guildId, partyId)
-    const result = await callParty<{ status: string; data: PartyData }>(
-      stub, 'setbanlist', { requesterId: userId, banlist },
-    ).catch(() => null)
+    const result = await parties.setBanlist(c.env.DB, guildId, partyId, userId, banlist)
 
-    if (!result) return c.followup({ content: 'Party not found.', flags: 64 })
+    if (result.status === 'not_found') return c.followup({ content: 'Party not found.', flags: 64 })
     if (result.status === 'unauthorized') {
       return c.followup({ content: 'Only the party owner can set the banlist.', flags: 64 })
     }
 
     await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
-    const count = result.data.banlist?.source.length ?? 0
+    const count = result.data?.banlist?.source.length ?? 0
     const msg = count === 0 ? 'Banlist cleared.' : `Banlist updated — ${count} entr${count === 1 ? 'y' : 'ies'}.`
     return c.followup({ content: msg, flags: 64 })
   })
@@ -667,21 +611,15 @@ export async function handleBanlistModal(c: ModalContext<AppEnv>) {
 // ── /party disband ────────────────────────────────────────────────────────────
 
 async function disband(c: CommandContext<AppEnv>, guildId: string, userId: string) {
-  const partyId = await getUserPartyId(c.env.PARTY_KV, guildId, userId)
+  const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const stub = getPartyStub(c.env, guildId, partyId)
-  const result = await callParty<{ status: string; data: PartyData }>(stub, 'disband', { requesterId: userId })
+  const result = await parties.disbandParty(c.env.DB, guildId, partyId, userId)
 
+  if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can disband the party.', flags: 64 })
 
-  await Promise.all([
-    ...result.data.members.map(m => setUserPartyId(c.env.PARTY_KV, guildId, m.userId, null)),
-    ...result.data.queue.map(q => setUserPartyId(c.env.PARTY_KV, guildId, q.userId, null)),
-    removeFromIndex(c.env.PARTY_KV, guildId, partyId),
-    markDisbanded(c.env.DISCORD_BOT_TOKEN, result.data)
-      .catch(e => console.warn(`markDisbanded failed for party ${partyId}:`, e)),
-  ])
+  await tryMarkDisbanded(c.env.DISCORD_BOT_TOKEN, result.data!)
 
-  return c.followup({ content: `**${result.data.name}** has been disbanded.`, flags: 64 })
+  return c.followup({ content: `**${result.data!.name}** has been disbanded.`, flags: 64 })
 }

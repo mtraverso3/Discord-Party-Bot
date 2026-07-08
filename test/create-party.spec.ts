@@ -1,12 +1,12 @@
 import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createPartyAndEmbed, getPartyIndex, getUserPartyId } from '../src/lib/party'
+import { createPartyAndEmbed } from '../src/lib/party'
+import { countParties, getUserPartyId } from '../src/store/parties'
 
 // These exercise the real create chokepoint end-to-end. The one outbound
-// dependency — posting the Discord embed — goes through the global fetch, which
-// we stub here. (Durable Object calls use stub.fetch, not global fetch, so they
-// keep working.) This is where the duplicate-party race is actually prevented,
-// so it's the key regression guard for the bug.
+// dependency — posting the Discord embed — goes through the global fetch,
+// which we stub here. The duplicate-party race is prevented by the D1
+// party_members primary key, so this is the key regression guard for it.
 
 const realFetch = globalThis.fetch
 let embedStatus = 200
@@ -38,13 +38,12 @@ function opts(name: string, guildId: string, ownerId = 'owner') {
 }
 
 describe('createPartyAndEmbed', () => {
-  it('creates a single party and wires up the index + owner mapping', async () => {
+  it('creates a single party and records the owner membership', async () => {
     const g = 'g-create-' + guildSeq++
     const r = await createPartyAndEmbed(env, opts('Solo', g))
     expect(r.ok).toBe(true)
-    const index = await getPartyIndex(env.PARTY_KV, g)
-    expect(index).toHaveLength(1)
-    expect(await getUserPartyId(env.PARTY_KV, g, 'owner')).toBe(index[0]!.id)
+    expect(await countParties(env.DB, g)).toBe(1)
+    expect(await getUserPartyId(env.DB, g, 'owner')).toBe(r.ok ? r.party.id : null)
   })
 
   it('serializes two concurrent creates for the same owner — exactly one wins', async () => {
@@ -59,9 +58,8 @@ describe('createPartyAndEmbed', () => {
     const loser = a.ok ? b : a
     expect(loser.ok).toBe(false)
 
-    const index = await getPartyIndex(env.PARTY_KV, g)
-    expect(index).toHaveLength(1)
-    expect(await getUserPartyId(env.PARTY_KV, g, 'owner')).toBe(index[0]!.id)
+    expect(await countParties(env.DB, g)).toBe(1)
+    expect(await getUserPartyId(env.DB, g, 'owner')).not.toBeNull()
   })
 
   it('rejects a second create once the owner already has a party', async () => {
@@ -69,31 +67,30 @@ describe('createPartyAndEmbed', () => {
     expect((await createPartyAndEmbed(env, opts('first', g))).ok).toBe(true)
     const second = await createPartyAndEmbed(env, opts('second', g))
     expect(second.ok).toBe(false)
-    if (!second.ok) expect(second.error).toMatch(/already in party/i)
-    expect(await getPartyIndex(env.PARTY_KV, g)).toHaveLength(1)
+    if (!second.ok) expect(second.error).toMatch(/already in a party/i)
+    expect(await countParties(env.DB, g)).toBe(1)
   })
 
   it('lets a different owner create their own party in the same guild', async () => {
     const g = 'g-two-owners-' + guildSeq++
     expect((await createPartyAndEmbed(env, opts('A', g, 'owner-a'))).ok).toBe(true)
     expect((await createPartyAndEmbed(env, opts('B', g, 'owner-b'))).ok).toBe(true)
-    expect(await getPartyIndex(env.PARTY_KV, g)).toHaveLength(2)
+    expect(await countParties(env.DB, g)).toBe(2)
   })
 
-  it('rolls back and frees the owner lock when the embed post fails', async () => {
+  it('rolls back when the embed post fails, so a retry succeeds', async () => {
     const g = 'g-embedfail-' + guildSeq++
     embedStatus = 403  // e.g. missing channel permissions
     const failed = await createPartyAndEmbed(env, opts('nope', g))
     expect(failed.ok).toBe(false)
 
-    // Nothing registered, and the lock must be released so the owner isn't
-    // stuck — a retry against a working channel succeeds.
-    expect(await getPartyIndex(env.PARTY_KV, g)).toHaveLength(0)
-    expect(await getUserPartyId(env.PARTY_KV, g, 'owner')).toBeNull()
+    // Nothing left behind — a retry against a working channel succeeds.
+    expect(await countParties(env.DB, g)).toBe(0)
+    expect(await getUserPartyId(env.DB, g, 'owner')).toBeNull()
 
     embedStatus = 200
     const retry = await createPartyAndEmbed(env, opts('retry', g))
     expect(retry.ok).toBe(true)
-    expect(await getPartyIndex(env.PARTY_KV, g)).toHaveLength(1)
+    expect(await countParties(env.DB, g)).toBe(1)
   })
 })

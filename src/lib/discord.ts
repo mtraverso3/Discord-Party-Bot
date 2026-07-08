@@ -85,23 +85,29 @@ function memberAvatarUrl(
   return null
 }
 
-/** Resolve (and cache) a member's avatar URL. Cached for 6h — the session
- *  polls frequently, so this keeps Discord calls to roughly one per user. An
- *  empty cached string means "resolved, but no custom avatar" (→ null). */
+const AVATAR_CACHE_TTL_SECONDS = 6 * 60 * 60
+
+/** Resolve (and cache) a member's avatar URL. Cached for 6h via the Workers
+ *  Cache API — the session polls frequently, so this keeps Discord calls to
+ *  roughly one per user. A cached empty body means "resolved, but no custom
+ *  avatar" (→ null). */
 export async function getMemberAvatarUrl(
-  kv: KVNamespace,
   token: string,
   guildId: string,
   userId: string,
 ): Promise<string | null> {
-  const key = `avatar:${guildId}:${userId}`
-  const cached = await kv.get(key)
-  if (cached !== null) return cached || null
+  const cacheKey = new Request(`https://cache.partybot.internal/avatar/${guildId}/${userId}`)
+  const cache = await caches.open('avatars')
+  const hit = await cache.match(cacheKey).catch(() => null)
+  if (hit) return (await hit.text()) || null
+
   let url: string | null = null
   try {
     url = memberAvatarUrl(guildId, userId, await getGuildMember(token, guildId, userId))
   } catch { /* leave null; client falls back to initials */ }
-  await kv.put(key, url ?? '', { expirationTtl: 6 * 60 * 60 })
+  await cache.put(cacheKey, new Response(url ?? '', {
+    headers: { 'Cache-Control': `max-age=${AVATAR_CACHE_TTL_SECONDS}` },
+  })).catch(() => {})
   return url
 }
 
