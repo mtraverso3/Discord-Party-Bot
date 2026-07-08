@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import {
-  discoverLcu, fetchChampSelectPicks, fetchFriends, fetchGameflowPhase, fetchRegion, lcuRequest,
+  discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchRegion, lcuRequest,
   type LcuCreds,
 } from './lcu'
 import {
@@ -11,8 +11,8 @@ import {
 } from './bot'
 import { crossReference, formatRiotId, ignMatches, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
 import type {
-  AutoJoinSettings, ChampionPick, GamePhase, GameView, InviteOutcome, InviteResult, LcuStatus, LobbyMode,
-  LobbyView, Session, SessionResult, SummonerInfo, TaggedPlayer,
+  AutoJoinSettings, BanCheck, ChampionPick, GamePhase, GameView, InviteOutcome, InviteResult, LcuStatus,
+  LobbyMode, LobbyView, Session, SessionResult, SummonerInfo, TaggedPlayer,
 } from '../shared/types'
 
 // ── LCU connection state ─────────────────────────────────────────────────────
@@ -396,7 +396,13 @@ function normalizeRiotId(riotId: string): string {
   return riotId.toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
-const EMPTY_GAME: GameView = { phase: 'none', byUserId: {}, byRiotId: {} }
+const EMPTY_GAME: GameView = { phase: 'none', byUserId: {}, byRiotId: {}, bansByUserId: {} }
+
+// Loose champion-name comparison: case- and punctuation-insensitive, so an
+// assigned "Kai'Sa"/"kaisa"/"Kai Sa" all match the catalog's "Kai'Sa".
+function normalizeChamp(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
 
 /**
  * Champion picks for the party's current champ select or live game.
@@ -416,9 +422,12 @@ async function gameChampions(): Promise<GameView> {
 
   const phase = await fetchGameflowPhase(creds)
 
-  // Champ select: championId by LCU puuid.
+  // Champ select: picks + ally bans, keyed by LCU puuid.
+  const champSelect = await fetchChampSelect(creds)
   const csByPuuid = new Map<string, number>()
-  for (const p of await fetchChampSelectPicks(creds)) csByPuuid.set(p.puuid, p.championId)
+  for (const p of champSelect.picks) csByPuuid.set(p.puuid, p.championId)
+  const banByPuuid = new Map<string, number>()
+  for (const b of champSelect.allyBans) banByPuuid.set(b.puuid, b.championId)
 
   // Live game: championId by normalized public Riot ID.
   const liveByRiotId = new Map<string, number>()
@@ -429,7 +438,7 @@ async function gameChampions(): Promise<GameView> {
     }
   }
 
-  if (csByPuuid.size === 0 && liveByRiotId.size === 0) {
+  if (csByPuuid.size === 0 && liveByRiotId.size === 0 && banByPuuid.size === 0) {
     return { ...EMPTY_GAME, phase: phase === 'InProgress' ? 'in-game' : phase === 'ChampSelect' ? 'champ-select' : 'none' }
   }
 
@@ -482,8 +491,25 @@ async function gameChampions(): Promise<GameView> {
     if (!(key in byRiotId)) byRiotId[key] = pickFor(championId)
   }))
 
+  // Ban compliance: only meaningful during champ select, where each ban is
+  // attributed to the caster. Once the game starts that attribution is gone.
+  const bansByUserId: Record<string, BanCheck> = {}
+  if (phase === 'ChampSelect') {
+    await Promise.all(party.members.map(async (m) => {
+      if (!m.assignedBan) return
+      const resolved = m.ign ? await resolveIgn(m.ign) : null
+      const actualId = resolved ? banByPuuid.get(resolved.puuid) : undefined
+      const actual = actualId !== undefined ? pickFor(actualId).name : null
+      bansByUserId[m.userId] = {
+        assigned: m.assignedBan,
+        actual,
+        ok: actual !== null && normalizeChamp(actual) === normalizeChamp(m.assignedBan),
+      }
+    }))
+  }
+
   const phaseOut: GamePhase = phase === 'InProgress' ? 'in-game' : 'champ-select'
-  return { phase: phaseOut, byUserId, byRiotId }
+  return { phase: phaseOut, byUserId, byRiotId, bansByUserId }
 }
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
