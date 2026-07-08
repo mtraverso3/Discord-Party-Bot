@@ -5,7 +5,7 @@ import {
   setUserPartyId,
 } from '../lib/party'
 import { gameAllowed, getGuildSettings } from '../lib/settings'
-import { getGuildMember } from '../lib/discord'
+import { getGuildMember, getMemberAvatarUrl } from '../lib/discord'
 import { fetchLiveGame, getChampionCatalog, platformForRegion } from '../lib/riot'
 
 const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
@@ -183,18 +183,22 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
       const settings = await getGuildSettings(env.PARTY_KV, rec.guildId)
       const isOwner = data.ownerId === rec.userId
       canInvite = isOwner || settings.clientInviters.includes(rec.userId)
+      const avatarUrls = await Promise.all(
+        data.members.map(m => getMemberAvatarUrl(env.PARTY_KV, env.DISCORD_BOT_TOKEN, rec.guildId, m.userId).catch(() => null)),
+      )
       party = {
         id: data.id,
         name: data.name,
         game: data.game,
         maxSize: data.maxSize,
         isOwner,
-        members: data.members.map(m => ({
+        members: data.members.map((m, i) => ({
           userId: m.userId,
           displayName: m.displayName,
           ign: m.ign ?? null,
           isOwner: m.userId === data.ownerId,
           assignedBan: data.banlist?.assignments[m.userId] ?? null,
+          avatarUrl: avatarUrls[i] ?? null,
         })),
       }
     }
