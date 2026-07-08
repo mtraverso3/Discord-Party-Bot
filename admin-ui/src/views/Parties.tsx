@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronDown, Crown, Moon, Plus, RefreshCw, Search, Swords, Timer, Trash2, Volume2 } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Crown, Moon, Plus, RefreshCw, Search, Swords, Timer, Trash2, Volume2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { GAMES } from '../games'
@@ -8,12 +8,12 @@ import { Avatar } from '../components/Avatar'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
 import { ChannelSelect } from '../components/ChannelSelect'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorNote, Input, Label, Mono, Segmented, Select, Spinner, StatusDot, Switch, Textarea } from '../components/ui'
-import { cn } from '../lib/cn'
 import { useGuildData } from '../lib/guildData'
 import { deadlineOf, fmtAbs, relTime } from '../lib/time'
 import type { ChannelInfo, GuildSettings, Party, PartyMember, QueueEntry, VoiceStatus } from '../types'
 
 type SortMode = 'newest' | 'oldest' | 'fullest' | 'expiring'
+type Avatars = Record<string, string | null>
 
 const SORTS: [SortMode, string][] = [
   ['newest', 'Newest first'],
@@ -22,9 +22,19 @@ const SORTS: [SortMode, string][] = [
   ['expiring', 'Expiring soonest'],
 ]
 
+/** Parse the selected party id out of the hash, e.g. #/parties/<id> → "<id>". */
+function selectedPartyId(): string | null {
+  let h = location.hash || ''
+  if (h.startsWith('#/')) h = h.slice(2)
+  else if (h.startsWith('#')) h = h.slice(1)
+  const parts = h.split('/')
+  return parts[0] === 'parties' && parts[1] ? decodeURIComponent(parts[1]) : null
+}
+
+const goToParty = (id: string) => { location.hash = '#/parties/' + encodeURIComponent(id) }
+const goToList = () => { location.hash = '#/parties' }
+
 export function Parties() {
-  const toast = useToast()
-  const confirm = useConfirm()
   const guildData = useGuildData()
 
   const [parties, setParties] = useState<Party[] | null>(null)
@@ -32,11 +42,7 @@ export function Parties() {
   const [settings, setSettings] = useState<GuildSettings | null>(null)
   const [voiceChannels, setVoiceChannels] = useState<ChannelInfo[]>([])
   const [textChannels, setTextChannels] = useState<ChannelInfo[]>([])
-  const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem('pb-sort') as SortMode) || 'newest')
-  const [auto, setAuto] = useState(() => localStorage.getItem('pb-autorefresh') === '1')
-  const [showCreate, setShowCreate] = useState(false)
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set())
+  const [selectedId, setSelectedId] = useState<string | null>(selectedPartyId)
 
   const refresh = useCallback(async () => {
     try {
@@ -55,12 +61,10 @@ export function Parties() {
   }, [refresh, guildData])
 
   useEffect(() => {
-    if (!auto) return
-    const t = setInterval(() => {
-      api<Party[]>('/parties').then(setParties).catch(() => {})
-    }, 10000)
-    return () => clearInterval(t)
-  }, [auto])
+    const onHash = () => setSelectedId(selectedPartyId())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   // Most mutation endpoints return the updated party — patch it into the local
   // cache instead of re-fetching every party (one DO round-trip each).
@@ -82,6 +86,67 @@ export function Parties() {
 
   if (error && !parties) return <ErrorNote>Error: {error}</ErrorNote>
   if (!parties) return <Spinner />
+
+  if (selectedId) {
+    const party = parties.find(p => p.id === selectedId)
+    if (!party) {
+      return (
+        <div className="space-y-4">
+          <Button variant="outline" size="sm" onClick={goToList}><ArrowLeft />Back to parties</Button>
+          <EmptyState icon={<Swords />} title="Party not found">
+            It may have been disbanded. Go back to the list to see current parties.
+          </EmptyState>
+        </div>
+      )
+    }
+    return (
+      <PartyDetail
+        party={party}
+        voiceChannels={voiceChannels}
+        onUpdate={applyUpdate}
+        onRemove={id => { removeLocal(id); goToList() }}
+      />
+    )
+  }
+
+  return (
+    <PartyList
+      parties={parties}
+      settings={settings}
+      voiceChannels={voiceChannels}
+      textChannels={textChannels}
+      onRefresh={refresh}
+      onUpdate={applyUpdate}
+      setParties={setParties}
+    />
+  )
+}
+
+// ── List view ─────────────────────────────────────────────────────────────────
+
+function PartyList({ parties, settings, voiceChannels, textChannels, onRefresh, onUpdate, setParties }: {
+  parties: Party[]
+  settings: GuildSettings | null
+  voiceChannels: ChannelInfo[]
+  textChannels: ChannelInfo[]
+  onRefresh: () => void
+  onUpdate: (p: Party) => void
+  setParties: (fn: (ps: Party[] | null) => Party[] | null) => void
+}) {
+  const toast = useToast()
+  const confirm = useConfirm()
+  const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem('pb-sort') as SortMode) || 'newest')
+  const [auto, setAuto] = useState(() => localStorage.getItem('pb-autorefresh') === '1')
+  const [showCreate, setShowCreate] = useState(false)
+
+  useEffect(() => {
+    if (!auto) return
+    const t = setInterval(() => {
+      api<Party[]>('/parties').then(ps => setParties(() => ps)).catch(() => {})
+    }, 10000)
+    return () => clearInterval(t)
+  }, [auto, setParties])
 
   const filtered = applyFilterSort(parties, query, sort)
 
@@ -117,7 +182,7 @@ export function Parties() {
           }} />
           Auto-refresh
         </label>
-        <Button variant="outline" size="sm" onClick={refresh}><RefreshCw />Refresh</Button>
+        <Button variant="outline" size="sm" onClick={onRefresh}><RefreshCw />Refresh</Button>
         <Button
           variant="destructive-outline"
           size="sm"
@@ -126,7 +191,7 @@ export function Parties() {
             try {
               await api('/clear', { method: 'POST' })
               toast('Cleared')
-              refresh()
+              onRefresh()
             } catch (e) { toast((e as Error).message, 'err') }
           }}
         >
@@ -140,7 +205,7 @@ export function Parties() {
           settings={settings}
           voiceChannels={voiceChannels}
           textChannels={textChannels}
-          onCreated={p => { applyUpdate(p); setShowCreate(false) }}
+          onCreated={p => { onUpdate(p); setShowCreate(false); goToParty(p.id) }}
           onCancel={() => setShowCreate(false)}
         />
       )}
@@ -156,24 +221,39 @@ export function Parties() {
               ? `${parties.length} ${parties.length === 1 ? 'party' : 'parties'}`
               : `${filtered.length} of ${parties.length} parties`}
           </p>
-          {filtered.map(p => (
-            <PartyCard
-              key={p.id}
-              party={p}
-              open={openIds.has(p.id)}
-              onToggle={open => setOpenIds(ids => {
-                const next = new Set(ids)
-                if (open) next.add(p.id); else next.delete(p.id)
-                return next
-              })}
-              voiceChannels={voiceChannels}
-              onUpdate={applyUpdate}
-              onRemove={removeLocal}
-            />
-          ))}
+          {filtered.map(p => <PartyListRow key={p.id} party={p} onOpen={() => goToParty(p.id)} />)}
         </div>
       )}
     </div>
+  )
+}
+
+function PartyListRow({ party: p, onOpen }: { party: Party; onOpen: () => void }) {
+  const deadline = deadlineOf(p)
+  const now = Date.now()
+  const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
+  const status = statusOf(p)
+
+  return (
+    <Card className="overflow-hidden transition-colors hover:border-primary/40">
+      <button
+        type="button"
+        className="flex w-full cursor-pointer flex-wrap items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+        onClick={onOpen}
+      >
+        <Badge variant={status.variant}><StatusDot />{status.label}</Badge>
+        <span className="text-sm font-semibold">{p.name}</span>
+        <Badge variant="outline">{p.game}</Badge>
+        <Badge variant="secondary">{p.members.length}/{p.maxSize}</Badge>
+        {p.queue.length > 0 && <Badge variant="warning">{p.queue.length} queued</Badge>}
+        <span className="grow" />
+        <span className="inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted-foreground" title={'Auto-disband ' + fmtAbs(deadline)}>
+          <Timer className="size-3.5" />{dueLabel}
+        </span>
+        <Mono className="hidden sm:inline">{p.id}</Mono>
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+    </Card>
   )
 }
 
@@ -191,6 +271,14 @@ function applyFilterSort(parties: Party[], query: string, sort: SortMode): Party
   else if (sort === 'fullest') out.sort((a, b) => (b.members.length / b.maxSize) - (a.members.length / a.maxSize))
   else if (sort === 'expiring') out.sort((a, b) => deadlineOf(a) - deadlineOf(b))
   return out
+}
+
+function statusOf(p: Party): { variant: 'destructive' | 'warning' | 'success'; label: string } {
+  return p.isClosed
+    ? { variant: 'destructive', label: 'Closed' }
+    : p.members.length >= p.maxSize
+      ? { variant: 'warning', label: 'Full' }
+      : { variant: 'success', label: 'Open' }
 }
 
 // ── Create form ──────────────────────────────────────────────────────────────
@@ -271,28 +359,35 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
   )
 }
 
-// ── Party card ───────────────────────────────────────────────────────────────
+// ── Detail page ──────────────────────────────────────────────────────────────
 
 type Section = 'people' | 'settings' | 'banlist'
 
-function PartyCard({ party: p, open, onToggle, voiceChannels, onUpdate, onRemove }: {
+function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
   party: Party
-  open: boolean
-  onToggle: (open: boolean) => void
   voiceChannels: ChannelInfo[]
   onUpdate: (p: Party | null) => void
   onRemove: (id: string) => void
 }) {
   const [section, setSection] = useState<Section>('people')
+  const [avatars, setAvatars] = useState<Avatars>({})
+
+  // Resolve Discord avatars for everyone shown on this page. The endpoint is
+  // 6h-cached server-side, so re-fetching as the roster changes stays cheap.
+  const ids = [...p.members.map(m => m.userId), ...p.queue.map(q => q.userId)].join(',')
+  useEffect(() => {
+    let alive = true
+    if (!ids) { setAvatars({}); return }
+    api<Avatars>('/members/avatars?ids=' + encodeURIComponent(ids))
+      .then(a => { if (alive) setAvatars(prev => ({ ...prev, ...a })) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [ids])
+
   const deadline = deadlineOf(p)
   const now = Date.now()
   const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
-
-  const status = p.isClosed
-    ? { variant: 'destructive' as const, label: 'Closed' }
-    : p.members.length >= p.maxSize
-      ? { variant: 'warning' as const, label: 'Full' }
-      : { variant: 'success' as const, label: 'Open' }
+  const status = statusOf(p)
 
   const tabs: [Section, string][] = [
     ['people', `People (${p.members.length + p.queue.length})`],
@@ -301,38 +396,44 @@ function PartyCard({ party: p, open, onToggle, voiceChannels, onUpdate, onRemove
   ]
 
   return (
-    <Card className={cn('overflow-hidden transition-colors', open && 'border-primary/40')}>
-      <button
-        type="button"
-        className="flex w-full cursor-pointer flex-wrap items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/40"
-        onClick={() => onToggle(!open)}
-        aria-expanded={open}
-      >
-        <Badge variant={status.variant}><StatusDot />{status.label}</Badge>
-        <span className="text-sm font-semibold">{p.name}</span>
-        <Badge variant="outline">{p.game}</Badge>
-        <Badge variant="secondary">{p.members.length}/{p.maxSize}</Badge>
-        {p.queue.length > 0 && <Badge variant="warning">{p.queue.length} queued</Badge>}
-        <span className="grow" />
-        <span className="inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted-foreground" title={'Auto-disband ' + fmtAbs(deadline)}>
-          <Timer className="size-3.5" />{dueLabel}
-        </span>
-        <Mono className="hidden sm:inline">{p.id}</Mono>
-        <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <div className="border-t px-4 py-4">
-          <Segmented value={section} onChange={setSection} options={tabs} className="mb-4" />
-          {section === 'people' && <PeopleSection p={p} onUpdate={onUpdate} />}
-          {section === 'settings' && <SettingsSection p={p} voiceChannels={voiceChannels} onUpdate={onUpdate} onRemove={onRemove} />}
-          {section === 'banlist' && <BanlistSection p={p} onUpdate={onUpdate} />}
-        </div>
-      )}
-    </Card>
+    <div className="space-y-4">
+      <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <button type="button" className="cursor-pointer transition-colors hover:text-foreground" onClick={goToList}>
+          Parties
+        </button>
+        <ChevronRight className="size-3.5" />
+        <span className="font-medium text-foreground">{p.name}</span>
+      </nav>
+
+      <Button variant="ghost" size="sm" className="-ml-2" onClick={goToList}><ArrowLeft />Back to parties</Button>
+
+      <Card>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={status.variant}><StatusDot />{status.label}</Badge>
+            <span className="text-base font-semibold">{p.name}</span>
+            <Badge variant="outline">{p.game}</Badge>
+            <Badge variant="secondary">{p.members.length}/{p.maxSize}</Badge>
+            {p.queue.length > 0 && <Badge variant="warning">{p.queue.length} queued</Badge>}
+            <span className="grow" />
+            <span className="inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted-foreground" title={'Auto-disband ' + fmtAbs(deadline)}>
+              <Timer className="size-3.5" />{dueLabel}
+            </span>
+            <Mono>{p.id}</Mono>
+          </div>
+          {p.description && <p className="mt-2 text-sm text-muted-foreground">{p.description}</p>}
+        </CardContent>
+      </Card>
+
+      <Segmented value={section} onChange={setSection} options={tabs} />
+      {section === 'people' && <PeopleSection p={p} avatars={avatars} onUpdate={onUpdate} />}
+      {section === 'settings' && <SettingsSection p={p} voiceChannels={voiceChannels} onUpdate={onUpdate} onRemove={onRemove} />}
+      {section === 'banlist' && <BanlistSection p={p} onUpdate={onUpdate} />}
+    </div>
   )
 }
 
-function PeopleSection({ p, onUpdate }: { p: Party; onUpdate: (p: Party | null) => void }) {
+function PeopleSection({ p, avatars, onUpdate }: { p: Party; avatars: Avatars; onUpdate: (p: Party | null) => void }) {
   const toast = useToast()
   const confirm = useConfirm()
   const addPicker = useRef<UserPickerHandle>(null)
@@ -374,6 +475,7 @@ function PeopleSection({ p, onUpdate }: { p: Party; onUpdate: (p: Party | null) 
             key={m.userId}
             p={p}
             m={m}
+            avatarUrl={avatars[m.userId]}
             onPromote={() => call(() => api<Party>(`/parties/${p.id}/members/${m.userId}/promote`, { method: 'POST' }), 'Promoted')}
             onRemove={() => call(() => api<Party>(`/parties/${p.id}/members/${m.userId}`, { method: 'DELETE' }), 'Removed')}
             confirmPromote={() => confirm(`Promote ${m.displayName} to owner of "${p.name}"?`, 'Promote')}
@@ -392,6 +494,7 @@ function PeopleSection({ p, onUpdate }: { p: Party; onUpdate: (p: Party | null) 
                 p={p}
                 q={q}
                 idx={i}
+                avatarUrl={avatars[q.userId]}
                 onMove={dir => call(() => api<Party>(`/parties/${p.id}/queue/${q.userId}/move`, {
                   method: 'POST', body: JSON.stringify({ direction: dir }),
                 }), 'Moved')}
@@ -427,9 +530,10 @@ function PeopleSection({ p, onUpdate }: { p: Party; onUpdate: (p: Party | null) 
   )
 }
 
-function MemberRow({ p, m, onPromote, onRemove, confirmPromote }: {
+function MemberRow({ p, m, avatarUrl, onPromote, onRemove, confirmPromote }: {
   p: Party
   m: PartyMember
+  avatarUrl?: string | null
   onPromote: () => void
   onRemove: () => void
   confirmPromote: () => Promise<boolean>
@@ -437,7 +541,7 @@ function MemberRow({ p, m, onPromote, onRemove, confirmPromote }: {
   const isOwner = m.userId === p.ownerId
   return (
     <div className="flex flex-wrap items-center gap-2.5 px-3 py-2 transition-colors hover:bg-muted/40">
-      <Avatar name={m.displayName} />
+      <Avatar name={m.displayName} imageUrl={avatarUrl} />
       <div className="min-w-40 flex-1">
         <div className="flex items-center gap-1.5 text-sm">
           <span className="font-medium">{m.displayName}</span>
@@ -445,7 +549,10 @@ function MemberRow({ p, m, onPromote, onRemove, confirmPromote }: {
           {m.away && <Moon className="size-3.5 text-muted-foreground" aria-label="Marked as away (BRB)" />}
           {m.ign && <span className="text-xs text-muted-foreground">{m.ign}</span>}
         </div>
-        <Mono>{m.userId}</Mono>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>@{m.username}</span>
+          <Mono>{m.userId}</Mono>
+        </div>
       </div>
       <Button
         variant="ghost"
@@ -465,10 +572,11 @@ function MemberRow({ p, m, onPromote, onRemove, confirmPromote }: {
   )
 }
 
-function QueueRow({ p, q, idx, onMove, onApprove, onDeny }: {
+function QueueRow({ p, q, idx, avatarUrl, onMove, onApprove, onDeny }: {
   p: Party
   q: QueueEntry
   idx: number
+  avatarUrl?: string | null
   onMove: (dir: 'up' | 'down') => void
   onApprove: () => void
   onDeny: () => void
@@ -476,13 +584,16 @@ function QueueRow({ p, q, idx, onMove, onApprove, onDeny }: {
   return (
     <div className="flex flex-wrap items-center gap-2.5 px-3 py-2 transition-colors hover:bg-muted/40">
       <span className="w-4 shrink-0 text-right font-mono text-xs text-muted-foreground">{idx + 1}</span>
-      <Avatar name={q.displayName} />
+      <Avatar name={q.displayName} imageUrl={avatarUrl} />
       <div className="min-w-40 flex-1">
         <div className="flex items-center gap-1.5 text-sm">
           <span className="font-medium">{q.displayName}</span>
           {q.ign && <span className="text-xs text-muted-foreground">{q.ign}</span>}
         </div>
-        <Mono>{q.userId}</Mono>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>@{q.username}</span>
+          <Mono>{q.userId}</Mono>
+        </div>
       </div>
       <Button variant="ghost" size="icon" className="size-8" title="Move up" disabled={idx === 0} onClick={() => onMove('up')}><ArrowUp /></Button>
       <Button variant="ghost" size="icon" className="size-8" title="Move down" disabled={idx === p.queue.length - 1} onClick={() => onMove('down')}><ArrowDown /></Button>

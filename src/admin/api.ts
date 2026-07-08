@@ -6,7 +6,7 @@ import { GAMES } from '../lib/games'
 import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings } from '../store/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../store/templates'
 import { appendAudit, getAudit } from '../store/audit'
-import { getBotGuilds, getGuildChannels, getGuildMember, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
+import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 import { importFromKv } from './import'
 
 function json(body: unknown, status = 200): Response {
@@ -38,6 +38,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path === '/parties' && method === 'POST') return await createOne(env, guildId!, body)
     if (path === '/channels' && method === 'GET') return await listChannels(env, guildId!, url.searchParams.get('kind'))
     if (path === '/members/resolve' && method === 'GET') return await resolveMembers(env, guildId!, url.searchParams.get('ids'))
+    if (path === '/members/avatars' && method === 'GET') return await memberAvatars(env, guildId!, url.searchParams.get('ids'))
     if (path === '/members' && method === 'GET') return await searchMembers(env, guildId!, url.searchParams.get('q'))
     if (path === '/clear' && method === 'POST') return await clearAllParties(env, guildId!)
     if (path === '/settings' && method === 'GET') return json(await getGuildSettings(env.DB, guildId!))
@@ -181,6 +182,25 @@ async function resolveMembers(env: AppBindings, guildId: string, idsParam: strin
     }))
   }
   return json(names)
+}
+
+/**
+ * Resolve a batch of user IDs to their Discord avatar CDN URLs, so the parties
+ * page can show profile pictures instead of coloured initials. A null value
+ * means the member uses a default avatar (the UI falls back to initials).
+ * Backed by the same 6h-cached resolver the desktop client uses, so repeated
+ * detail-page loads stay cheap on Discord's API.
+ */
+async function memberAvatars(env: AppBindings, guildId: string, idsParam: string | null): Promise<Response> {
+  const ids = [...new Set((idsParam ?? '').split(',').map(s => s.trim()).filter(Boolean))].slice(0, 100)
+  const urls: Record<string, string | null> = {}
+  const BATCH = 5
+  for (let i = 0; i < ids.length; i += BATCH) {
+    await Promise.all(ids.slice(i, i + BATCH).map(async id => {
+      urls[id] = await getMemberAvatarUrl(env.DISCORD_BOT_TOKEN, guildId, id).catch(() => null)
+    }))
+  }
+  return json(urls)
 }
 
 async function getOne(env: AppBindings, guildId: string, partyId: string): Promise<Response> {
