@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchGameId, fetchLiveClientPlayers, fetchRegion,
-  lcuRequest, type ChampSelectBan, type LcuCreds,
+  lcuRequest, type ChampSelectBan, type ChampSelectCell, type LcuCreds,
 } from './lcu'
 import {
   addToParty, clearLink, fetchChampionCatalog, fetchLiveChampions, fetchSession, getAutoJoinSettings,
@@ -447,9 +447,15 @@ interface BanSnapshot {
   bans: Record<string, BanCheck>
   rawBans: ChampSelectBan[]
   members: BanMember[]
-  enriched: boolean  // whether the load-in correlation pass has run
+  cells: ChampSelectCell[]  // final champ-select cells (debug)
+  enriched: boolean         // whether the load-in correlation pass has run
 }
 let banSnapshot: BanSnapshot | null = null
+
+// A player's locked pick can be revealed later in champ select than their ban,
+// so we accumulate cellId → pick across the whole draft (reset each new cycle)
+// and stamp each ban's caster pick from it.
+let cellPicks = new Map<number, number>()
 
 function banHasUnresolved(s: BanSnapshot): boolean {
   return s.members.some(m => s.bans[m.userId] && s.bans[m.userId]!.actual == null)
@@ -497,7 +503,8 @@ async function enrichBansAtLoadIn(
     writeFileSync(join(app.getPath('userData'), 'ban-debug.json'), JSON.stringify({
       at: new Date().toISOString(),
       livePlayers: players.map(p => ({ riotId: p.riotId, championName: p.championName, team: p.team, position: p.position })),
-      rawBans: s.rawBans.map(b => ({ championId: b.championId, casterPick: b.casterPick, hasPuuid: !!b.puuid })),
+      cells: s.cells,
+      rawBans: s.rawBans.map(b => ({ championId: b.championId, casterCell: b.casterCell, casterPick: b.casterPick, team: b.team, hasPuuid: !!b.puuid })),
       members: s.members.map(m => ({ ign: m.ign, resolved: s.bans[m.userId]?.actual ?? null })),
     }, null, 2))
   } catch { /* ignore */ }
@@ -521,8 +528,8 @@ async function gameChampions(): Promise<GameView> {
 
   const phase = await fetchGameflowPhase(creds)
 
-  // A new game cycle invalidates any retained ban snapshot.
-  if (PRE_CHAMP_PHASES.has(phase)) banSnapshot = null
+  // A new game cycle invalidates any retained ban snapshot + pick accumulator.
+  if (PRE_CHAMP_PHASES.has(phase)) { banSnapshot = null; cellPicks = new Map() }
 
   const catalog = await ensureCatalog()
   const pickFor = (championId: number): ChampionPick => {
@@ -545,6 +552,10 @@ async function gameChampions(): Promise<GameView> {
   // the champ-select data couldn't (see enrichBansAtLoadIn).
   let bansByUserId: Record<string, BanCheck> = {}
   if (phase === 'ChampSelect') {
+    // Accumulate every revealed cell pick, then stamp each ban's caster pick.
+    for (const c of champSelect.cells) if (c.championId > 0) cellPicks.set(c.cellId, c.championId)
+    const rawBans = champSelect.bans.map(b => ({ ...b, casterPick: cellPicks.get(b.casterCell) || b.casterPick }))
+
     const computed: Record<string, BanCheck> = {}
     const members: BanMember[] = []
     await Promise.all(party.members.map(async (m) => {
@@ -564,7 +575,7 @@ async function gameChampions(): Promise<GameView> {
     }))
     bansByUserId = computed
     if (members.length > 0) {
-      banSnapshot = { partyId: party.id, bans: computed, rawBans: champSelect.bans, members, enriched: false }
+      banSnapshot = { partyId: party.id, bans: computed, rawBans, members, cells: champSelect.cells, enriched: false }
     }
   } else if (banSnapshot?.partyId === party.id) {
     if (IN_GAME_PHASES.has(phase) && !banSnapshot.enriched && banHasUnresolved(banSnapshot)) {

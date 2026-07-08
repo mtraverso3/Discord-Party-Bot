@@ -84,12 +84,23 @@ export interface ChampSelectBan {
   puuid: string | null
   team: 'my' | 'their'  // relative to the local player
   position: string      // normalized lowercase role, or '' if unassigned
-  casterPick: number    // champion the caster ultimately locked (0 if none yet)
+  casterCell: number    // actorCellId of the player who cast the ban
+  casterPick: number    // champion that cell had locked at capture time (0 if none)
+}
+
+/** A champ-select cell (one player slot), used to accumulate picks over time. */
+export interface ChampSelectCell {
+  cellId: number
+  team: 'my' | 'their'
+  championId: number
+  hasPuuid: boolean
+  position: string
 }
 
 export interface ChampSelectData {
   picks: ChampSelectPick[]   // hovered/locked champions, both teams
   bans: ChampSelectBan[]     // every completed ban, both teams
+  cells: ChampSelectCell[]   // both teams' cells (for pick accumulation + debug)
 }
 
 function normPosition(p: unknown): string {
@@ -106,26 +117,28 @@ function normPosition(p: unknown): string {
  * the game loads in and reveals who ended up in each slot.
  */
 export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData> {
-  const empty: ChampSelectData = { picks: [], bans: [] }
+  const empty: ChampSelectData = { picks: [], bans: [], cells: [] }
   try {
     const res = await lcuRequest(creds, 'GET', '/lol-champ-select/v1/session')
     if (res.status !== 200) return empty
     const body = res.body
 
     const picks: ChampSelectPick[] = []
+    const cells: ChampSelectCell[] = []
     const cellMeta = new Map<number, { team: 'my' | 'their'; position: string; puuid: string | null; pick: number }>()
     for (const [team, side] of [[body?.myTeam, 'my'], [body?.theirTeam, 'their']] as const) {
       if (!Array.isArray(team)) continue
       for (const cell of team) {
         const puuid: unknown = cell?.puuid
-        const hasPuuid = typeof puuid === 'string' && puuid
+        const hasPuuid = typeof puuid === 'string' && !!puuid
         const pick = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
         const pickId = Number.isFinite(pick) && pick > 0 ? pick : 0
-        if (hasPuuid && pickId > 0) picks.push({ puuid, championId: pickId })
+        if (hasPuuid && pickId > 0) picks.push({ puuid: puuid as string, championId: pickId })
         if (Number.isFinite(Number(cell?.cellId))) {
-          cellMeta.set(Number(cell.cellId), {
-            team: side, position: normPosition(cell?.assignedPosition), puuid: hasPuuid ? puuid : null, pick: pickId,
-          })
+          const cellId = Number(cell.cellId)
+          const position = normPosition(cell?.assignedPosition)
+          cellMeta.set(cellId, { team: side, position, puuid: hasPuuid ? (puuid as string) : null, pick: pickId })
+          cells.push({ cellId, team: side, championId: pickId, hasPuuid, position })
         }
       }
     }
@@ -138,18 +151,20 @@ export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData
           if (a?.type !== 'ban' || !a?.completed) continue
           const championId = Number(a?.championId ?? 0)
           if (!(championId > 0)) continue
-          const meta = cellMeta.get(Number(a?.actorCellId))
+          const casterCell = Number(a?.actorCellId)
+          const meta = cellMeta.get(casterCell)
           bans.push({
             championId,
             puuid: meta?.puuid ?? null,
             team: meta?.team ?? (a?.isAllyAction ? 'my' : 'their'),
             position: meta?.position ?? '',
+            casterCell: Number.isFinite(casterCell) ? casterCell : -1,
             casterPick: meta?.pick ?? 0,
           })
         }
       }
     }
-    return { picks, bans }
+    return { picks, bans, cells }
   } catch {
     return empty
   }
