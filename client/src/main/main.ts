@@ -520,16 +520,22 @@ async function gameChampions(): Promise<GameView> {
   // game — once the game starts the attribution is gone from the LCU.
   let bansByUserId: Record<string, BanCheck> = restoredBans ?? {}
   if (phase === 'ChampSelect') {
+    // Resolve an assigned ban's name (as pasted into the banlist) to its icon.
+    const iconByName = new Map<string, string>()
+    for (const info of Object.values(catalog?.champions ?? {})) iconByName.set(normalizeChamp(info.name), info.iconUrl)
+
     const computed: Record<string, BanCheck> = {}
     await Promise.all(party.members.map(async (m) => {
       if (!m.assignedBan) return
       const resolved = m.ign ? await resolveIgn(m.ign) : null
       const actualId = resolved ? banByPuuid.get(resolved.puuid) : undefined
-      const actual = actualId !== undefined ? pickFor(actualId).name : null
+      const actualPick = actualId !== undefined ? pickFor(actualId) : null
       computed[m.userId] = {
         assigned: m.assignedBan,
-        actual,
-        ok: actual !== null && normalizeChamp(actual) === normalizeChamp(m.assignedBan),
+        assignedIcon: iconByName.get(normalizeChamp(m.assignedBan)) ?? null,
+        actual: actualPick?.name ?? null,
+        actualIcon: actualPick?.iconUrl ?? null,
+        ok: actualPick !== null && normalizeChamp(actualPick.name) === normalizeChamp(m.assignedBan),
       }
     }))
     bansByUserId = computed

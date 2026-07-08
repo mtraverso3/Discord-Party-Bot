@@ -128,9 +128,11 @@ export type GamePhase = 'none' | 'champ-select' | 'in-game'
  *  phase); `ok` is true when it matches `assigned`. Only present during champ
  *  select — per-player ban attribution isn't available once the game starts. */
 export interface BanCheck {
-  assigned: string
-  actual: string | null
-  ok: boolean
+  assigned: string             // champion the member was told to ban
+  assignedIcon: string | null  // icon for `assigned`, when resolvable
+  actual: string | null        // champion they actually banned (null until banned)
+  actualIcon: string | null    // icon for `actual`, when known
+  ok: boolean                  // actual matches assigned
 }
 
 /** Champion picks for the current champ select or live game, cross-referenced

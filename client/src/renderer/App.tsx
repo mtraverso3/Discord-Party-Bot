@@ -432,17 +432,50 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
   )
 }
 
+/* Ban-compliance chip. A tiny champion portrait carries a corner status glyph
+   so it reads as a ban outcome, not a pick, backed by explicit "Banned …" text. */
+function BanChampIcon({ iconUrl, glyph }: { iconUrl: string | null; glyph: 'ok' | 'bad' | null }) {
+  return (
+    <span className="relative inline-block size-4 shrink-0">
+      {iconUrl
+        ? <img src={iconUrl} alt="" className="size-4 rounded-full object-cover" />
+        : <Ban className="size-4" />}
+      {glyph && (
+        <span className={`absolute -right-1 -bottom-1 grid size-2.5 place-items-center rounded-full text-white ${
+          glyph === 'ok' ? 'bg-success' : 'bg-destructive'
+        }`}>
+          {glyph === 'ok' ? <Check className="size-2" strokeWidth={3.5} /> : <X className="size-2" strokeWidth={3.5} />}
+        </span>
+      )}
+    </span>
+  )
+}
+
+// Own pill styling (not <Badge>) so the "Banned X, not Y" text isn't truncated.
+const BAN_PILL = 'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[0.68rem] font-medium whitespace-nowrap'
+
 function BanChip({ ban }: { ban: BanCheck }) {
   if (ban.actual === null) {
-    return <Badge variant="outline" title={`Assigned to ban ${ban.assigned}`}><Ban className="size-3" />{ban.assigned}</Badge>
+    return (
+      <span className={`${BAN_PILL} border-border text-muted-foreground`} title={`Assigned to ban ${ban.assigned} — not banned yet`}>
+        <BanChampIcon iconUrl={ban.assignedIcon} glyph={null} />
+        Ban {ban.assigned}
+      </span>
+    )
   }
   if (ban.ok) {
-    return <Badge variant="success" title={`Banned ${ban.assigned} as assigned`}><Check className="size-3" />{ban.assigned}</Badge>
+    return (
+      <span className={`${BAN_PILL} border-transparent bg-success-muted text-success`} title={`Banned ${ban.assigned} as assigned`}>
+        <BanChampIcon iconUrl={ban.assignedIcon} glyph="ok" />
+        Banned {ban.assigned}
+      </span>
+    )
   }
   return (
-    <Badge variant="destructive" title={`Assigned ${ban.assigned}, but banned ${ban.actual}`}>
-      <TriangleAlert className="size-3" />{ban.actual}, not {ban.assigned}
-    </Badge>
+    <span className={`${BAN_PILL} border-transparent bg-danger-muted text-destructive`} title={`Should have banned ${ban.assigned}, but banned ${ban.actual}`}>
+      <BanChampIcon iconUrl={ban.actualIcon} glyph="bad" />
+      Banned {ban.actual}, not {ban.assigned}
+    </span>
   )
 }
 
