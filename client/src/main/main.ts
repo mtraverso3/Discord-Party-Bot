@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchGameId, fetchLiveClientPlayers, fetchRegion,
@@ -460,35 +461,46 @@ function livePlayerMatchesIgn(ign: string | null, riotId: string): boolean {
 }
 
 // Second ban check, run once the game has loaded: the Live Client Data API now
-// reveals every player's team + position, so we can attribute each ban (kept
-// with its team+position slot from champ select) to the party member who ended
-// up in that slot — filling in the members the champ-select puuids couldn't.
-async function enrichBansAtLoadIn(s: BanSnapshot, pickFor: (id: number) => ChampionPick): Promise<void> {
-  if (!summoner) return
+// reveals every player's locked champion. Champions are unique across a draft,
+// so "the champion this player picked" → "the ban cast from that player's slot"
+// attributes each remaining ban to a member without needing positions (which
+// customs usually don't assign) or enemy puuids (which the client never gives).
+async function enrichBansAtLoadIn(
+  s: BanSnapshot,
+  pickFor: (id: number) => ChampionPick,
+  championIdForName: (name: string) => number | undefined,
+): Promise<void> {
   const players = await fetchLiveClientPlayers()
   if (players.length === 0) return  // API not up yet — retry on a later poll
-  const leaderIgn = summoner.tagLine ? `${summoner.gameName}#${summoner.tagLine}` : summoner.gameName
-  const leader = players.find(p => livePlayerMatchesIgn(leaderIgn, p.riotId))
-  s.enriched = true  // players are live now; don't keep re-polling this pass
-  if (!leader || !leader.team) return
+  s.enriched = true                 // players are live; this pass is our shot
 
-  // Ban per team+position slot (teams are relative to the local/leader player).
-  const banBySlot = new Map<string, number>()
-  for (const b of s.rawBans) if (b.position) banBySlot.set(`${b.team}:${b.position}`, b.championId)
+  // Map each caster's locked pick → the champion they banned.
+  const banByCasterPick = new Map<number, number>()
+  for (const b of s.rawBans) if (b.casterPick > 0) banByCasterPick.set(b.casterPick, b.championId)
 
   for (const m of s.members) {
     const cur = s.bans[m.userId]
     if (!cur || cur.actual != null) continue
     const lp = players.find(p => livePlayerMatchesIgn(m.ign, p.riotId))
-    if (!lp || !lp.position) continue
-    const championId = banBySlot.get(`${lp.team === leader.team ? 'my' : 'their'}:${lp.position}`)
-    if (championId === undefined) continue
-    const pick = pickFor(championId)
+    const pickId = lp ? championIdForName(lp.championName) : undefined
+    const bannedId = pickId !== undefined ? banByCasterPick.get(pickId) : undefined
+    if (bannedId === undefined) continue
+    const pick = pickFor(bannedId)
     s.bans[m.userId] = {
       ...cur, actual: pick.name, actualIcon: pick.iconUrl,
       ok: normalizeChamp(pick.name) === normalizeChamp(cur.assigned),
     }
   }
+
+  // Debug artifact so a failed correlation can be diagnosed without a live rerun.
+  try {
+    writeFileSync(join(app.getPath('userData'), 'ban-debug.json'), JSON.stringify({
+      at: new Date().toISOString(),
+      livePlayers: players.map(p => ({ riotId: p.riotId, championName: p.championName, team: p.team, position: p.position })),
+      rawBans: s.rawBans.map(b => ({ championId: b.championId, casterPick: b.casterPick, hasPuuid: !!b.puuid })),
+      members: s.members.map(m => ({ ign: m.ign, resolved: s.bans[m.userId]?.actual ?? null })),
+    }, null, 2))
+  } catch { /* ignore */ }
 }
 
 /**
@@ -517,6 +529,9 @@ async function gameChampions(): Promise<GameView> {
     const info = catalog?.champions[String(championId)]
     return { championId, name: info?.name ?? `Champion ${championId}`, iconUrl: info?.iconUrl ?? null }
   }
+  const nameToId = new Map<string, number>()
+  for (const info of Object.values(catalog?.champions ?? {})) nameToId.set(normalizeChamp(info.name), info.id)
+  const championIdForName = (name: string): number | undefined => nameToId.get(normalizeChamp(name))
 
   // Champ select: picks + bans, keyed by LCU puuid where the client exposes it.
   const champSelect = await fetchChampSelect(creds)
@@ -530,9 +545,6 @@ async function gameChampions(): Promise<GameView> {
   // the champ-select data couldn't (see enrichBansAtLoadIn).
   let bansByUserId: Record<string, BanCheck> = {}
   if (phase === 'ChampSelect') {
-    const iconByName = new Map<string, string>()
-    for (const info of Object.values(catalog?.champions ?? {})) iconByName.set(normalizeChamp(info.name), info.iconUrl)
-
     const computed: Record<string, BanCheck> = {}
     const members: BanMember[] = []
     await Promise.all(party.members.map(async (m) => {
@@ -540,9 +552,10 @@ async function gameChampions(): Promise<GameView> {
       const resolved = m.ign ? await resolveIgn(m.ign) : null
       const actualId = resolved ? banByPuuid.get(resolved.puuid) : undefined
       const actualPick = actualId !== undefined ? pickFor(actualId) : null
+      const assignedId = championIdForName(m.assignedBan)
       computed[m.userId] = {
         assigned: m.assignedBan,
-        assignedIcon: iconByName.get(normalizeChamp(m.assignedBan)) ?? null,
+        assignedIcon: assignedId !== undefined ? pickFor(assignedId).iconUrl : null,
         actual: actualPick?.name ?? null,
         actualIcon: actualPick?.iconUrl ?? null,
         ok: actualPick !== null && normalizeChamp(actualPick.name) === normalizeChamp(m.assignedBan),
@@ -555,7 +568,7 @@ async function gameChampions(): Promise<GameView> {
     }
   } else if (banSnapshot?.partyId === party.id) {
     if (IN_GAME_PHASES.has(phase) && !banSnapshot.enriched && banHasUnresolved(banSnapshot)) {
-      await enrichBansAtLoadIn(banSnapshot, pickFor).catch(() => { /* best effort */ })
+      await enrichBansAtLoadIn(banSnapshot, pickFor, championIdForName).catch(() => { /* best effort */ })
     }
     bansByUserId = banSnapshot.bans
   }
