@@ -404,6 +404,20 @@ function normalizeChamp(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
+// Gameflow phases that count as "in a game" (champ select is over — its ban
+// attribution is gone — but the game it produced is still going).
+const IN_GAME_PHASES = new Set([
+  'GameStart', 'InProgress', 'Reconnect', 'WaitingForStats', 'PreEndOfGame', 'EndOfGame',
+])
+// Phases before champ select — reaching one means a new cycle, so any retained
+// ban snapshot from the previous game is now stale and gets dropped.
+const PRE_CHAMP_PHASES = new Set(['None', 'Lobby', 'Matchmaking', 'ReadyCheck', 'CheckedIntoTournament'])
+
+// Ban attribution only exists in the live champ-select session, so we snapshot
+// the computed compliance there and keep serving it through the game the champ
+// select produced (keyed by party so a different party's snapshot never leaks).
+let banSnapshot: { partyId: string; bans: Record<string, BanCheck> } | null = null
+
 /**
  * Champion picks for the party's current champ select or live game.
  *
@@ -422,6 +436,16 @@ async function gameChampions(): Promise<GameView> {
 
   const phase = await fetchGameflowPhase(creds)
 
+  // A new game cycle invalidates any retained ban snapshot.
+  if (PRE_CHAMP_PHASES.has(phase)) banSnapshot = null
+  // Outside champ select, fall back to the snapshot captured during it (same party).
+  const restoredBans = phase !== 'ChampSelect' && banSnapshot?.partyId === party.id
+    ? banSnapshot.bans : null
+
+  const phaseOut: GamePhase = IN_GAME_PHASES.has(phase) ? 'in-game'
+    : phase === 'ChampSelect' ? 'champ-select'
+    : restoredBans ? 'in-game' : 'none'
+
   // Champ select: picks + ally bans, keyed by LCU puuid.
   const champSelect = await fetchChampSelect(creds)
   const csByPuuid = new Map<string, number>()
@@ -439,7 +463,7 @@ async function gameChampions(): Promise<GameView> {
   }
 
   if (csByPuuid.size === 0 && liveByRiotId.size === 0 && banByPuuid.size === 0) {
-    return { ...EMPTY_GAME, phase: phase === 'InProgress' ? 'in-game' : phase === 'ChampSelect' ? 'champ-select' : 'none' }
+    return { ...EMPTY_GAME, phase: phaseOut, bansByUserId: restoredBans ?? {} }
   }
 
   const catalog = await ensureCatalog()
@@ -491,24 +515,27 @@ async function gameChampions(): Promise<GameView> {
     if (!(key in byRiotId)) byRiotId[key] = pickFor(championId)
   }))
 
-  // Ban compliance: only meaningful during champ select, where each ban is
-  // attributed to the caster. Once the game starts that attribution is gone.
-  const bansByUserId: Record<string, BanCheck> = {}
+  // Ban compliance: computed live during champ select (where each ban is
+  // attributed to its caster), then snapshotted so it keeps showing through the
+  // game — once the game starts the attribution is gone from the LCU.
+  let bansByUserId: Record<string, BanCheck> = restoredBans ?? {}
   if (phase === 'ChampSelect') {
+    const computed: Record<string, BanCheck> = {}
     await Promise.all(party.members.map(async (m) => {
       if (!m.assignedBan) return
       const resolved = m.ign ? await resolveIgn(m.ign) : null
       const actualId = resolved ? banByPuuid.get(resolved.puuid) : undefined
       const actual = actualId !== undefined ? pickFor(actualId).name : null
-      bansByUserId[m.userId] = {
+      computed[m.userId] = {
         assigned: m.assignedBan,
         actual,
         ok: actual !== null && normalizeChamp(actual) === normalizeChamp(m.assignedBan),
       }
     }))
+    bansByUserId = computed
+    if (Object.keys(computed).length > 0) banSnapshot = { partyId: party.id, bans: computed }
   }
 
-  const phaseOut: GamePhase = phase === 'InProgress' ? 'in-game' : 'champ-select'
   return { phase: phaseOut, byUserId, byRiotId, bansByUserId }
 }
 
