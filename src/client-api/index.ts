@@ -19,7 +19,7 @@ const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 //   POST   /client/lookup      (Bearer) { riotIds } -> { players: Record<riotId, { userId, displayName } | null> }
 //   POST   /client/party/add   (Bearer) { userId } -> { ok, party? } | { ok: false, error }
 //   GET    /client/champions/catalog (Bearer) -> { version, champions: Record<id, { id, name, iconUrl }> }
-//   POST   /client/champions/live    (Bearer) { region, puuid } -> { ok, configured, live, participants: [{ puuid, championId, teamId }] }
+//   POST   /client/champions/live    (Bearer) { region, gameName, tagLine } -> { ok, configured, live, participants: [{ riotId, championId, teamId }] }
 //
 // A short-lived link code (from `/party link` in Discord) is exchanged once
 // for a long-lived bearer token tied to the Discord user, so the client stays
@@ -404,25 +404,27 @@ async function liveChampions(req: Request, env: AppBindings): Promise<Response> 
     return json({ ok: true, configured: false, live: false, participants: [] })
   }
 
-  let body: { region?: unknown; puuid?: unknown }
+  let body: { region?: unknown; gameName?: unknown; tagLine?: unknown }
   try {
     body = await req.json()
   } catch {
     return json({ ok: false, error: 'Invalid JSON body.' }, 400)
   }
   const region = typeof body.region === 'string' ? body.region.trim() : ''
-  const puuid = typeof body.puuid === 'string' ? body.puuid.trim() : ''
-  if (!region || !puuid) return json({ ok: false, error: 'region and puuid are required.' }, 400)
+  const gameName = typeof body.gameName === 'string' ? body.gameName.trim() : ''
+  const tagLine = typeof body.tagLine === 'string' ? body.tagLine.trim() : ''
+  if (!region || !gameName || !tagLine) {
+    return json({ ok: false, error: 'region, gameName and tagLine are required.' }, 400)
+  }
 
-  const platform = platformForRegion(region)
-  if (!platform) return json({ ok: false, error: `Unsupported region "${region}".` }, 400)
+  if (!platformForRegion(region)) return json({ ok: false, error: `Unsupported region "${region}".` }, 400)
 
   try {
-    const game = await fetchLiveGame(env.RIOT_API_KEY, platform, puuid)
+    const game = await fetchLiveGame(env.RIOT_API_KEY, region, gameName, tagLine)
     if (!game) return json({ ok: true, configured: true, live: false, participants: [] })
     return json({ ok: true, configured: true, live: true, participants: game.participants })
   } catch (e) {
-    console.error('spectator lookup failed', { platform, error: (e as Error).message })
+    console.error('spectator lookup failed', { region, error: (e as Error).message })
     return json({ ok: false, configured: true, error: (e as Error).message }, 502)
   }
 }
