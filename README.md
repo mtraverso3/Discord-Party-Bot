@@ -84,7 +84,7 @@ Older deployments stored state in KV + Durable Objects. After deploying the D1 v
 - **Parties** — everything the owner commands can do (edit, close/open, members, queue, banlist, disband) plus search/sort, auto-refresh, queue reordering, embed bumping, and creating parties on a member's behalf
 - **Templates** — save reusable party blueprints (title, description, game, player cap, voice channel, banlist) and spin up a party for any member in one form, without re-entering everything each time
 - **History** — every past and present party session, with a timeline of who came and went and the League games played in it (champions, teams, win/loss)
-- **Users** — inspect and edit any member's per-game IGN profile
+- **Users** — a member profile deep-linked by ID (survives refresh and is shareable): per-game IGN profile, admin notes, party history, League games played, live stats, and a jump to their current party
 - **Audit log** — the last 200 admin actions with the acting admin's email
 - **Settings** — per-guild limits enforced by the bot: max concurrent parties, default player cap, allowed games, desktop client inviters
 

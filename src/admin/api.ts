@@ -8,6 +8,7 @@ import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTempla
 import { appendAudit, getAudit } from '../store/audit'
 import * as history from '../store/history'
 import * as games from '../store/games'
+import * as notes from '../store/notes'
 import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 import { importFromKv } from './import'
 
@@ -99,6 +100,17 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
       const op = um[2] ?? ''
       if (op === '' && method === 'GET') return await getUser(env, guildId!, userId)
       if (op === '/profile' && method === 'PATCH') return await patchUserProfile(env, guildId!, userId, body)
+      if (op === '/history' && method === 'GET') return json(await history.listSessionsForUser(env.DB, guildId!, userId))
+      if (op === '/games' && method === 'GET') return json(await games.listGamesForUser(env.DB, guildId!, userId))
+      if (op === '/notes' && method === 'GET') return json(await notes.listNotes(env.DB, guildId!, userId))
+      if (op === '/notes' && method === 'POST') return await addNoteRoute(env, guildId!, userId, body, email)
+
+      const nm = op.match(/^\/notes\/(\d+)$/)
+      if (nm) {
+        const noteId = Number(nm[1]!)
+        if (method === 'PATCH')  return await updateNoteRoute(env, guildId!, noteId, body)
+        if (method === 'DELETE') return await deleteNoteRoute(env, guildId!, noteId)
+      }
     }
 
     return json({ error: 'Not found' }, 404)
@@ -428,6 +440,29 @@ async function patchUserProfile(env: AppBindings, guildId: string, userId: strin
   }
 
   return json(profile)
+}
+
+// ── User notes ────────────────────────────────────────────────────────────────
+
+const NOTE_MAX = 2000
+
+async function addNoteRoute(env: AppBindings, guildId: string, userId: string, body: any, email?: string): Promise<Response> {
+  const text = (body.body ?? '').toString().trim().slice(0, NOTE_MAX)
+  if (!text) return json({ error: 'Note body is required' }, 400)
+  const note = await notes.addNote(env.DB, guildId, userId, text, email)
+  return note ? json(note) : json({ error: 'Failed to save note' }, 500)
+}
+
+async function updateNoteRoute(env: AppBindings, guildId: string, noteId: number, body: any): Promise<Response> {
+  const text = (body.body ?? '').toString().trim().slice(0, NOTE_MAX)
+  if (!text) return json({ error: 'Note body is required' }, 400)
+  const note = await notes.updateNote(env.DB, guildId, noteId, text)
+  return note ? json(note) : json({ error: 'Note not found' }, 404)
+}
+
+async function deleteNoteRoute(env: AppBindings, guildId: string, noteId: number): Promise<Response> {
+  const ok = await notes.deleteNote(env.DB, guildId, noteId)
+  return ok ? json({ status: 'deleted' }) : json({ error: 'Note not found' }, 404)
 }
 
 async function moveQueuedRoute(env: AppBindings, guildId: string, partyId: string, userId: string, body: any): Promise<Response> {

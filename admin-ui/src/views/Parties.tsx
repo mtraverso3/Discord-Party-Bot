@@ -584,10 +584,7 @@ function MemberRow({ p, m, avatarUrl, onPromote, onRemove, confirmPromote }: {
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => {
-          sessionStorage.setItem('pb-user-lookup', m.userId)
-          location.hash = '#/users'
-        }}
+        onClick={() => { location.hash = '#/users/' + encodeURIComponent(m.userId) }}
       >
         Profile
       </Button>

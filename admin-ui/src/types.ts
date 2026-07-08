@@ -98,6 +98,21 @@ export interface UserLookup {
   member: { username: string; displayName: string } | null
 }
 
+export interface UserNote {
+  id: number
+  body: string
+  authorEmail: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface UserHistorySession extends HistorySession {
+  gameCount: number
+  wasOwner: boolean
+  firstSeenAt: number
+  lastSeenAt: number
+}
+
 export interface VoiceStatus {
   voiceChannelId: string | null
   states: { userId: string; channelId: string | null }[]

@@ -126,6 +126,59 @@ export async function listGamesForHistory(db: D1Database, historyId: number): Pr
 }
 
 /**
+ * League games from every session a user took part in, newest first. A party's
+ * reported games belong to whoever was in that party, so this is "the games
+ * played in this member's parties" — the reverse index in user_igns then lets
+ * the UI highlight which participant row is actually them.
+ */
+export async function listGamesForUser(
+  db: D1Database, guildId: string, userId: string, limit = 50,
+): Promise<PartyGame[]> {
+  const { results: games } = await db.prepare(`
+    SELECT g.* FROM party_games g
+    WHERE g.guild_id = ?1
+      AND EXISTS (
+        SELECT 1 FROM party_history_events e
+        WHERE e.history_id = g.history_id AND e.user_id = ?2
+      )
+    ORDER BY g.id DESC LIMIT ?3
+  `).bind(guildId, userId, limit).all<GameRow>()
+  if (games.length === 0) return []
+
+  const ids = games.map(g => g.id)
+  const placeholders = ids.map((_, i) => `?${i + 1}`).join(', ')
+  const { results: parts } = await db.prepare(`
+    SELECT * FROM party_game_participants WHERE game_row_id IN (${placeholders})
+  `).bind(...ids).all<{
+    game_row_id: number; puuid: string; riot_id: string
+    champion_id: number; champion_name: string; team_id: number; win: number | null
+  }>()
+
+  return games.map(g => ({
+    id: g.id,
+    matchId: g.match_id,
+    region: g.region,
+    gameId: g.game_id,
+    reportedBy: g.reported_by,
+    reportedAt: g.reported_at,
+    status: g.status,
+    resolvedAt: g.resolved_at ?? undefined,
+    queueId: g.queue_id ?? undefined,
+    gameCreation: g.game_creation ?? undefined,
+    gameDuration: g.game_duration ?? undefined,
+    error: g.error ?? undefined,
+    participants: parts.filter(p => p.game_row_id === g.id).map(p => ({
+      puuid: p.puuid,
+      riotId: p.riot_id,
+      championId: p.champion_id,
+      championName: p.champion_name,
+      teamId: p.team_id,
+      win: p.win == null ? null : !!p.win,
+    })),
+  }))
+}
+
+/**
  * Cron: resolve pending game reports via Match-v5. Finished games get their
  * participants written and go `resolved`; games the API still can't return are
  * left pending (and aged out to `failed` after PENDING_MAX_AGE_MS). Requires

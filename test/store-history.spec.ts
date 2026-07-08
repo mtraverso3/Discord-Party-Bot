@@ -105,6 +105,25 @@ describe('party history', () => {
     expect(sessions[0]!.endReason).toMatch(/inactive/)
   })
 
+  it('lists the sessions a specific user took part in, with role and activity', async () => {
+    const { guildId, party } = await makeParty()
+    await parties.joinParty(env.DB, guildId, party.id, user('a'))
+    await parties.joinParty(env.DB, guildId, party.id, user('b'))
+
+    const forA = await history.listSessionsForUser(env.DB, guildId, 'a')
+    expect(forA).toHaveLength(1)
+    expect(forA[0]!.partyId).toBe(party.id)
+    expect(forA[0]!.wasOwner).toBe(false)
+    expect(forA[0]!.firstSeenAt).toBeGreaterThan(0)
+    expect(forA[0]!.lastSeenAt).toBeGreaterThanOrEqual(forA[0]!.firstSeenAt)
+
+    const forOwner = await history.listSessionsForUser(env.DB, guildId, 'owner')
+    expect(forOwner[0]!.wasOwner).toBe(true)
+
+    // A user who was never in the party shows nothing.
+    expect(await history.listSessionsForUser(env.DB, guildId, 'nobody')).toHaveLength(0)
+  })
+
   it('keeps separate sessions when a party id is reused after disband', async () => {
     const { guildId, party } = await makeParty()
     await parties.disbandParty(env.DB, guildId, party.id, 'owner')

@@ -21,7 +21,7 @@ const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
   { id: 'parties', label: 'Parties', icon: <Swords />, desc: 'Create, inspect, and manage active parties.' },
   { id: 'templates', label: 'Templates', icon: <FileStack />, desc: 'Reusable party blueprints — build one, then spin up a party for any member.' },
   { id: 'history', label: 'History', icon: <HistoryIcon />, desc: 'Past and present parties — who joined, who left, and League games played.' },
-  { id: 'users', label: 'Users', icon: <User />, desc: 'Look up a member to inspect their IGN profile and party state.' },
+  { id: 'users', label: 'Users', icon: <User />, desc: 'Look up a member — IGN profile, admin notes, party history, and games played.' },
   { id: 'audit', label: 'Audit log', icon: <ScrollText />, desc: 'Every admin action taken through this panel.' },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon />, desc: 'Guild-wide limits enforced by the bot.' },
 ]
