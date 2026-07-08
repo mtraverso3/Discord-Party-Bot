@@ -1,6 +1,6 @@
 {
   "name": "partybot-client",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "PartyBot desktop client \u2014 League lobby invites and party verification",
   "private": true,
   "main": "dist/main.js",
