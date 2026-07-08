@@ -4,9 +4,8 @@ import {
   addAdmin, consumeAdminLinkToken, generateAdminToken, isAdmin, listAdmins,
   removeAdmin, writeAdminLinkToken,
 } from '../src/store/adminAuth'
-import { CONTINUE_PATH, handleAuth, normalizeBaseUrl, signSession, SESSION_COOKIE } from '../src/auth/session'
+import { handleAuth, normalizeBaseUrl, signSession, SESSION_COOKIE } from '../src/auth/session'
 import { handleOidc } from '../src/auth/oidc'
-import { handleAdmin } from '../src/admin'
 import { sha256B64url } from '../src/lib/jwt'
 import type { AppBindings } from '../src/types'
 
@@ -103,7 +102,7 @@ describe('/auth/login', () => {
     const res = await handleAuth(new Request(u, { redirect: 'manual' }), oidcEnv, u)
 
     expect(res.status).toBe(302)
-    expect(res.headers.get('Location')).toBe(CONTINUE_PATH)
+    expect(res.headers.get('Location')).toBe('/admin')
     expect(res.headers.get('Set-Cookie')).toContain(`${SESSION_COOKIE}=`)
   })
 
@@ -237,14 +236,5 @@ describe('normalizeBaseUrl', () => {
     expect(normalizeBaseUrl('bot.test')).toBe('https://bot.test')
     expect(normalizeBaseUrl('https://bot.test/')).toBe('https://bot.test')
     expect(normalizeBaseUrl('http://localhost:8787')).toBe('http://localhost:8787')
-  })
-})
-
-describe('/admin/continue', () => {
-  it('bounces to /admin without needing the main app JWT', async () => {
-    const u = new URL(`${BASE}/admin/continue`)
-    const res = await handleAdmin(new Request(u, { redirect: 'manual' }), oidcEnv)
-    expect(res.status).toBe(302)
-    expect(res.headers.get('Location')).toBe('/admin')
   })
 })

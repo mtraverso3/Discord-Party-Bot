@@ -15,12 +15,6 @@ import { consumeAdminLinkToken, isAdmin } from '../store/adminAuth'
 export const SESSION_COOKIE = 'pb_admin_session'
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000
 
-// Where the magic-link landing sends the browser after setting the cookie.
-// A dedicated path (not /admin directly) so it can be fronted by its own
-// single-IdP Access app that skips the provider chooser; the Worker bounces
-// it to /admin. See the README's "Skipping the provider chooser" note.
-export const CONTINUE_PATH = '/admin/continue'
-
 /**
  * Normalize a configured base URL: assume https:// when no scheme is given and
  * drop any trailing slash. Keeps the OIDC issuer valid and the `/party admin`
@@ -99,7 +93,7 @@ export async function handleAuth(req: Request, env: AppBindings, url: URL): Prom
   const value = await signSession(link.userId, link.displayName, secret)
   return new Response(null, {
     status: 302,
-    headers: { Location: CONTINUE_PATH, 'Set-Cookie': cookieHeader(value, Math.floor(SESSION_TTL_MS / 1000)) },
+    headers: { Location: '/admin', 'Set-Cookie': cookieHeader(value, Math.floor(SESSION_TTL_MS / 1000)) },
   })
 }
 
