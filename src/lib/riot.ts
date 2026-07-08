@@ -119,10 +119,15 @@ export async function fetchLiveGame(
 ): Promise<LiveGame | null> {
   const res = await fetch(
     `https://${platform}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/${encodeURIComponent(puuid)}`,
-    { headers: { 'X-Riot-Token': token } },
+    { headers: { 'X-Riot-Token': token.trim() } },
   )
   if (res.status === 404) return null      // not currently in a (spectatable) game
-  if (!res.ok) throw new Error(`spectator ${res.status}`)
+  if (!res.ok) {
+    // Surface Riot's own error text — a 400 here is usually "Exception
+    // decrypting <puuid>" (wrong/malformed puuid), which is otherwise opaque.
+    const detail = await res.text().catch(() => '')
+    throw new Error(`spectator ${res.status}: ${detail.slice(0, 300)}`)
+  }
   const body = (await res.json()) as {
     gameId: number
     participants: { puuid?: string; championId: number; teamId: number }[]

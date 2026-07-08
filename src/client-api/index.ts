@@ -421,7 +421,8 @@ async function liveChampions(req: Request, env: AppBindings): Promise<Response> 
     const game = await fetchLiveGame(env.RIOT_API_KEY, platform, puuid)
     if (!game) return json({ ok: true, configured: true, live: false, participants: [] })
     return json({ ok: true, configured: true, live: true, participants: game.participants })
-  } catch {
-    return json({ ok: false, configured: true, error: 'Live-game lookup failed.' }, 502)
+  } catch (e) {
+    console.error('spectator lookup failed', { platform, error: (e as Error).message })
+    return json({ ok: false, configured: true, error: (e as Error).message }, 502)
   }
 }
