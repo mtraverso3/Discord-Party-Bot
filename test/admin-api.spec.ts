@@ -37,6 +37,53 @@ async function resolve(ids: string): Promise<Record<string, string>> {
   return res.json()
 }
 
+describe('per-guild magic-link scoping', () => {
+  const domain = 'discord.local'
+  const scopedEmail = (uid: string, gid: string) => `${uid}@${gid}.${domain}`
+
+  it('lets a super admin (real email) reach any guild', async () => {
+    const url = new URL('http://x/admin/api/settings?guild=g1')
+    const res = await handleAdminApi(new Request(url), env, url, 'boss@example.com')
+    expect(res.status).toBe(200)
+  })
+
+  it('blocks a magic-link admin from a guild that is not theirs', async () => {
+    const url = new URL('http://x/admin/api/settings?guild=other')
+    const res = await handleAdminApi(new Request(url), env, url, scopedEmail('123', 'g1'))
+    expect(res.status).toBe(403)
+  })
+
+  it('allows a magic-link admin into their own guild', async () => {
+    const url = new URL('http://x/admin/api/settings?guild=g1')
+    const res = await handleAdminApi(new Request(url), env, url, scopedEmail('123', 'g1'))
+    expect(res.status).toBe(200)
+  })
+
+  it('forbids a magic-link admin from adding admins', async () => {
+    const url = new URL('http://x/admin/api/admins?guild=g1')
+    const res = await handleAdminApi(
+      new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"userId":"111111111111111111"}' }),
+      env, url, scopedEmail('123', 'g1'),
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it('lets a super admin add and remove per-guild admins', async () => {
+    const addUrl = new URL('http://x/admin/api/admins?guild=g1')
+    const added = await handleAdminApi(
+      new Request(addUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"userId":"111111111111111111","displayName":"A"}' }),
+      env, addUrl, 'boss@example.com',
+    )
+    expect(added.status).toBe(200)
+    const list = await added.json<any[]>()
+    expect(list.find(a => a.userId === '111111111111111111')).toBeTruthy()
+
+    const delUrl = new URL('http://x/admin/api/admins/111111111111111111?guild=g1')
+    const removed = await handleAdminApi(new Request(delUrl, { method: 'DELETE' }), env, delUrl, 'boss@example.com')
+    expect(removed.status).toBe(200)
+  })
+})
+
 describe('GET /members/resolve', () => {
   it('prefers the guild nickname, falls back to the global username, and skips unknowns', async () => {
     const names = await resolve('inguild,leftguild,ghost')

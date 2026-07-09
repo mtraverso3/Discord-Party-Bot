@@ -9,7 +9,7 @@ import { fmtAbs, relTime } from '../lib/time'
 import { useLoad } from '../lib/useLoad'
 import type { Admin } from '../types'
 
-export function Admins() {
+export function Admins({ superAdmin }: { superAdmin: boolean }) {
   const toast = useToast()
   const confirm = useConfirm()
   const { data: admins, error, setData } = useLoad(() => api<Admin[]>('/admins'))
@@ -50,22 +50,25 @@ export function Admins() {
         <CardHeader>
           <CardTitle>Discord admin allow-list</CardTitle>
           <CardDescription>
-            These Discord users can run <Mono>/party admin</Mono> to get a single-use link that signs them in to this
-            panel — no email required. Login still goes through Cloudflare Access; removing someone here cuts off access
-            at their next sign-in.
+            These Discord users can run <Mono>/party admin</Mono> to get a single-use link that signs them in to
+            <strong> this server only</strong> — no email required. Login still goes through Cloudflare Access; removing
+            someone here cuts off access at their next sign-in. Only super admins (Cloudflare Access email logins) can
+            add or remove admins.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <div className="flex-1">
-              <UserPicker
-                ref={picker}
-                placeholder="Search a member or paste a Discord user ID"
-              />
+        {superAdmin && (
+          <CardContent className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="flex-1">
+                <UserPicker
+                  ref={picker}
+                  placeholder="Search a member or paste a Discord user ID"
+                />
+              </div>
+              <Button busy={busy} onClick={() => add(picker.current?.getId() ?? '')}>Add admin</Button>
             </div>
-            <Button busy={busy} onClick={() => add(picker.current?.getId() ?? '')}>Add admin</Button>
-          </div>
-        </CardContent>
+          </CardContent>
+        )}
       </Card>
 
       {admins.length === 0 ? (
@@ -75,7 +78,7 @@ export function Admins() {
       ) : (
         <Card>
           <Table>
-            <THead><tr><th>User</th><th>Added</th><th>Added by</th><th></th></tr></THead>
+            <THead><tr><th>User</th><th>Added</th><th>Added by</th>{superAdmin && <th></th>}</tr></THead>
             <TBody>
               {admins.map(a => (
                 <tr key={a.userId}>
@@ -87,11 +90,13 @@ export function Admins() {
                     {relTime(Date.now() - a.addedAt)} ago
                   </td>
                   <td className="whitespace-nowrap text-muted-foreground">{a.addedBy || '—'}</td>
-                  <td className="text-right">
-                    <Button variant="ghost" size="icon" title="Remove admin" onClick={() => remove(a)}>
-                      <Trash2 />
-                    </Button>
-                  </td>
+                  {superAdmin && (
+                    <td className="text-right">
+                      <Button variant="ghost" size="icon" title="Remove admin" onClick={() => remove(a)}>
+                        <Trash2 />
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </TBody>

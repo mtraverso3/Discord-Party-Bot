@@ -29,12 +29,13 @@ export function normalizeBaseUrl(base: string): string {
 export interface AdminSession {
   uid: string
   name: string
+  gid: string   // guild this magic-link session is scoped to
   exp: number
 }
 
-/** Mint the signed cookie value for a Discord identity. */
-export async function signSession(uid: string, name: string, secret: string): Promise<string> {
-  return signHmac({ uid, name, exp: Date.now() + SESSION_TTL_MS }, secret)
+/** Mint the signed cookie value for a Discord identity scoped to one guild. */
+export async function signSession(uid: string, name: string, gid: string, secret: string): Promise<string> {
+  return signHmac({ uid, name, gid, exp: Date.now() + SESSION_TTL_MS }, secret)
 }
 
 /** Read + verify the admin session cookie from a request; null if absent/invalid/expired. */
@@ -42,7 +43,7 @@ export async function readSession(req: Request, secret: string): Promise<AdminSe
   const raw = parseCookie(req, SESSION_COOKIE)
   if (!raw) return null
   const s = await verifyHmac<AdminSession>(raw, secret)
-  return s && s.uid ? s : null
+  return s && s.uid && s.gid ? s : null
 }
 
 function cookieHeader(value: string, maxAgeSec: number): string {
@@ -85,12 +86,13 @@ export async function handleAuth(req: Request, env: AppBindings, url: URL): Prom
     return page('Link expired or already used', 'Magic links are single-use and last 24 hours. Run <code>/party admin</code> in Discord for a fresh one.', 410)
   }
 
-  // Re-check the allow-list at click time so de-listing takes effect immediately.
-  if (!(await isAdmin(env.DB, link.userId))) {
-    return page('Access removed', 'Your Discord account is no longer on the admin allow-list.', 403)
+  // Re-check the allow-list (for this guild) at click time so de-listing takes
+  // effect immediately.
+  if (!(await isAdmin(env.DB, link.guildId, link.userId))) {
+    return page('Access removed', 'Your Discord account is no longer on this server’s admin allow-list.', 403)
   }
 
-  const value = await signSession(link.userId, link.displayName, secret)
+  const value = await signSession(link.userId, link.displayName, link.guildId, secret)
   return new Response(null, {
     status: 302,
     headers: { Location: '/admin', 'Set-Cookie': cookieHeader(value, Math.floor(SESSION_TTL_MS / 1000)) },

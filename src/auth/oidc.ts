@@ -12,8 +12,10 @@
 //   POST /oidc/token                          Access exchanges the code for an id_token
 //   GET  /oidc/userinfo                       Access may fetch claims here too
 //
-// The id_token carries a synthetic email (`<discordId>@discord.local`) so the
-// existing Access-JWT path and audit log attribute actions to the Discord user.
+// The id_token carries a synthetic email (`<discordId>@<guildId>.discord.local`)
+// so the existing Access-JWT path and audit log attribute actions to the Discord
+// user; the guild subdomain pins a magic-link admin to the one guild that minted
+// their link (see src/admin/api.ts).
 
 import type { AppBindings } from '../types'
 import { publicJwk, signRs256, verifyRs256, sha256B64url, type RsaPrivateJwk } from '../lib/jwt'
@@ -126,13 +128,15 @@ async function authorize(req: Request, env: AppBindings, url: URL, cfg: OidcConf
       401,
     )
   }
-  // Enforce the allow-list again — a still-valid cookie shouldn't outlive removal.
-  if (!(await isAdmin(env.DB, session.uid))) {
-    return page('Access removed', 'Your Discord account is no longer on the admin allow-list.', 403)
+  // Enforce the allow-list again — a still-valid cookie shouldn't outlive removal
+  // — scoped to the guild the session was minted for.
+  if (!(await isAdmin(env.DB, session.gid, session.uid))) {
+    return page('Access removed', 'Your Discord account is no longer on this server’s admin allow-list.', 403)
   }
 
   const code = generateOidcCode()
   await writeOidcCode(env.DB, code, {
+    guildId: session.gid,
     userId: session.uid,
     displayName: session.name,
     nonce,
@@ -182,7 +186,11 @@ async function token(req: Request, env: AppBindings, cfg: OidcConfig): Promise<R
   }
 
   const now = Math.floor(Date.now() / 1000)
-  const email = `${rec.userId}@${cfg.emailDomain}`
+  // Encode the scoped guild into the synthetic email's subdomain. The admin API
+  // parses it back out to pin a magic-link admin to their one guild; the Access
+  // JWT reliably forwards `email`, so this is how the scope survives the hop
+  // through Cloudflare Access. Super admins log in with a real email instead.
+  const email = `${rec.userId}@${rec.guildId}.${cfg.emailDomain}`
   const base = {
     iss: cfg.issuer,
     sub: rec.userId,

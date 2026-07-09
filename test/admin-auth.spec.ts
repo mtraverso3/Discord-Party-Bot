@@ -12,6 +12,7 @@ import type { AppBindings } from '../src/types'
 const CLIENT_ID = 'cf-access'
 const CLIENT_SECRET = 'sup3r-secret'
 const TEAM = 'myteam'
+const GUILD = '900000000000000001'
 const REDIRECT = `https://${TEAM}.cloudflareaccess.com/cdn-cgi/access/callback`
 const BASE = 'https://bot.test'
 
@@ -45,8 +46,8 @@ function decodeJwt(jwt: string): any {
   return JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)))
 }
 
-async function cookieFor(uid: string, name = 'Someone'): Promise<string> {
-  return `${SESSION_COOKIE}=${await signSession(uid, name, oidcEnv.ADMIN_SESSION_SECRET!)}`
+async function cookieFor(uid: string, name = 'Someone', gid = GUILD): Promise<string> {
+  return `${SESSION_COOKIE}=${await signSession(uid, name, gid, oidcEnv.ADMIN_SESSION_SECRET!)}`
 }
 
 async function authorize(cookie: string | null, extra: Record<string, string> = {}): Promise<Response> {
@@ -71,32 +72,43 @@ async function exchange(body: Record<string, string>): Promise<Response> {
 }
 
 describe('admin allow-list store', () => {
-  it('adds, checks, lists, and removes admins', async () => {
-    expect(await isAdmin(env.DB, '111111111111111111')).toBe(false)
-    await addAdmin(env.DB, { userId: '111111111111111111', displayName: 'Alice', addedBy: 'root@x' })
-    expect(await isAdmin(env.DB, '111111111111111111')).toBe(true)
+  it('adds, checks, lists, and removes admins per guild', async () => {
+    expect(await isAdmin(env.DB, GUILD, '111111111111111111')).toBe(false)
+    await addAdmin(env.DB, { guildId: GUILD, userId: '111111111111111111', displayName: 'Alice', addedBy: 'root@x' })
+    expect(await isAdmin(env.DB, GUILD, '111111111111111111')).toBe(true)
 
-    const list = await listAdmins(env.DB)
+    const list = await listAdmins(env.DB, GUILD)
     expect(list.find(a => a.userId === '111111111111111111')?.displayName).toBe('Alice')
 
-    expect(await removeAdmin(env.DB, '111111111111111111')).toBe(true)
-    expect(await isAdmin(env.DB, '111111111111111111')).toBe(false)
-    expect(await removeAdmin(env.DB, '111111111111111111')).toBe(false)
+    expect(await removeAdmin(env.DB, GUILD, '111111111111111111')).toBe(true)
+    expect(await isAdmin(env.DB, GUILD, '111111111111111111')).toBe(false)
+    expect(await removeAdmin(env.DB, GUILD, '111111111111111111')).toBe(false)
   })
 
-  it('magic-link tokens are single-use', async () => {
+  it('scopes admin access to a single guild', async () => {
+    const OTHER = '900000000000000002'
+    await addAdmin(env.DB, { guildId: GUILD, userId: '121212121212121212', displayName: 'Scoped', addedBy: null })
+    expect(await isAdmin(env.DB, GUILD, '121212121212121212')).toBe(true)
+    // Same user is NOT an admin on a different guild.
+    expect(await isAdmin(env.DB, OTHER, '121212121212121212')).toBe(false)
+    expect((await listAdmins(env.DB, OTHER)).find(a => a.userId === '121212121212121212')).toBeUndefined()
+  })
+
+  it('magic-link tokens are single-use and carry the guild', async () => {
     const token = generateAdminToken()
-    await writeAdminLinkToken(env.DB, token, { userId: '222', displayName: 'Bob' })
-    expect((await consumeAdminLinkToken(env.DB, token))?.userId).toBe('222')
+    await writeAdminLinkToken(env.DB, token, { guildId: GUILD, userId: '222', displayName: 'Bob' })
+    const consumed = await consumeAdminLinkToken(env.DB, token)
+    expect(consumed?.userId).toBe('222')
+    expect(consumed?.guildId).toBe(GUILD)
     expect(await consumeAdminLinkToken(env.DB, token)).toBeNull()
   })
 })
 
 describe('/auth/login', () => {
   it('consumes a valid token and sets the session cookie', async () => {
-    await addAdmin(env.DB, { userId: '333333333333333333', displayName: 'Carol', addedBy: null })
+    await addAdmin(env.DB, { guildId: GUILD, userId: '333333333333333333', displayName: 'Carol', addedBy: null })
     const token = generateAdminToken()
-    await writeAdminLinkToken(oidcEnv.DB, token, { userId: '333333333333333333', displayName: 'Carol' })
+    await writeAdminLinkToken(oidcEnv.DB, token, { guildId: GUILD, userId: '333333333333333333', displayName: 'Carol' })
 
     const u = new URL(`${BASE}/auth/login?token=${token}`)
     const res = await handleAuth(new Request(u, { redirect: 'manual' }), oidcEnv, u)
@@ -114,7 +126,7 @@ describe('/auth/login', () => {
 
   it('refuses a token for a de-listed user', async () => {
     const token = generateAdminToken()
-    await writeAdminLinkToken(oidcEnv.DB, token, { userId: '999', displayName: 'Ghost' }) // never added
+    await writeAdminLinkToken(oidcEnv.DB, token, { guildId: GUILD, userId: '999', displayName: 'Ghost' }) // never added
     const u = new URL(`${BASE}/auth/login?token=${token}`)
     const res = await handleAuth(new Request(u), oidcEnv, u)
     expect(res.status).toBe(403)
@@ -125,7 +137,7 @@ describe('OIDC provider', () => {
   const UID = '444444444444444444'
 
   beforeAll(async () => {
-    await addAdmin(env.DB, { userId: UID, displayName: 'Dave', addedBy: null })
+    await addAdmin(env.DB, { guildId: GUILD, userId: UID, displayName: 'Dave', addedBy: null })
   })
 
   it('publishes discovery + jwks', async () => {
@@ -166,7 +178,7 @@ describe('OIDC provider', () => {
     const tok = await tokRes.json<any>()
     const claims = decodeJwt(tok.id_token)
     expect(claims.sub).toBe(UID)
-    expect(claims.email).toBe(`${UID}@discord.local`)
+    expect(claims.email).toBe(`${UID}@${GUILD}.discord.local`)
     expect(claims.aud).toBe(CLIENT_ID)
     expect(claims.iss).toBe(BASE)
     expect(claims.name).toBe('Dave')

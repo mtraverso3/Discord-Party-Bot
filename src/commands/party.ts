@@ -62,7 +62,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
         case 'link':    return await link(c, guildId, userId)
-        case 'admin':   return await adminLink(c, userId)
+        case 'admin':   return await adminLink(c, guildId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
       }
     } catch (e) {
@@ -546,21 +546,21 @@ async function link(c: CommandContext<AppEnv>, guildId: string, userId: string) 
 
 // ── /party admin ────────────────────────────────────────────────────────────
 
-async function adminLink(c: CommandContext<AppEnv>, userId: string) {
+async function adminLink(c: CommandContext<AppEnv>, guildId: string, userId: string) {
   const base = c.env.PUBLIC_BASE_URL
   if (!base || !c.env.ADMIN_SESSION_SECRET) {
     return c.followup({ content: 'Admin login is not configured on this bot.', flags: 64 })
   }
-  if (!(await isAdmin(c.env.DB, userId))) {
+  if (!(await isAdmin(c.env.DB, guildId, userId))) {
     return c.followup({
-      content: "You're not on the admin allow-list. Ask an existing admin to add you in the admin panel's **Admins** page.",
+      content: "You're not on this server's admin allow-list. Ask a super admin to add you in the admin panel's **Admins** page.",
       flags: 64,
     })
   }
 
   const { displayName } = extractMemberInfo(c.interaction)
   const token = generateAdminToken()
-  await writeAdminLinkToken(c.env.DB, token, { userId, displayName })
+  await writeAdminLinkToken(c.env.DB, token, { guildId, userId, displayName })
   const url = `\<${normalizeBaseUrl(base)}/auth/login?token=${token}\>`
 
   return c.followup({

@@ -20,30 +20,70 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
+export interface AdminIdentity {
+  /** True for Cloudflare Access email logins — full, cross-guild access. */
+  superAdmin: boolean
+  /** For magic-link admins, the one guild they're scoped to. */
+  guildId?: string
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Classify the Access-authenticated identity. Magic-link admins arrive with the
+ * synthetic email the Worker's OIDC provider minted — `<userId>@<guildId>.<domain>`
+ * — which pins them to that one guild. Any other email (or none) is a super
+ * admin (real Cloudflare Access SSO) with unrestricted, cross-guild access.
+ */
+export function adminIdentity(env: AppBindings, email?: string): AdminIdentity {
+  const domain = env.OIDC_EMAIL_DOMAIN || 'discord.local'
+  const m = email?.match(new RegExp(`^\\d+@([^@.]+)\\.${escapeRegex(domain)}$`))
+  return m ? { superAdmin: false, guildId: m[1] } : { superAdmin: true }
+}
+
 export async function handleAdminApi(req: Request, env: AppBindings, url: URL, email?: string): Promise<Response> {
   const guildId = url.searchParams.get('guild')
-  // The admin allow-list is a global capability, not per-guild, so its routes
-  // (and the other cross-guild endpoints) don't require a ?guild= param.
-  const guildless = url.pathname.endsWith('/me') || url.pathname.endsWith('/guilds')
-    || url.pathname.endsWith('/import-kv') || url.pathname.includes('/admin/api/admins')
+  const identity = adminIdentity(env, email)
+
+  const path = url.pathname.slice('/admin/api'.length)
+  const method = req.method
+
+  // Cross-guild endpoints don't need a ?guild= param. Everything else (including
+  // the now per-guild admin allow-list) is scoped to a specific guild.
+  const guildless = path === '/me' || path === '/guilds' || path === '/import-kv'
   if (!guildId && !guildless) {
     return json({ error: 'guild query param required' }, 400)
   }
 
-  const path = url.pathname.slice('/admin/api'.length)
-  const method = req.method
+  // Magic-link admins are pinned to the single guild that minted their link.
+  // Super admins (real CF Access email) are unrestricted — the status quo.
+  if (!identity.superAdmin) {
+    if (path === '/import-kv') return json({ error: 'Forbidden — super admins only' }, 403)
+    if (guildId && guildId !== identity.guildId) {
+      return json({ error: 'Forbidden — outside your guild' }, 403)
+    }
+    // Managing the allow-list (adding/removing admins) is reserved to super admins.
+    const isAdminMutation = path === '/admins' && method === 'POST'
+      || /^\/admins\/[^/]+$/.test(path) && method === 'DELETE'
+    if (isAdminMutation) {
+      return json({ error: 'Only super admins can manage the admin allow-list' }, 403)
+    }
+  }
+
   const body = (method === 'POST' || method === 'PATCH') && req.headers.get('content-type')?.includes('json')
     ? await req.json<any>().catch(() => ({}))
     : {}
 
   const route = async (): Promise<Response> => {
-    if (path === '/me' && method === 'GET') return json({ email })
-    if (path === '/guilds' && method === 'GET') return await listGuilds(env)
+    if (path === '/me' && method === 'GET') return json({ email, superAdmin: identity.superAdmin, guildId: identity.guildId })
+    if (path === '/guilds' && method === 'GET') return await listGuilds(env, identity)
     if (path === '/import-kv' && method === 'POST') return await importFromKv(env)
-    if (path === '/admins' && method === 'GET') return json(await listAdmins(env.DB))
-    if (path === '/admins' && method === 'POST') return await addAdminRoute(env, body, email)
+    if (path === '/admins' && method === 'GET') return json(await listAdmins(env.DB, guildId!))
+    if (path === '/admins' && method === 'POST') return await addAdminRoute(env, guildId!, body, email)
     const adm = path.match(/^\/admins\/([^/]+)$/)
-    if (adm && method === 'DELETE') return await removeAdminRoute(env, adm[1]!)
+    if (adm && method === 'DELETE') return await removeAdminRoute(env, guildId!, adm[1]!)
     if (path === '/log' && method === 'GET') return json(await getAudit(env.DB, guildId!))
     if (path === '/history' && method === 'GET') return await listHistory(env, guildId!, url.searchParams)
     const hm = path.match(/^\/history\/([^/]+)$/)
@@ -191,14 +231,16 @@ async function partyGames(env: AppBindings, guildId: string, partyId: string): P
   return json({ historyId, games: await games.listGamesForHistory(env.DB, historyId) })
 }
 
-async function listGuilds(env: AppBindings): Promise<Response> {
+async function listGuilds(env: AppBindings, identity: AdminIdentity): Promise<Response> {
   const guilds = await getBotGuilds(env.DISCORD_BOT_TOKEN).catch(() => [])
-  return json(guilds.map(g => ({ id: g.id, name: g.name, icon: g.icon })))
+  // Magic-link admins only ever see the one guild they're scoped to.
+  const scoped = identity.superAdmin ? guilds : guilds.filter(g => g.id === identity.guildId)
+  return json(scoped.map(g => ({ id: g.id, name: g.name, icon: g.icon })))
 }
 
-// ── Admin allow-list (Discord-identity login) ──────────────────────────────────
+// ── Admin allow-list (per-guild Discord-identity login) ─────────────────────────
 
-async function addAdminRoute(env: AppBindings, body: any, email?: string): Promise<Response> {
+async function addAdminRoute(env: AppBindings, guildId: string, body: any, email?: string): Promise<Response> {
   const userId = (body.userId ?? '').toString().trim()
   if (!/^\d{15,21}$/.test(userId)) return json({ error: 'A valid Discord user ID is required' }, 400)
 
@@ -210,12 +252,12 @@ async function addAdminRoute(env: AppBindings, body: any, email?: string): Promi
     displayName = user ? (user.global_name ?? user.username) : userId
   }
 
-  await addAdmin(env.DB, { userId, displayName, addedBy: email ?? null })
-  return json(await listAdmins(env.DB))
+  await addAdmin(env.DB, { guildId, userId, displayName, addedBy: email ?? null })
+  return json(await listAdmins(env.DB, guildId))
 }
 
-async function removeAdminRoute(env: AppBindings, userId: string): Promise<Response> {
-  const ok = await removeAdmin(env.DB, userId)
+async function removeAdminRoute(env: AppBindings, guildId: string, userId: string): Promise<Response> {
+  const ok = await removeAdmin(env.DB, guildId, userId)
   return ok ? json({ status: 'removed' }) : json({ error: 'Not on the admin list' }, 404)
 }
 

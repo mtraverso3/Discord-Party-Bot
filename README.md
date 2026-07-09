@@ -105,7 +105,9 @@ To hack on the UI itself: run `wrangler dev` in the repo root and `npm run dev` 
 
 Lets you allow specific **Discord users** into the admin UI without giving them an email in the Access policy — and without any Discord OAuth. Cloudflare Access still fronts `/admin*`; the difference is only *how* a session is obtained.
 
-**How it works.** An allow-listed user runs `/party admin` and gets a single-use link. Opening it drops a signed 24h session cookie (the Discord slash-command interaction *is* the proof of identity). From there the Worker acts as a small OIDC identity provider: hitting `/admin` bounces through Cloudflare Access → the Worker's `/oidc/authorize`, which reads that cookie and issues Access an identity of `<discordId>@<domain>`. Access mints its own JWT as usual, so the existing in-Worker verification and audit trail are unchanged — actions are attributed to the Discord user (shown by name on the **Admins**/**Audit** pages). Email SSO keeps working alongside this. The OIDC and login endpoints (`/oidc/*`, `/auth/*`, `/.well-known/openid-configuration`) live **outside** the Access application so the browser and Access can reach them; keep the main Access app scoped to `/admin*` only.
+**Super admins vs. magic-link admins.** Signing in with a real email through Cloudflare Access makes you a **super admin**: you can see and manage every guild and are the only one who can add or remove magic-link admins. **Magic-link admins** (added per guild in the **Admins** page and signed in via `/party admin`) are scoped to the single guild that granted them access — they only ever see that one server and can't touch the allow-list.
+
+**How it works.** A guild's allow-listed user runs `/party admin` in that guild and gets a single-use link. Opening it drops a signed 24h session cookie pinned to that guild (the Discord slash-command interaction *is* the proof of identity). From there the Worker acts as a small OIDC identity provider: hitting `/admin` bounces through Cloudflare Access → the Worker's `/oidc/authorize`, which reads that cookie and issues Access an identity of `<discordId>@<guildId>.<domain>`. The guild subdomain is how the scope survives the hop through Access — the admin API parses it back out to pin the session to that one guild. Access mints its own JWT as usual, so the existing in-Worker verification and audit trail are unchanged — actions are attributed to the Discord user (shown by name on the **Admins**/**Audit** pages). Email SSO keeps working alongside this. The OIDC and login endpoints (`/oidc/*`, `/auth/*`, `/.well-known/openid-configuration`) live **outside** the Access application so the browser and Access can reach them; keep the main Access app scoped to `/admin*` only.
 
 **Setup:**
 
@@ -128,14 +130,14 @@ Lets you allow specific **Discord users** into the admin UI without giving them 
    - **Certificate URL**: `https://<your-domain>/oidc/jwks`
    - Enable **PKCE**. Save, then **Test** — it should sign in cleanly once a session cookie exists.
 4. On the Access application covering `/admin*`, add this OIDC provider as an allowed login method (keep your email SSO method too if you want both). The Worker's allow-list is the real gate, so a broad "allow everyone via this IdP" policy rule is fine.
-5. Seed the first admin (bootstrap — after this, admins add each other in the UI):
+5. Seed a magic-link admin for a specific guild (super admins who sign in with an allowed email don't need seeding — they can add magic-link admins per guild from the UI):
    ```
    wrangler d1 execute partybot --remote --command \
-     "INSERT INTO admin_users (user_id, display_name, added_at) VALUES ('YOUR_DISCORD_ID', 'You', unixepoch()*1000)"
+     "INSERT INTO admin_users (guild_id, user_id, display_name, added_at) VALUES ('YOUR_GUILD_ID', 'YOUR_DISCORD_ID', 'You', unixepoch()*1000)"
    ```
-6. Run `/party admin` in Discord and open the link. Manage the allow-list afterward from the admin UI's **Admins** page.
+6. Run `/party admin` in that guild and open the link. Super admins manage each guild's allow-list from the admin UI's **Admins** page.
 
-Removing a user from the allow-list cuts them off at their next Access re-auth (the `/oidc/authorize` step re-checks the list even against a still-valid cookie). All the login credentials are short-lived and swept by the existing cron.
+Removing a user from a guild's allow-list cuts them off at their next Access re-auth (the `/oidc/authorize` step re-checks the list even against a still-valid cookie). All the login credentials are short-lived and swept by the existing cron.
 
 ## Desktop client (optional)
 
