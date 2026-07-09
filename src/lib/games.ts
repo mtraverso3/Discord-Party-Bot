@@ -6,5 +6,6 @@ export const GAMES = [
   { name: 'Goose Goose Duck', value: 'Goose Goose Duck' },
   { name: 'Valorant', value: 'Valorant' },
   { name: 'Overwatch', value: 'Overwatch' },
+  { name: 'Meccha Chameleon', value: 'Meccha Chameleon' },
   { name: 'Other', value: 'Other' },
 ] as const
