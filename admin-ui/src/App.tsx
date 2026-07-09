@@ -24,7 +24,7 @@ const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
   { id: 'history', label: 'History', icon: <HistoryIcon />, desc: 'Past and present parties — who joined, who left, and League games played.' },
   { id: 'users', label: 'Users', icon: <User />, desc: 'Look up a member — IGN profile, admin notes, party history, and games played.' },
   { id: 'audit', label: 'Audit log', icon: <ScrollText />, desc: 'Every admin action taken through this panel.' },
-  { id: 'admins', label: 'Admins', icon: <ShieldCheck />, desc: 'Discord users allowed to sign in to this panel via /party admin.' },
+  { id: 'admins', label: 'Admins', icon: <ShieldCheck />, desc: 'Discord users allowed to sign in to this server via /party admin.' },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon />, desc: 'Guild-wide limits enforced by the bot.' },
 ]
 
@@ -41,6 +41,7 @@ export function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('pb-theme') || 'light')
   const [tab, setTab] = useState(currentTab)
   const [email, setEmail] = useState('')
+  const [superAdmin, setSuperAdmin] = useState(true)
   const [guild, setGuild] = useState<GuildInfo | null>(null)
   const [expired, setExpired] = useState(false)
 
@@ -53,7 +54,10 @@ export function App() {
     onSessionExpired(() => setExpired(true))
     const onHash = () => setTab(currentTab())
     window.addEventListener('hashchange', onHash)
-    api<{ email?: string }>('/me').then(r => { if (r?.email) setEmail(r.email) }).catch(() => {})
+    api<{ email?: string; superAdmin?: boolean }>('/me').then(r => {
+      if (r?.email) setEmail(r.email)
+      setSuperAdmin(r?.superAdmin !== false)
+    }).catch(() => {})
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
@@ -111,7 +115,7 @@ export function App() {
               guild={guild}
               themeButton={themeButton}
             >
-              <TabView tab={tab} />
+              <TabView tab={tab} superAdmin={superAdmin} />
             </Shell>
           )}
         </GuildDataProvider>
@@ -240,14 +244,14 @@ function GuildIcon({ guild }: { guild: GuildInfo | null }) {
   )
 }
 
-function TabView({ tab }: { tab: string }) {
+function TabView({ tab, superAdmin }: { tab: string; superAdmin: boolean }) {
   switch (tab) {
     case 'parties': return <Parties />
     case 'templates': return <Templates />
     case 'history': return <History />
     case 'users': return <Users />
     case 'audit': return <Audit />
-    case 'admins': return <Admins />
+    case 'admins': return <Admins superAdmin={superAdmin} />
     case 'settings': return <Settings />
     default: return <Dashboard />
   }
