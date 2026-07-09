@@ -47,7 +47,7 @@ export function Admins({ superAdmin }: { superAdmin: boolean }) {
   return (
     <div className="max-w-3xl space-y-4">
       <Card>
-        <CardHeader className={!superAdmin ? 'pb-5' : undefined}>
+        <CardHeader className={!superAdmin ? 'pb-4' : undefined}>
           <CardTitle>Discord admin allow-list</CardTitle>
           <CardDescription>
             These Discord users can run <Mono>/party admin</Mono> to get a single-use link that signs them in to
