@@ -47,13 +47,11 @@ export function Admins({ superAdmin }: { superAdmin: boolean }) {
   return (
     <div className="max-w-3xl space-y-4">
       <Card>
-        <CardHeader>
+        <CardHeader className={!superAdmin ? 'pb-5' : undefined}>
           <CardTitle>Discord admin allow-list</CardTitle>
           <CardDescription>
             These Discord users can run <Mono>/party admin</Mono> to get a single-use link that signs them in to
-            <strong> this server only</strong> — no email required. Login still goes through Cloudflare Access; removing
-            someone here cuts off access at their next sign-in. Only super admins (Cloudflare Access email logins) can
-            add or remove admins.
+            <strong> this server only</strong>. Only super admins can add or remove admins.
           </CardDescription>
         </CardHeader>
         {superAdmin && (
