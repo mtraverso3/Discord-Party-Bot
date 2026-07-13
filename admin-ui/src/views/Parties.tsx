@@ -1,6 +1,7 @@
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Crown, Megaphone, Moon, Plus, RefreshCw, Search, Swords, Timer, Trash2, Volume2 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Crown, Megaphone, Moon, Plus, RefreshCw, Search, Swords, Timer, Trash2, Volume1, Volume2, VolumeX } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
+import { cn } from '../lib/cn'
 import { GAMES } from '../games'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
@@ -464,7 +465,7 @@ function PeopleSection({ p, avatars, onUpdate }: { p: Party; avatars: Avatars; o
   const toast = useToast()
   const confirm = useConfirm()
   const addPicker = useRef<UserPickerHandle>(null)
-  const [voiceInfo, setVoiceInfo] = useState('')
+  const [voice, setVoice] = useState<VoiceStatus | null>(null)
   const [voiceBusy, setVoiceBusy] = useState(false)
 
   const call = async (fn: () => Promise<Party>, okMsg: string) => {
@@ -477,19 +478,7 @@ function PeopleSection({ p, avatars, onUpdate }: { p: Party; avatars: Avatars; o
   const checkVoice = async () => {
     setVoiceBusy(true)
     try {
-      const v = await api<VoiceStatus>('/parties/' + p.id + '/voice')
-      const nameOf = (id: string) => p.members.find(x => x.userId === id)?.displayName ?? id
-      const inLinked = v.states.filter(s => v.voiceChannelId && s.channelId === v.voiceChannelId)
-      const elsewhere = v.states.filter(s => s.channelId && s.channelId !== v.voiceChannelId)
-      const offline = v.states.filter(s => !s.channelId)
-      const parts: string[] = []
-      if (v.voiceChannelId) {
-        parts.push(`🔊 ${inLinked.length}/${v.states.length} in linked VC` +
-          (inLinked.length ? ': ' + inLinked.map(s => nameOf(s.userId)).join(', ') : ''))
-      }
-      if (elsewhere.length) parts.push('elsewhere: ' + elsewhere.map(s => nameOf(s.userId)).join(', '))
-      if (offline.length) parts.push('not in voice: ' + offline.map(s => nameOf(s.userId)).join(', '))
-      setVoiceInfo(parts.join(' · ') || 'No members in voice.')
+      setVoice(await api<VoiceStatus>('/parties/' + p.id + '/voice'))
     } catch (e) { toast((e as Error).message, 'err') }
     setVoiceBusy(false)
   }
@@ -558,8 +547,42 @@ function PeopleSection({ p, avatars, onUpdate }: { p: Party; avatars: Avatars; o
         >
           <Megaphone />Bump embed
         </Button>
-        {voiceInfo && <span className="text-xs text-muted-foreground">{voiceInfo}</span>}
       </div>
+      {voice && <VoiceReport voice={voice} members={p.members} />}
+    </div>
+  )
+}
+
+/** Structured breakdown of where each party member is in voice. */
+function VoiceReport({ voice, members }: { voice: VoiceStatus; members: PartyMember[] }) {
+  const nameOf = (id: string) => members.find(x => x.userId === id)?.displayName ?? id
+  const inLinked = voice.states.filter(s => voice.voiceChannelId && s.channelId === voice.voiceChannelId)
+  const elsewhere = voice.states.filter(s => s.channelId && s.channelId !== voice.voiceChannelId)
+  const notInVoice = voice.states.filter(s => !s.channelId)
+
+  const groups: { key: string; icon: ReactNode; label: string; ids: string[]; tone: string }[] = [
+    { key: 'linked', icon: <Volume2 />, label: voice.voiceChannelId ? 'In linked voice' : 'In voice', ids: (voice.voiceChannelId ? inLinked : elsewhere).map(s => s.userId), tone: 'text-success' },
+    ...(voice.voiceChannelId ? [{ key: 'elsewhere', icon: <Volume1 />, label: 'In another channel', ids: elsewhere.map(s => s.userId), tone: 'text-warning' }] : []),
+    { key: 'none', icon: <VolumeX />, label: 'Not in voice', ids: notInVoice.map(s => s.userId), tone: 'text-muted-foreground' },
+  ]
+  const total = voice.states.length
+
+  return (
+    <div className="mt-3 divide-y rounded-lg border text-sm">
+      {groups.map(g => (
+        <div key={g.key} className="flex items-start gap-2.5 px-3 py-2.5">
+          <span className={cn('mt-0.5 shrink-0 [&_svg]:size-4', g.tone)}>{g.icon}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-medium">{g.label}</span>
+              <span className="text-xs text-muted-foreground">{g.ids.length}/{total}</span>
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {g.ids.length ? g.ids.map(nameOf).join(', ') : '—'}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
