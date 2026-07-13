@@ -50,6 +50,12 @@ export async function addAdmin(
   `).bind(entry.guildId, entry.userId, entry.displayName, entry.addedBy, Date.now()).run()
 }
 
+/** Record a successful magic-link login. Not surfaced in the UI. */
+export async function touchAdminLogin(db: D1Database, guildId: string, userId: string): Promise<void> {
+  await db.prepare('UPDATE admin_users SET last_login_at = ?3 WHERE guild_id = ?1 AND user_id = ?2')
+    .bind(guildId, userId, Date.now()).run()
+}
+
 export async function removeAdmin(db: D1Database, guildId: string, userId: string): Promise<boolean> {
   const res = await db.prepare('DELETE FROM admin_users WHERE guild_id = ?1 AND user_id = ?2')
     .bind(guildId, userId).run()
