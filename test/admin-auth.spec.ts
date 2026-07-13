@@ -116,6 +116,11 @@ describe('/auth/login', () => {
     expect(res.status).toBe(302)
     expect(res.headers.get('Location')).toBe('/admin')
     expect(res.headers.get('Set-Cookie')).toContain(`${SESSION_COOKIE}=`)
+
+    // The login is recorded on the admin row (not surfaced in the UI).
+    const row = await env.DB.prepare('SELECT last_login_at FROM admin_users WHERE guild_id = ?1 AND user_id = ?2')
+      .bind(GUILD, '333333333333333333').first<{ last_login_at: number | null }>()
+    expect(row?.last_login_at).toBeTypeOf('number')
   })
 
   it('rejects an unknown/used token', async () => {

@@ -10,7 +10,7 @@
 
 import type { AppBindings } from '../types'
 import { signHmac, verifyHmac } from '../lib/jwt'
-import { consumeAdminLinkToken, isAdmin } from '../store/adminAuth'
+import { consumeAdminLinkToken, isAdmin, touchAdminLogin } from '../store/adminAuth'
 
 export const SESSION_COOKIE = 'pb_admin_session'
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000
@@ -91,6 +91,8 @@ export async function handleAuth(req: Request, env: AppBindings, url: URL): Prom
   if (!(await isAdmin(env.DB, link.guildId, link.userId))) {
     return page('Access removed', 'Your Discord account is no longer on this server’s admin allow-list.', 403)
   }
+
+  await touchAdminLogin(env.DB, link.guildId, link.userId)
 
   const value = await signSession(link.userId, link.displayName, link.guildId, secret)
   return new Response(null, {
