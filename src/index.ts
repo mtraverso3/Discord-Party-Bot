@@ -14,6 +14,7 @@ import { sweepInactiveParties } from './store/parties'
 import { sweepExpiredAuth } from './store/clientAuth'
 import { sweepExpiredAdminAuth } from './store/adminAuth'
 import { resolvePendingGames } from './store/games'
+import { landingPage } from './landing'
 
 const inner = new DiscordHono<AppEnv>()
   .command('party', handleParty)
@@ -46,6 +47,9 @@ export default {
     if (url.pathname.startsWith('/auth/')) {
       return handleAuth(req, env, url)
     }
+
+    // Public landing page — replaces discord-hono's default placeholder at `/`.
+    if (req.method === 'GET' && url.pathname === '/') return landingPage()
 
     if (req.method !== 'POST') return inner.fetch(req, env as any, ctx)
 
