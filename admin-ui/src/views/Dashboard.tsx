@@ -39,8 +39,8 @@ export function Dashboard() {
             <CardContent className="pt-3"><DisbandsSoon parties={parties} /></CardContent>
           </Card>
           <Card className="md:col-span-2">
-            <CardHeader><CardTitle>Top open parties</CardTitle></CardHeader>
-            <CardContent className="pt-3"><TopOpen parties={parties} /></CardContent>
+            <CardHeader><CardTitle>Top active parties</CardTitle></CardHeader>
+            <CardContent className="pt-3"><TopActive parties={parties} /></CardContent>
           </Card>
         </div>
       )}
@@ -100,18 +100,17 @@ function ByGame({ parties }: { parties: Party[] }) {
   )
 }
 
-function TopOpen({ parties }: { parties: Party[] }) {
-  const open = parties
-    .filter(p => !p.isClosed && p.members.length < p.maxSize)
+function TopActive({ parties }: { parties: Party[] }) {
+  const top = [...parties]
     .sort((a, b) => b.members.length - a.members.length || a.maxSize - b.maxSize)
     .slice(0, 5)
 
-  if (open.length === 0) {
-    return <p className="py-1 text-sm text-muted-foreground">No open parties — every active party is full or closed.</p>
+  if (top.length === 0) {
+    return <p className="py-1 text-sm text-muted-foreground">No active parties.</p>
   }
   return (
     <div className="divide-y">
-      {open.map(p => (
+      {top.map(p => (
         <PartyRow key={p.id} p={p}>
           <FillBar filled={p.members.length} total={p.maxSize} />
         </PartyRow>
