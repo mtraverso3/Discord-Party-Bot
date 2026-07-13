@@ -423,7 +423,7 @@ function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
             </span>
             <Mono>{p.id}</Mono>
           </div>
-          {p.description && <p className="mt-2 text-sm text-muted-foreground">{p.description}</p>}
+          {p.description && <p className="mt-2 text-sm text-muted-foreground whitespace-pre-line">{p.description}</p>}
         </CardContent>
       </Card>
 
