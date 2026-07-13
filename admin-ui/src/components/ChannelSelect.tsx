@@ -1,5 +1,6 @@
 import { ChevronsUpDown } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ChannelInfo } from '../types'
 import { cn } from '../lib/cn'
 
@@ -21,14 +22,33 @@ export function ChannelSelect({ channels, value, onChange, allowNone, placeholde
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 })
 
   const selected = channels.find(c => c.id === value)
   const unknown = value && !selected
 
+  useLayoutEffect(() => {
+    if (!open) return
+    const update = () => {
+      const r = boxRef.current?.getBoundingClientRect()
+      if (r) setPos({ top: r.bottom, left: r.left, width: r.width })
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     const onDocClick = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (boxRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
@@ -61,8 +81,12 @@ export function ChannelSelect({ channels, value, onChange, allowNone, placeholde
         </span>
         <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
       </button>
-      {open && (
-        <div className="animate-fade-in absolute top-full right-0 left-0 z-20 mt-1 overflow-hidden rounded-lg border bg-popover shadow-lg">
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          className="animate-fade-in fixed z-50 mt-1 overflow-hidden rounded-lg border bg-popover shadow-lg"
+          style={{ top: pos.top, left: pos.left, width: pos.width }}
+        >
           <div className="border-b p-1.5">
             <input
               type="text"
@@ -83,7 +107,8 @@ export function ChannelSelect({ channels, value, onChange, allowNone, placeholde
             ))}
             {filtered.length === 0 && <div className="px-2.5 py-2 text-sm text-muted-foreground">No channels match</div>}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
