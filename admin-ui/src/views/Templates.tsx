@@ -110,7 +110,7 @@ function TemplateCard({ t, settings, voiceChannels, textChannels, onSaved, onDel
             {t.name
               ? <p><span className="font-medium">Party title: </span>{t.name}</p>
               : <p className="text-muted-foreground">No fixed title — defaults to the owner's name.</p>}
-            {t.description && <p className="mt-1 text-muted-foreground">{t.description}</p>}
+            {t.description && <p className="mt-1 text-muted-foreground whitespace-pre-line">{t.description}</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={() => { setShowApply(s => !s); setShowEdit(false) }}><Play />Use template…</Button>
