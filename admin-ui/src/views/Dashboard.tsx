@@ -1,4 +1,4 @@
-import { Gamepad2, Swords, Timer, Users as UsersIcon, Hourglass, CircleDot } from 'lucide-react'
+import { Gamepad2, Swords, Timer, Users as UsersIcon, Hourglass, CircleDot, ChevronRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { api } from '../api'
 import { useLoad } from '../lib/useLoad'
@@ -37,6 +37,10 @@ export function Dashboard() {
           <Card>
             <CardHeader><CardTitle>Next auto-disbands</CardTitle></CardHeader>
             <CardContent className="pt-3"><DisbandsSoon parties={parties} /></CardContent>
+          </Card>
+          <Card className="md:col-span-2">
+            <CardHeader><CardTitle>Top open parties</CardTitle></CardHeader>
+            <CardContent className="pt-3"><TopOpen parties={parties} /></CardContent>
           </Card>
         </div>
       )}
@@ -96,6 +100,38 @@ function ByGame({ parties }: { parties: Party[] }) {
   )
 }
 
+function TopOpen({ parties }: { parties: Party[] }) {
+  const open = parties
+    .filter(p => !p.isClosed && p.members.length < p.maxSize)
+    .sort((a, b) => b.members.length - a.members.length || a.maxSize - b.maxSize)
+    .slice(0, 5)
+
+  if (open.length === 0) {
+    return <p className="py-1 text-sm text-muted-foreground">No open parties — every active party is full or closed.</p>
+  }
+  return (
+    <div className="divide-y">
+      {open.map(p => (
+        <PartyRow key={p.id} p={p}>
+          <FillBar filled={p.members.length} total={p.maxSize} />
+        </PartyRow>
+      ))}
+    </div>
+  )
+}
+
+function FillBar({ filled, total }: { filled: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, (filled / total) * 100) : 0
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">{filled}/{total}</span>
+    </div>
+  )
+}
+
 function DisbandsSoon({ parties }: { parties: Party[] }) {
   const now = Date.now()
   const soon = parties
@@ -105,11 +141,7 @@ function DisbandsSoon({ parties }: { parties: Party[] }) {
   return (
     <div className="divide-y">
       {soon.map(({ p, deadline }) => (
-        <div className="flex items-center gap-3 py-2 first:pt-0 last:pb-0" key={p.id}>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{p.name}</div>
-            <Mono>{p.id}</Mono>
-          </div>
+        <PartyRow key={p.id} p={p}>
           <span
             className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
             title={fmtAbs(deadline)}
@@ -117,8 +149,25 @@ function DisbandsSoon({ parties }: { parties: Party[] }) {
             <Timer className="size-3.5" />
             {deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'}
           </span>
-        </div>
+        </PartyRow>
       ))}
     </div>
+  )
+}
+
+/** A party list row that links to the party's detail page in the Parties tab. */
+function PartyRow({ p, children }: { p: Party; children: ReactNode }) {
+  return (
+    <a
+      href={`#/parties/${encodeURIComponent(p.id)}`}
+      className="group -mx-2 flex items-center gap-3 rounded-md px-2 py-2 transition-colors first:mt-0 hover:bg-muted/50"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{p.name}</div>
+        <Mono>{p.id}</Mono>
+      </div>
+      {children}
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground" />
+    </a>
   )
 }
