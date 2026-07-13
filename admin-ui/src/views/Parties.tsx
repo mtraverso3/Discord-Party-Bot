@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Crown, Moon, Plus, RefreshCw, Search, Swords, Timer, Trash2, Volume2 } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Crown, Megaphone, Moon, Plus, RefreshCw, Search, Swords, Timer, Trash2, Volume2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { GAMES } from '../games'
@@ -551,6 +551,13 @@ function PeopleSection({ p, avatars, onUpdate }: { p: Party; avatars: Avatars; o
       </form>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" busy={voiceBusy} onClick={checkVoice}><Volume2 />Check voice</Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => call(() => api<Party>('/parties/' + p.id + '/bump', { method: 'POST', body: JSON.stringify({}) }), 'Bumped')}
+        >
+          <Megaphone />Bump embed
+        </Button>
         {voiceInfo && <span className="text-xs text-muted-foreground">{voiceInfo}</span>}
       </div>
     </div>
