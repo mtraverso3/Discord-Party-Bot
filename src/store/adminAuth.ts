@@ -28,6 +28,13 @@ export async function isAdmin(db: D1Database, guildId: string, userId: string): 
   return !!row
 }
 
+/** The stored display name for one allow-listed admin, if any. */
+export async function getAdminDisplayName(db: D1Database, guildId: string, userId: string): Promise<string | null> {
+  const row = await db.prepare('SELECT display_name FROM admin_users WHERE guild_id = ?1 AND user_id = ?2')
+    .bind(guildId, userId).first<{ display_name: string }>()
+  return row?.display_name ?? null
+}
+
 export async function listAdmins(db: D1Database, guildId: string): Promise<AdminUser[]> {
   const { results } = await db.prepare(
     'SELECT guild_id, user_id, display_name, added_by, added_at FROM admin_users WHERE guild_id = ?1 ORDER BY added_at DESC',

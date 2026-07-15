@@ -89,7 +89,7 @@ export function Audit() {
   const name = (id: string): string => names[id] || id
   const adminLabel = (email?: string): string => {
     const id = discordIdOf(email)
-    if (id) return `${name(id)} · Discord`
+    if (id) return name(id)
     return email || '—'
   }
 
