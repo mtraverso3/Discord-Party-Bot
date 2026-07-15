@@ -23,6 +23,9 @@ beforeEach(() => {
     if (path.endsWith('/users/leftguild')) {
       return Response.json({ id: 'leftguild', username: 'leftguild_un', global_name: 'LeftGuildGlobal' })
     }
+    if (path.endsWith('/users/777')) {
+      return Response.json({ id: '777', username: 'seven_un', global_name: 'SevenGlobal' })
+    }
     if (path.includes('/users/')) {
       return new Response('Unknown User', { status: 404 })
     }
@@ -66,6 +69,24 @@ describe('per-guild magic-link scoping', () => {
       env, url, scopedEmail('123', 'g1'),
     )
     expect(res.status).toBe(403)
+  })
+
+  it('returns the real email for a super admin on /me', async () => {
+    const url = new URL('http://x/admin/api/me')
+    const res = await handleAdminApi(new Request(url), env, url, 'boss@example.com')
+    const me = await res.json<any>()
+    expect(me).toEqual({ email: 'boss@example.com', superAdmin: true })
+  })
+
+  it('resolves a magic-link admin to their Discord name and never surfaces the synthetic email', async () => {
+    // User 777 isn't on the allow-list, so /me falls back to the live global name.
+    const url = new URL('http://x/admin/api/me')
+    const res = await handleAdminApi(new Request(url), env, url, scopedEmail('777', 'g1'))
+    const me = await res.json<any>()
+    expect(me.superAdmin).toBe(false)
+    expect(me.guildId).toBe('g1')
+    expect(me.displayName).toBe('SevenGlobal')
+    expect(me.email).toBeUndefined()
   })
 
   it('lets a super admin add and remove per-guild admins', async () => {

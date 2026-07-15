@@ -1,4 +1,4 @@
-import { ArrowLeftRight, History as HistoryIcon, LayoutDashboard, Moon, ScrollText, Settings as SettingsIcon, ShieldCheck, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
+import { ArrowLeftRight, History as HistoryIcon, LayoutDashboard, LogOut, Moon, ScrollText, Settings as SettingsIcon, ShieldCheck, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, guildId, onSessionExpired } from './api'
 import type { GuildInfo } from './types'
@@ -40,7 +40,7 @@ function currentTab(): string {
 export function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('pb-theme') || 'light')
   const [tab, setTab] = useState(currentTab)
-  const [email, setEmail] = useState('')
+  const [label, setLabel] = useState('')
   const [superAdmin, setSuperAdmin] = useState(true)
   const [guild, setGuild] = useState<GuildInfo | null>(null)
   const [expired, setExpired] = useState(false)
@@ -54,8 +54,11 @@ export function App() {
     onSessionExpired(() => setExpired(true))
     const onHash = () => setTab(currentTab())
     window.addEventListener('hashchange', onHash)
-    api<{ email?: string; superAdmin?: boolean }>('/me').then(r => {
-      if (r?.email) setEmail(r.email)
+    api<{ email?: string; displayName?: string; superAdmin?: boolean }>('/me').then(r => {
+      // Super admins show their real email; magic-link admins show their resolved
+      // Discord name (never the synthetic <id>@<guild>.discord.local address).
+      const l = r?.displayName ?? r?.email
+      if (l) setLabel(l)
       setSuperAdmin(r?.superAdmin !== false)
     }).catch(() => {})
     return () => window.removeEventListener('hashchange', onHash)
@@ -81,6 +84,17 @@ export function App() {
     </Button>
   )
 
+  const logoutButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      title="Sign out"
+      onClick={() => { location.href = '/auth/logout' }}
+    >
+      <LogOut />
+    </Button>
+  )
+
   return (
     <ToastProvider>
       <ConfirmProvider>
@@ -102,8 +116,9 @@ export function App() {
                   <p className="text-sm text-muted-foreground">Pick a server to manage.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {email && <span className="hidden text-xs text-muted-foreground sm:block">{email}</span>}
+                  {label && <span className="hidden text-xs text-muted-foreground sm:block">{label}</span>}
                   {themeButton}
+                  {logoutButton}
                 </div>
               </div>
               <GuildPicker />
@@ -111,9 +126,10 @@ export function App() {
           ) : (
             <Shell
               tab={tab}
-              email={email}
+              label={label}
               guild={guild}
               themeButton={themeButton}
+              logoutButton={logoutButton}
             >
               <TabView tab={tab} superAdmin={superAdmin} />
             </Shell>
@@ -132,11 +148,12 @@ function BrandMark() {
   )
 }
 
-function Shell({ tab, email, guild, themeButton, children }: {
+function Shell({ tab, label, guild, themeButton, logoutButton, children }: {
   tab: string
-  email: string
+  label: string
   guild: GuildInfo | null
   themeButton: ReactNode
+  logoutButton: ReactNode
   children: ReactNode
 }) {
   const active = TABS.find(t => t.id === tab) ?? TABS[0]
@@ -180,8 +197,9 @@ function Shell({ tab, email, guild, themeButton, children }: {
           ))}
         </nav>
         <div className="flex items-center gap-2 border-t px-4 py-3">
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={email}>{email}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={label}>{label}</span>
           {themeButton}
+          {logoutButton}
         </div>
       </aside>
 
@@ -197,6 +215,7 @@ function Shell({ tab, email, guild, themeButton, children }: {
             </div>
             <a href="?" title="Switch server" className="text-muted-foreground"><ArrowLeftRight className="size-4" /></a>
             {themeButton}
+            {logoutButton}
           </div>
           <nav className="flex gap-1 overflow-x-auto px-3 py-2">
             {TABS.map(t => (

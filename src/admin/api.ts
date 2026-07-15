@@ -6,7 +6,7 @@ import { GAMES } from '../lib/games'
 import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings } from '../store/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../store/templates'
 import { appendAudit, getAudit } from '../store/audit'
-import { addAdmin, listAdmins, removeAdmin } from '../store/adminAuth'
+import { addAdmin, getAdminDisplayName, listAdmins, removeAdmin } from '../store/adminAuth'
 import * as history from '../store/history'
 import * as games from '../store/games'
 import * as notes from '../store/notes'
@@ -25,6 +25,8 @@ export interface AdminIdentity {
   superAdmin: boolean
   /** For magic-link admins, the one guild they're scoped to. */
   guildId?: string
+  /** For magic-link admins, their Discord user ID (from the synthetic email). */
+  userId?: string
 }
 
 function escapeRegex(s: string): string {
@@ -39,8 +41,8 @@ function escapeRegex(s: string): string {
  */
 export function adminIdentity(env: AppBindings, email?: string): AdminIdentity {
   const domain = env.OIDC_EMAIL_DOMAIN || 'discord.local'
-  const m = email?.match(new RegExp(`^\\d+@([^@.]+)\\.${escapeRegex(domain)}$`))
-  return m ? { superAdmin: false, guildId: m[1] } : { superAdmin: true }
+  const m = email?.match(new RegExp(`^(\\d+)@([^@.]+)\\.${escapeRegex(domain)}$`))
+  return m ? { superAdmin: false, userId: m[1], guildId: m[2] } : { superAdmin: true }
 }
 
 export async function handleAdminApi(req: Request, env: AppBindings, url: URL, email?: string): Promise<Response> {
@@ -77,7 +79,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     : {}
 
   const route = async (): Promise<Response> => {
-    if (path === '/me' && method === 'GET') return json({ email, superAdmin: identity.superAdmin, guildId: identity.guildId })
+    if (path === '/me' && method === 'GET') return await meRoute(env, identity, email)
     if (path === '/guilds' && method === 'GET') return await listGuilds(env, identity)
     if (path === '/import-kv' && method === 'POST') return await importFromKv(env)
     if (path === '/admins' && method === 'GET') return json(await listAdmins(env.DB, guildId!))
@@ -229,6 +231,25 @@ async function partyGames(env: AppBindings, guildId: string, partyId: string): P
   const historyId = await history.activeSessionId(env.DB, guildId, partyId)
   if (historyId == null) return json({ historyId: null, games: [] })
   return json({ historyId, games: await games.listGamesForHistory(env.DB, historyId) })
+}
+
+/**
+ * Identify the current admin for the UI header. Super admins get their real
+ * Cloudflare Access email. Magic-link admins are pinned to a synthetic
+ * `<userId>@<guildId>.discord.local` email that should never be shown to them —
+ * we resolve their Discord display name instead (from the allow-list, falling
+ * back to the live global name, then the bare ID) and withhold the email.
+ */
+async function meRoute(env: AppBindings, identity: AdminIdentity, email?: string): Promise<Response> {
+  if (identity.superAdmin) return json({ email, superAdmin: true })
+
+  const { guildId, userId } = identity
+  let displayName = userId ? await getAdminDisplayName(env.DB, guildId!, userId).catch(() => null) : null
+  if (!displayName && userId) {
+    const user = await getUserById(env.DISCORD_BOT_TOKEN, userId).catch(() => null)
+    displayName = user ? (user.global_name ?? user.username) : userId
+  }
+  return json({ superAdmin: false, guildId, displayName: displayName ?? userId })
 }
 
 async function listGuilds(env: AppBindings, identity: AdminIdentity): Promise<Response> {
