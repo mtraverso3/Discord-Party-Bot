@@ -17,6 +17,8 @@ export interface PartyBotBridge {
   tagsGet(): Promise<TaggedPlayer[]>
   tagsSet(players: TaggedPlayer[]): Promise<void>
   addToParty(userId: string): Promise<{ ok: boolean; error?: string }>
+  approveQueued(userId: string): Promise<{ ok: boolean; error?: string }>
+  denyQueued(userId: string): Promise<{ ok: boolean; error?: string }>
 }
 
 const bridge: PartyBotBridge = {
@@ -33,6 +35,8 @@ const bridge: PartyBotBridge = {
   tagsGet: () => ipcRenderer.invoke('tags:get'),
   tagsSet: (players) => ipcRenderer.invoke('tags:set', players),
   addToParty: (userId) => ipcRenderer.invoke('party:add', userId),
+  approveQueued: (userId) => ipcRenderer.invoke('party:approve', userId),
+  denyQueued: (userId) => ipcRenderer.invoke('party:deny', userId),
 }
 
 contextBridge.exposeInMainWorld('pb', bridge)

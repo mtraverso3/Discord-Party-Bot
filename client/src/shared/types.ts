@@ -28,13 +28,23 @@ export interface SessionMember {
   avatarUrl: string | null    // Discord avatar CDN URL, or null for a default avatar
 }
 
+/** Someone waiting to be let into the party, in queue order. */
+export interface SessionQueued {
+  userId: string
+  displayName: string
+  ign: string | null
+  avatarUrl: string | null
+}
+
 export interface SessionParty {
   id: string
   name: string
   game: string
   maxSize: number
   isOwner: boolean
+  isClosed: boolean   // closed parties send every joiner to the queue
   members: SessionMember[]
+  queue: SessionQueued[]
 }
 
 export interface Session {

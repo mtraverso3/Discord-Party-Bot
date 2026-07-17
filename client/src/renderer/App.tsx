@@ -1,13 +1,13 @@
 import {
   ArrowLeft, Ban, Check, ChevronDown, Crown, Gamepad2, Link2, PartyPopper, Send, Settings as SettingsIcon,
-  Swords, Tag as TagIcon, TriangleAlert, WifiOff, X,
+  Swords, Tag as TagIcon, TriangleAlert, UserCheck, UserX, WifiOff, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PartyBotBridge } from '../preload'
 import type {
   AutoJoinSettings, BanCheck, ChampionPick, GameView, LcuStatus, LinkState, LobbyMode, LobbyRow, LobbyView,
-  Session, SessionMember, TaggedPlayer,
+  Session, SessionMember, SessionQueued, TaggedPlayer,
 } from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
 import { Avatar, Badge, Button, Card, EmptyState, Input, Select, StatusDot, Switch } from './ui'
@@ -168,6 +168,7 @@ export function App() {
               <SquadCard
                 session={session!} lcu={lcu} lobby={lobby} game={game}
                 setTagFor={setTagFor} showToast={show} refreshLobby={refreshLobby}
+                refreshSession={refreshSession}
               />
             )}
           </>
@@ -358,7 +359,7 @@ function NoPartyScreen({ sessionError }: { sessionError: string | null }) {
    Each person appears once; their League-lobby presence is a status on the
    row instead of a second list. Lobby-only players get their own section. */
 
-function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLobby }: {
+function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLobby, refreshSession }: {
   session: Session
   lcu: LcuStatus
   lobby: LobbyView
@@ -366,11 +367,16 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
   setTagFor: (riotId: string, tag: string) => void
   showToast: (msg: string, kind?: 'ok' | 'err') => void
   refreshLobby: () => Promise<void>
+  refreshSession: () => Promise<void>
 }) {
   const party = session.party!
   const inLobbyNames = new Set(lobby.rows.filter(r => r.status === 'party').map(r => r.displayName))
   const inLobbyCount = party.members.filter(m => m.userId === session.userId || inLobbyNames.has(m.displayName)).length
   const guests = lobby.rows.filter(r => r.status === 'tagged' || r.status === 'intruder')
+  // A closed party queues everyone who joins. The owner can wave them in from
+  // here instead of going back to Discord — or deny them, which works even at
+  // capacity, since a denied player never needed a slot.
+  const showQueue = party.isOwner && party.isClosed && party.queue.length > 0
 
   return (
     <Card>
@@ -378,7 +384,11 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pt-4 pb-3">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold tracking-tight">{party.name}</h2>
-          <p className="text-xs text-muted-foreground">{party.members.length} of {party.maxSize} members</p>
+          <p className="text-xs text-muted-foreground">
+            {party.members.length} of {party.maxSize} members
+            {party.isClosed && ' · closed'}
+            {party.queue.length > 0 && ` · ${party.queue.length} in queue`}
+          </p>
         </div>
         <Badge variant="outline" className="max-w-full">{party.game}</Badge>
       </div>
@@ -404,6 +414,14 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
             inLobby={m.userId === session.userId || inLobbyNames.has(m.displayName)} />
         ))}
       </div>
+
+      {/* Queued players waiting on the owner */}
+      {showQueue && (
+        <ApprovalQueue
+          queue={party.queue} openSlots={Math.max(0, party.maxSize - party.members.length)}
+          showToast={showToast} refreshSession={refreshSession}
+        />
+      )}
 
       {/* Lobby-only players */}
       {lobby.exists && guests.length > 0 && (
@@ -527,6 +545,94 @@ function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion, ban }: {
         </p>
       </div>
       {chip}
+    </div>
+  )
+}
+
+/* The owner's queue controls for a closed party. Collapses to a single summary
+   line so a long roster keeps fitting on screen — it starts open only when
+   there's a slot to approve into, since a full party's queue is informational
+   until someone leaves. The list itself scrolls past a few entries rather than
+   pushing the invite bar off the bottom. */
+function ApprovalQueue({ queue, openSlots, showToast, refreshSession }: {
+  queue: SessionQueued[]
+  openSlots: number
+  showToast: (msg: string, kind?: 'ok' | 'err') => void
+  refreshSession: () => Promise<void>
+}) {
+  const [open, setOpen] = useState(openSlots > 0)
+  const [busy, setBusy] = useState<{ userId: string; action: 'approve' | 'deny' } | null>(null)
+
+  // A slot opening up is the moment this becomes actionable, so surface it —
+  // but don't fight the owner if they've collapsed it since.
+  const hadSlots = useRef(openSlots > 0)
+  useEffect(() => {
+    if (openSlots > 0 && !hadSlots.current) setOpen(true)
+    hadSlots.current = openSlots > 0
+  }, [openSlots])
+
+  async function act(q: SessionQueued, action: 'approve' | 'deny') {
+    setBusy({ userId: q.userId, action })
+    const res = action === 'approve' ? await pb.approveQueued(q.userId) : await pb.denyQueued(q.userId)
+    setBusy(null)
+    // Either way the queue we're rendering may be stale — someone can be
+    // approved or denied from Discord between polls — so re-read the session.
+    await refreshSession()
+    if (!res.ok) {
+      showToast(res.error ?? `${action === 'approve' ? 'Approve' : 'Deny'} failed`, 'err')
+      return
+    }
+    showToast(action === 'approve' ? `${q.displayName} is in the party` : `${q.displayName} removed from the queue`)
+  }
+
+  const busyFor = (userId: string, action: 'approve' | 'deny') =>
+    busy?.userId === userId && busy.action === action
+
+  return (
+    <div className="border-t">
+      <button
+        className="flex w-full cursor-pointer items-center gap-2 px-4 py-2 text-left transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <p className="text-[0.68rem] font-medium tracking-wide text-muted-foreground uppercase">Waiting to join</p>
+        <Badge variant={openSlots > 0 ? 'warning' : 'secondary'}>{queue.length}</Badge>
+        <span className="ml-auto text-[0.7rem] text-muted-foreground">
+          {openSlots > 0 ? `${openSlots} slot${openSlots === 1 ? '' : 's'} open` : 'party full'}
+        </span>
+        <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="max-h-44 overflow-y-auto px-4 pb-1">
+          {queue.map((q, i) => (
+            <div key={q.userId} className="flex items-center gap-2.5 border-b py-1.5 last:border-b-0">
+              <Avatar name={q.displayName} imageUrl={q.avatarUrl} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[0.8rem] font-medium">{q.displayName}</p>
+                <p className="truncate text-[0.7rem] text-muted-foreground">
+                  {q.ign ?? 'No IGN set'} · #{i + 1} in queue
+                </p>
+              </div>
+              <Button
+                size="sm" busy={busyFor(q.userId, 'approve')} disabled={busy !== null || openSlots === 0}
+                title={openSlots === 0 ? 'The party is full — free a slot first' : `Approve ${q.displayName} into the party`}
+                onClick={() => void act(q, 'approve')}
+              >
+                {!busyFor(q.userId, 'approve') && <UserCheck />}
+                Approve
+              </Button>
+              <Button
+                variant="ghost" size="icon" className="hover:text-destructive"
+                title={`Deny ${q.displayName} — removes them from the queue`}
+                busy={busyFor(q.userId, 'deny')} disabled={busy !== null}
+                onClick={() => void act(q, 'deny')}
+              >
+                {!busyFor(q.userId, 'deny') && <UserX />}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

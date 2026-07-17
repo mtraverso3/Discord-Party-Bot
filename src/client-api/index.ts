@@ -22,6 +22,8 @@ const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 //   POST   /client/party/game  (Bearer) { game } -> { ok, game? } | { ok: false, error }
 //   POST   /client/lookup      (Bearer) { riotIds } -> { players: Record<riotId, { userId, displayName } | null> }
 //   POST   /client/party/add   (Bearer) { userId } -> { ok, party? } | { ok: false, error }
+//   POST   /client/party/approve (Bearer) { userId } -> { ok } | { ok: false, error }
+//   POST   /client/party/deny    (Bearer) { userId } -> { ok } | { ok: false, error }
 //   POST   /client/party/game-report (Bearer) { region, gameId } -> { ok, status, matchId } | { ok: false, error }
 //   GET    /client/champions/catalog (Bearer) -> { version, champions: Record<id, { id, name, iconUrl }> }
 //   POST   /client/champions/live    (Bearer) { region, gameName, tagLine } -> { ok, configured, live, participants: [{ riotId, championId, teamId }] }
@@ -55,6 +57,12 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
   }
   if (url.pathname === '/client/party/add' && req.method === 'POST') {
     return await addPartyMember(req, env)
+  }
+  if (url.pathname === '/client/party/approve' && req.method === 'POST') {
+    return await approvePartyQueued(req, env)
+  }
+  if (url.pathname === '/client/party/deny' && req.method === 'POST') {
+    return await denyPartyQueued(req, env)
   }
   if (url.pathname === '/client/party/game-report' && req.method === 'POST') {
     return await reportPartyGame(req, env)
@@ -120,8 +128,11 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
       const settings = await getGuildSettings(env.DB, rec.guildId)
       const isOwner = data.ownerId === rec.userId
       canInvite = isOwner || settings.clientInviters.includes(rec.userId)
+      // Queued users are already public in the Discord embed, so every member
+      // sees them here; only the owner gets an approve button for them.
+      const roster = [...data.members, ...data.queue]
       const avatarUrls = await Promise.all(
-        data.members.map(m => getMemberAvatarUrl(env.DISCORD_BOT_TOKEN, rec.guildId, m.userId).catch(() => null)),
+        roster.map(m => getMemberAvatarUrl(env.DISCORD_BOT_TOKEN, rec.guildId, m.userId).catch(() => null)),
       )
       party = {
         id: data.id,
@@ -129,6 +140,7 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
         game: data.game,
         maxSize: data.maxSize,
         isOwner,
+        isClosed: data.isClosed,
         members: data.members.map((m, i) => ({
           userId: m.userId,
           displayName: m.displayName,
@@ -136,6 +148,12 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
           isOwner: m.userId === data.ownerId,
           assignedBan: data.banlist?.assignments[m.userId] ?? null,
           avatarUrl: avatarUrls[i] ?? null,
+        })),
+        queue: data.queue.map((q, i) => ({
+          userId: q.userId,
+          displayName: q.displayName,
+          ign: q.ign ?? null,
+          avatarUrl: avatarUrls[data.members.length + i] ?? null,
         })),
       }
     }
@@ -302,6 +320,65 @@ async function addPartyMember(req: Request, env: AppBindings): Promise<Response>
   if (result.status === 'in_other_party') return json({ ok: false, error: 'That player is already in another party.' }, 400)
   if (result.status === 'full') return json({ ok: false, error: 'Party is full.' }, 400)
   if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can add members.' }, 403)
+
+  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  return json({ ok: true })
+}
+
+// Shared preamble for the queue actions below: authenticate, read the target
+// user out of the body, and resolve the caller's party. Returns a ready-made
+// error Response, or the ids the action needs.
+async function queueActionContext(
+  req: Request, env: AppBindings,
+): Promise<Response | { guildId: string; partyId: string; requesterId: string; targetId: string }> {
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ ok: false, error: 'Not linked.' }, 401)
+  const { rec } = auth
+
+  let body: { userId?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ ok: false, error: 'Invalid JSON body.' }, 400)
+  }
+  const targetId = typeof body.userId === 'string' ? body.userId.trim() : ''
+  if (!targetId) return json({ ok: false, error: 'userId is required.' }, 400)
+
+  const partyId = await parties.getUserPartyId(env.DB, rec.guildId, rec.userId)
+  if (!partyId) return json({ ok: false, error: 'You are not in a party.' }, 404)
+
+  return { guildId: rec.guildId, partyId, requesterId: rec.userId, targetId }
+}
+
+// Lets a party owner approve a queued player from the desktop client — the
+// same thing `/party approve` does in Discord. A closed party sends every
+// joiner to the queue, so without this the owner has to go back to Discord to
+// let anyone in while they're mid-lobby.
+async function approvePartyQueued(req: Request, env: AppBindings): Promise<Response> {
+  const ctx = await queueActionContext(req, env)
+  if (ctx instanceof Response) return ctx
+  const { guildId, partyId, requesterId, targetId } = ctx
+
+  const result = await parties.approveQueued(env.DB, guildId, partyId, requesterId, targetId)
+  if (result.status === 'not_found')    return json({ ok: false, error: 'Party not found.' }, 404)
+  if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can approve members.' }, 403)
+  if (result.status === 'not_queued')   return json({ ok: false, error: 'That player is no longer in the queue.' }, 400)
+  if (result.status === 'full')         return json({ ok: false, error: 'Party is full.' }, 400)
+
+  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  return json({ ok: true })
+}
+
+// The counterpart to approve — drops a queued player, same as `/party deny`.
+async function denyPartyQueued(req: Request, env: AppBindings): Promise<Response> {
+  const ctx = await queueActionContext(req, env)
+  if (ctx instanceof Response) return ctx
+  const { guildId, partyId, requesterId, targetId } = ctx
+
+  const result = await parties.denyQueued(env.DB, guildId, partyId, requesterId, targetId)
+  if (result.status === 'not_found')    return json({ ok: false, error: 'Party not found.' }, 404)
+  if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can deny members.' }, 403)
+  if (result.status === 'not_queued')   return json({ ok: false, error: 'That player is no longer in the queue.' }, 400)
 
   await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
   return json({ ok: true })
