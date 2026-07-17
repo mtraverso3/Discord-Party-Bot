@@ -200,6 +200,26 @@ export async function addToParty(userId: string): Promise<{ ok: boolean; error?:
   }
 }
 
+async function queueAction(path: string, userId: string): Promise<{ ok: boolean; error?: string }> {
+  const token = loadConfig().token
+  if (!token) return { ok: false, error: 'Not linked.' }
+  try {
+    const res = await botFetch('POST', path, { userId }, token)
+    if (res.status !== 200) return { ok: false, error: res.body?.error ?? `PartyBot returned ${res.status}.` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: `Could not reach PartyBot: ${(e as Error).message}` }
+  }
+}
+
+export function approveQueued(userId: string): Promise<{ ok: boolean; error?: string }> {
+  return queueAction('/client/party/approve', userId)
+}
+
+export function denyQueued(userId: string): Promise<{ ok: boolean; error?: string }> {
+  return queueAction('/client/party/deny', userId)
+}
+
 export function getAutoJoinSettings(): AutoJoinSettings {
   const c = loadConfig()
   return { enabled: !!c.autoJoinEnabled, targetName: c.autoJoinTarget ?? '', inviteParty: !!c.autoJoinInviteParty }

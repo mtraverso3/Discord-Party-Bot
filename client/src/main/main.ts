@@ -6,8 +6,8 @@ import {
   lcuRequest, type ChampSelectBan, type ChampSelectCell, type LcuCreds,
 } from './lcu'
 import {
-  addToParty, clearLink, fetchChampionCatalog, fetchLiveChampions, fetchSession, getAutoJoinSettings,
-  getTaggedPlayers, linkState, linkWithCode, lookupPlayers, reportGame, setAutoJoinSettings, setPartyGame,
+  addToParty, approveQueued, clearLink, denyQueued, fetchChampionCatalog, fetchLiveChampions, fetchSession,
+  getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode, lookupPlayers, reportGame, setAutoJoinSettings, setPartyGame,
   setTaggedPlayers, type ChampionCatalog,
 } from './bot'
 import { crossReference, formatRiotId, ignMatches, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
@@ -684,6 +684,16 @@ ipcMain.handle('lobby:status', () => lobbyStatus())
 ipcMain.handle('game:champions', () => gameChampions())
 ipcMain.handle('party:add', async (_e, userId: string) => {
   const res = await addToParty(String(userId ?? ''))
+  if (res.ok) await fetchSession().then(r => { if (r.ok) lastSession = r.session as Session })
+  return res
+})
+ipcMain.handle('party:approve', async (_e, userId: string) => {
+  const res = await approveQueued(String(userId ?? ''))
+  if (res.ok) await fetchSession().then(r => { if (r.ok) lastSession = r.session as Session })
+  return res
+})
+ipcMain.handle('party:deny', async (_e, userId: string) => {
+  const res = await denyQueued(String(userId ?? ''))
   if (res.ok) await fetchSession().then(r => { if (r.ok) lastSession = r.session as Session })
   return res
 })

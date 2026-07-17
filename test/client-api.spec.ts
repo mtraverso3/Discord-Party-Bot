@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { generateLinkCode, handleClientApi, writeLinkCode } from '../src/client-api'
-import { createParty, joinParty } from '../src/store/parties'
+import { closeParty, createParty, joinParty } from '../src/store/parties'
 import { saveUserIgn } from '../src/store/profiles'
 import { saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
 
@@ -111,6 +111,153 @@ describe('client session', () => {
     const token = await linkUser(OWNER, 'Owner', 'g4')
     expect((await req('DELETE', '/client/session', { token })).status).toBe(200)
     expect((await req('GET', '/client/session', { token })).status).toBe(401)
+  })
+})
+
+describe('client party approve', () => {
+  const QUEUED = '100000000000000003'
+
+  // A closed party queues joiners instead of seating them.
+  async function closedPartyWithQueue(guildId: string, partyId: string) {
+    await makeParty(guildId, partyId, OWNER, [])
+    await closeParty(env.DB, guildId, partyId, OWNER)
+    await joinParty(env.DB, guildId, partyId, { userId: QUEUED, username: 'q_un', displayName: 'Queued' })
+  }
+
+  it('exposes the closed state and queue on the session', async () => {
+    await closedPartyWithQueue('g20', 'LCU020')
+    const token = await linkUser(OWNER, 'Owner', 'g20')
+
+    const body = await (await req('GET', '/client/session', { token })).json() as any
+    expect(body.party.isClosed).toBe(true)
+    expect(body.party.queue).toHaveLength(1)
+    expect(body.party.queue[0].userId).toBe(QUEUED)
+    expect(body.party.members.some((m: any) => m.userId === QUEUED)).toBe(false)
+  })
+
+  it('requires a valid bearer token', async () => {
+    expect((await req('POST', '/client/party/approve', { body: { userId: QUEUED } })).status).toBe(401)
+  })
+
+  it('lets the owner approve a queued player into an open slot', async () => {
+    await closedPartyWithQueue('g21', 'LCU021')
+    const token = await linkUser(OWNER, 'Owner', 'g21')
+
+    const res = await req('POST', '/client/party/approve', { body: { userId: QUEUED }, token })
+    expect(res.status).toBe(200)
+    expect((await res.json() as any).ok).toBe(true)
+
+    const body = await (await req('GET', '/client/session', { token })).json() as any
+    expect(body.party.members.some((m: any) => m.userId === QUEUED)).toBe(true)
+    expect(body.party.queue).toHaveLength(0)
+  })
+
+  it('rejects non-owners', async () => {
+    await closedPartyWithQueue('g22', 'LCU022')
+    await joinParty(env.DB, 'g22', 'LCU022', { userId: MEMBER, username: 'm_un', displayName: 'Member' })
+    const token = await linkUser(MEMBER, 'Member', 'g22')
+
+    const res = await req('POST', '/client/party/approve', { body: { userId: QUEUED }, token })
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects a user who is not in the queue', async () => {
+    await closedPartyWithQueue('g23', 'LCU023')
+    const token = await linkUser(OWNER, 'Owner', 'g23')
+
+    const res = await req('POST', '/client/party/approve', { body: { userId: MEMBER }, token })
+    expect(res.status).toBe(400)
+    expect((await res.json() as any).error).toMatch(/no longer in the queue/)
+  })
+
+  it('rejects an approve into a full party', async () => {
+    await makeParty('g24', 'LCU024', OWNER, [])
+    // Fill every remaining slot (maxSize 5, owner already seated).
+    for (let i = 0; i < 4; i++) {
+      await joinParty(env.DB, 'g24', 'LCU024', { userId: `20000000000000000${i}`, username: `f${i}`, displayName: `Filler ${i}` })
+    }
+    await closeParty(env.DB, 'g24', 'LCU024', OWNER)
+    await joinParty(env.DB, 'g24', 'LCU024', { userId: QUEUED, username: 'q_un', displayName: 'Queued' })
+    const token = await linkUser(OWNER, 'Owner', 'g24')
+
+    const res = await req('POST', '/client/party/approve', { body: { userId: QUEUED }, token })
+    expect(res.status).toBe(400)
+    expect((await res.json() as any).error).toMatch(/full/)
+  })
+
+  it('400s on a missing userId, 404s when not in a party', async () => {
+    await closedPartyWithQueue('g25', 'LCU025')
+    const token = await linkUser(OWNER, 'Owner', 'g25')
+    expect((await req('POST', '/client/party/approve', { body: {}, token })).status).toBe(400)
+
+    const loner = await linkUser(MEMBER, 'Member', 'g26')
+    expect((await req('POST', '/client/party/approve', { body: { userId: QUEUED }, token: loner })).status).toBe(404)
+  })
+})
+
+describe('client party deny', () => {
+  const QUEUED = '100000000000000004'
+
+  async function closedPartyWithQueue(guildId: string, partyId: string) {
+    await makeParty(guildId, partyId, OWNER, [])
+    await closeParty(env.DB, guildId, partyId, OWNER)
+    await joinParty(env.DB, guildId, partyId, { userId: QUEUED, username: 'q_un', displayName: 'Queued' })
+  }
+
+  it('requires a valid bearer token', async () => {
+    expect((await req('POST', '/client/party/deny', { body: { userId: QUEUED } })).status).toBe(401)
+  })
+
+  it('lets the owner drop a queued player without seating them', async () => {
+    await closedPartyWithQueue('g30', 'LCU030')
+    const token = await linkUser(OWNER, 'Owner', 'g30')
+
+    const res = await req('POST', '/client/party/deny', { body: { userId: QUEUED }, token })
+    expect(res.status).toBe(200)
+    expect((await res.json() as any).ok).toBe(true)
+
+    const body = await (await req('GET', '/client/session', { token })).json() as any
+    expect(body.party.queue).toHaveLength(0)
+    expect(body.party.members.some((m: any) => m.userId === QUEUED)).toBe(false)
+  })
+
+  it('rejects non-owners', async () => {
+    await closedPartyWithQueue('g31', 'LCU031')
+    await joinParty(env.DB, 'g31', 'LCU031', { userId: MEMBER, username: 'm_un', displayName: 'Member' })
+    const token = await linkUser(MEMBER, 'Member', 'g31')
+
+    const res = await req('POST', '/client/party/deny', { body: { userId: QUEUED }, token })
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects a user who is not in the queue', async () => {
+    await closedPartyWithQueue('g32', 'LCU032')
+    const token = await linkUser(OWNER, 'Owner', 'g32')
+
+    const res = await req('POST', '/client/party/deny', { body: { userId: MEMBER }, token })
+    expect(res.status).toBe(400)
+    expect((await res.json() as any).error).toMatch(/no longer in the queue/)
+  })
+
+  it('works on a full party — a denied player never needed a slot', async () => {
+    await makeParty('g33', 'LCU033', OWNER, [])
+    for (let i = 0; i < 4; i++) {
+      await joinParty(env.DB, 'g33', 'LCU033', { userId: `30000000000000000${i}`, username: `f${i}`, displayName: `Filler ${i}` })
+    }
+    await closeParty(env.DB, 'g33', 'LCU033', OWNER)
+    await joinParty(env.DB, 'g33', 'LCU033', { userId: QUEUED, username: 'q_un', displayName: 'Queued' })
+    const token = await linkUser(OWNER, 'Owner', 'g33')
+
+    expect((await req('POST', '/client/party/deny', { body: { userId: QUEUED }, token })).status).toBe(200)
+  })
+
+  it('400s on a missing userId, 404s when not in a party', async () => {
+    await closedPartyWithQueue('g34', 'LCU034')
+    const token = await linkUser(OWNER, 'Owner', 'g34')
+    expect((await req('POST', '/client/party/deny', { body: {}, token })).status).toBe(400)
+
+    const loner = await linkUser(MEMBER, 'Member', 'g35')
+    expect((await req('POST', '/client/party/deny', { body: { userId: QUEUED }, token: loner })).status).toBe(404)
   })
 })
 
