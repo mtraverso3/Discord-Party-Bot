@@ -473,12 +473,9 @@ function BanChampIcon({ iconUrl, glyph }: { iconUrl: string | null; glyph: 'ok' 
 const BAN_PILL = 'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[0.68rem] font-medium whitespace-nowrap'
 
 function BanChip({ ban }: { ban: BanCheck }) {
-  // Inferred results (presence-based, not confirmed by caster) use a dashed
-  // border so they read as "likely" rather than the solid-filled certainties.
-  const inferredNote = ban.inferred ? ' (assigned champ was in the bans — not confirmed by caster)' : ''
-
-  // Assigned but not yet banned — only meaningful before the inferred pass.
-  if (ban.actual === null && !ban.inferred) {
+  // Still waiting on the assigned champion to show up in the bans — the ban
+  // phase isn't over, so "missing" isn't a verdict yet.
+  if (ban.pending && !ban.ok) {
     return (
       <span className={`${BAN_PILL} border-border text-muted-foreground`} title={`Assigned to ban ${ban.assigned} — not banned yet`}>
         <BanChampIcon iconUrl={ban.assignedIcon} glyph={null} />
@@ -486,20 +483,11 @@ function BanChip({ ban }: { ban: BanCheck }) {
       </span>
     )
   }
-  // Inferred miss: the assigned champ isn't among the bans, so it wasn't banned.
-  if (ban.actual === null) {
-    return (
-      <span className={`${BAN_PILL} border-dashed border-destructive/50 text-destructive`} title={`${ban.assigned} was not banned in this game`}>
-        <BanChampIcon iconUrl={ban.assignedIcon} glyph="bad" />
-        Didn't ban {ban.assigned}
-      </span>
-    )
-  }
   if (ban.ok) {
     return (
       <span
-        className={`${BAN_PILL} text-success ${ban.inferred ? 'border-dashed border-success/50' : 'border-transparent bg-success-muted'}`}
-        title={`Banned ${ban.assigned} as assigned${inferredNote}`}
+        className={`${BAN_PILL} border-transparent bg-success-muted text-success`}
+        title={`${ban.assigned} was banned as assigned`}
       >
         <BanChampIcon iconUrl={ban.assignedIcon} glyph="ok" />
         Banned {ban.assigned}
@@ -507,9 +495,9 @@ function BanChip({ ban }: { ban: BanCheck }) {
     )
   }
   return (
-    <span className={`${BAN_PILL} border-transparent bg-danger-muted text-destructive`} title={`Should have banned ${ban.assigned}, but banned ${ban.actual}`}>
-      <BanChampIcon iconUrl={ban.actualIcon} glyph="bad" />
-      Banned {ban.actual}, not {ban.assigned}
+    <span className={`${BAN_PILL} border-transparent bg-danger-muted text-destructive`} title={`${ban.assigned} was never banned in this champ select`}>
+      <BanChampIcon iconUrl={ban.assignedIcon} glyph="bad" />
+      Didn't ban {ban.assigned}
     </span>
   )
 }

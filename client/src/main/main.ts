@@ -1,9 +1,8 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
-import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchGameId, fetchLiveClientPlayers, fetchRegion,
-  lcuRequest, type ChampSelectBan, type ChampSelectCell, type LcuCreds,
+  discoverLcu, fetchChampSelect, fetchFriends, fetchGameflowPhase, fetchGameId, fetchRegion,
+  lcuRequest, type LcuCreds,
 } from './lcu'
 import {
   addToParty, approveQueued, clearLink, denyQueued, fetchChampionCatalog, fetchLiveChampions, fetchSession,
@@ -426,8 +425,8 @@ function normalizeChamp(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-// Gameflow phases that count as "in a game" (champ select is over — its ban
-// attribution is gone — but the game it produced is still going).
+// Gameflow phases that count as "in a game" (champ select is over — the live
+// session that carried the bans is gone — but the game it produced is running).
 const IN_GAME_PHASES = new Set([
   'GameStart', 'InProgress', 'Reconnect', 'WaitingForStats', 'PreEndOfGame', 'EndOfGame',
 ])
@@ -435,98 +434,15 @@ const IN_GAME_PHASES = new Set([
 // ban snapshot from the previous game is now stale and gets dropped.
 const PRE_CHAMP_PHASES = new Set(['None', 'Lobby', 'Matchmaking', 'ReadyCheck', 'CheckedIntoTournament'])
 
-// Ban attribution only exists in the live champ-select session, so we snapshot
-// the computed compliance there and keep serving it through the game the champ
-// select produced (keyed by party so a different party's snapshot never leaks).
-// The snapshot also retains every raw ban (with its team+position slot) so a
-// second pass, once the game loads in, can attribute enemy bans the champ-select
-// data couldn't (the client only exposes ally puuids).
-interface BanMember { userId: string; ign: string | null }
+// Ban compliance is read straight off the champ-select session — "was this
+// member's assigned champion banned at all?" — which the client always exposes,
+// unlike who cast each ban. The result is snapshotted at the end of champ select
+// and kept for the game it produced (keyed by party so no snapshot leaks across).
 interface BanSnapshot {
   partyId: string
   bans: Record<string, BanCheck>
-  rawBans: ChampSelectBan[]
-  members: BanMember[]
-  cells: ChampSelectCell[]  // final champ-select cells (debug)
-  enriched: boolean         // whether the load-in correlation pass has run
 }
 let banSnapshot: BanSnapshot | null = null
-
-// A player's locked pick can be revealed later in champ select than their ban,
-// so we accumulate cellId → pick across the whole draft (reset each new cycle)
-// and stamp each ban's caster pick from it.
-let cellPicks = new Map<number, number>()
-
-function banHasUnresolved(s: BanSnapshot): boolean {
-  return s.members.some(m => s.bans[m.userId] && s.bans[m.userId]!.actual == null)
-}
-
-function livePlayerMatchesIgn(ign: string | null, riotId: string): boolean {
-  const [gameName, tagLine = ''] = riotId.split('#')
-  return ignMatches(ign, gameName ?? '', tagLine)
-}
-
-// Second ban check, run once the game has loaded: the Live Client Data API now
-// reveals every player's locked champion. Champions are unique across a draft,
-// so "the champion this player picked" → "the ban cast from that player's slot"
-// attributes each remaining ban to a member without needing positions (which
-// customs usually don't assign) or enemy puuids (which the client never gives).
-async function enrichBansAtLoadIn(
-  s: BanSnapshot,
-  pickFor: (id: number) => ChampionPick,
-  championIdForName: (name: string) => number | undefined,
-): Promise<void> {
-  const players = await fetchLiveClientPlayers()
-  if (players.length === 0) return  // API not up yet — retry on a later poll
-  s.enriched = true                 // players are live; this pass is our shot
-
-  // Map each caster's locked pick → the champion they banned.
-  const banByCasterPick = new Map<number, number>()
-  for (const b of s.rawBans) if (b.casterPick > 0) banByCasterPick.set(b.casterPick, b.championId)
-
-  for (const m of s.members) {
-    const cur = s.bans[m.userId]
-    if (!cur || cur.actual != null) continue
-    const lp = players.find(p => livePlayerMatchesIgn(m.ign, p.riotId))
-    const pickId = lp ? championIdForName(lp.championName) : undefined
-    const bannedId = pickId !== undefined ? banByCasterPick.get(pickId) : undefined
-    if (bannedId === undefined) continue
-    const pick = pickFor(bannedId)
-    s.bans[m.userId] = {
-      ...cur, actual: pick.name, actualIcon: pick.iconUrl,
-      ok: normalizeChamp(pick.name) === normalizeChamp(cur.assigned), inferred: false,
-    }
-  }
-
-  // Presence fallback: for members the client never de-anonymized (bans with no
-  // puuid/pick — everyone outside the local player's game-group), we can't know
-  // WHO cast which ban, only the full set of champions banned. Since the inhouse
-  // assigns each member a specific champion, treat "assigned champ is among the
-  // bans" as compliance and "absent" as a miss. Marked inferred so the UI shows
-  // it's not caster-confirmed.
-  const bannedIds = new Set(s.rawBans.map(b => b.championId))
-  for (const m of s.members) {
-    const cur = s.bans[m.userId]
-    if (!cur || cur.actual != null) continue
-    const assignedId = championIdForName(cur.assigned)
-    if (assignedId !== undefined && bannedIds.has(assignedId)) {
-      s.bans[m.userId] = { ...cur, actual: cur.assigned, actualIcon: cur.assignedIcon, ok: true, inferred: true }
-    } else {
-      s.bans[m.userId] = { ...cur, ok: false, inferred: true }  // definitely not banned
-    }
-  }
-
-  // Debug artifact so a failed correlation can be diagnosed without a live rerun.
-  try {
-    writeFileSync(join(app.getPath('userData'), 'ban-debug.json'), JSON.stringify({
-      at: new Date().toISOString(),
-      livePlayers: players.map(p => ({ riotId: p.riotId, championName: p.championName, team: p.team, position: p.position })),
-      cells: s.cells,
-      rawBans: s.rawBans.map(b => ({ championId: b.championId, casterCell: b.casterCell, casterPick: b.casterPick, team: b.team, hasPuuid: !!b.puuid })),
-      members: s.members.map(m => ({ ign: m.ign, resolved: s.bans[m.userId]?.actual ?? null })),
-    }, null, 2))
-  } catch { /* ignore */ }
-}
 
 /**
  * Champion picks for the party's current champ select or live game.
@@ -546,8 +462,8 @@ async function gameChampions(): Promise<GameView> {
 
   const phase = await fetchGameflowPhase(creds)
 
-  // A new game cycle invalidates any retained ban snapshot + pick accumulator.
-  if (PRE_CHAMP_PHASES.has(phase)) { banSnapshot = null; cellPicks = new Map() }
+  // A new game cycle invalidates any retained ban snapshot.
+  if (PRE_CHAMP_PHASES.has(phase)) banSnapshot = null
 
   const catalog = await ensureCatalog()
   const pickFor = (championId: number): ChampionPick => {
@@ -562,45 +478,34 @@ async function gameChampions(): Promise<GameView> {
   const champSelect = await fetchChampSelect(creds)
   const csByPuuid = new Map<string, number>()
   for (const p of champSelect.picks) csByPuuid.set(p.puuid, p.championId)
-  const banByPuuid = new Map<string, number>()
-  for (const b of champSelect.bans) if (b.puuid) banByPuuid.set(b.puuid, b.championId)
 
-  // Ban compliance: computed during champ select (attributed by puuid), then
-  // snapshotted. Once the game loads in, a second pass attributes any members
-  // the champ-select data couldn't (see enrichBansAtLoadIn).
+  // Ban compliance: each member's assigned champion is either among the bans
+  // revealed in champ select or it isn't. Who cast the ban doesn't matter — the
+  // inhouse gives every member a distinct champion, so presence in the ban list
+  // is the compliance check. Recomputed each poll (bans reveal progressively)
+  // and snapshotted so the verdict survives into the game.
   let bansByUserId: Record<string, BanCheck> = {}
   if (phase === 'ChampSelect') {
-    // Accumulate every revealed cell pick, then stamp each ban's caster pick.
-    for (const c of champSelect.cells) if (c.championId > 0) cellPicks.set(c.cellId, c.championId)
-    const rawBans = champSelect.bans.map(b => ({ ...b, casterPick: cellPicks.get(b.casterCell) || b.casterPick }))
-
+    const bannedIds = new Set(champSelect.bannedIds)
     const computed: Record<string, BanCheck> = {}
-    const members: BanMember[] = []
-    await Promise.all(party.members.map(async (m) => {
-      if (!m.assignedBan) return
-      const resolved = m.ign ? await resolveIgn(m.ign) : null
-      const actualId = resolved ? banByPuuid.get(resolved.puuid) : undefined
-      const actualPick = actualId !== undefined ? pickFor(actualId) : null
+    for (const m of party.members) {
+      if (!m.assignedBan) continue
       const assignedId = championIdForName(m.assignedBan)
       computed[m.userId] = {
         assigned: m.assignedBan,
         assignedIcon: assignedId !== undefined ? pickFor(assignedId).iconUrl : null,
-        actual: actualPick?.name ?? null,
-        actualIcon: actualPick?.iconUrl ?? null,
-        ok: actualPick !== null && normalizeChamp(actualPick.name) === normalizeChamp(m.assignedBan),
-        inferred: false,
+        ok: assignedId !== undefined && bannedIds.has(assignedId),
+        pending: !champSelect.banPhaseDone,
       }
-      members.push({ userId: m.userId, ign: m.ign })
-    }))
+    }
     bansByUserId = computed
-    if (members.length > 0) {
-      banSnapshot = { partyId: party.id, bans: computed, rawBans, members, cells: champSelect.cells, enriched: false }
-    }
+    if (Object.keys(computed).length > 0) banSnapshot = { partyId: party.id, bans: computed }
   } else if (banSnapshot?.partyId === party.id) {
-    if (IN_GAME_PHASES.has(phase) && !banSnapshot.enriched && banHasUnresolved(banSnapshot)) {
-      await enrichBansAtLoadIn(banSnapshot, pickFor, championIdForName).catch(() => { /* best effort */ })
-    }
-    bansByUserId = banSnapshot.bans
+    // Champ select is over, so whatever the snapshot holds is final even if the
+    // last poll caught the draft mid-ban-phase.
+    bansByUserId = Object.fromEntries(
+      Object.entries(banSnapshot.bans).map(([userId, b]) => [userId, { ...b, pending: false }]),
+    )
   }
 
   const phaseOut: GamePhase = IN_GAME_PHASES.has(phase) ? 'in-game'
