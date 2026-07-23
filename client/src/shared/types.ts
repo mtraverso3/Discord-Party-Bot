@@ -133,24 +133,21 @@ export interface ChampionPick {
 
 export type GamePhase = 'none' | 'champ-select' | 'in-game'
 
-/** Whether a member banned the champion they were assigned. `actual` is the
- *  champion they actually banned (null until they've banned during the ban
- *  phase); `ok` is true when it matches `assigned`. Only present during champ
- *  select — per-player ban attribution isn't available once the game starts. */
+/** Whether a member's assigned champion was banned in champ select. The client
+ *  doesn't reveal who cast each ban, so compliance is simply "the assigned
+ *  champion is among the bans" — unambiguous because every member is assigned a
+ *  distinct champion. `pending` is true while bans are still being revealed. */
 export interface BanCheck {
   assigned: string             // champion the member was told to ban
   assignedIcon: string | null  // icon for `assigned`, when resolvable
-  actual: string | null        // champion they actually banned (null until banned / when inferred-miss)
-  actualIcon: string | null    // icon for `actual`, when known
-  ok: boolean                  // assigned was banned
-  inferred: boolean            // true when derived from ban presence, not confirmed by caster
-                               // (the client can't identify who cast non-group bans)
+  ok: boolean                  // assigned champion is among the revealed bans
+  pending: boolean             // ban phase still in progress — `ok` isn't final yet
 }
 
 /** Champion picks for the current champ select or live game, cross-referenced
  *  against the party. `byUserId` covers party members; `byRiotId` (normalized,
  *  lowercase "name#tag") covers everyone else in the game/lobby. `bansByUserId`
- *  reports each assigned member's ban vs. what they actually banned. */
+ *  reports whether each assigned member's champion was banned. */
 export interface GameView {
   phase: GamePhase
   byUserId: Record<string, ChampionPick>
