@@ -321,3 +321,52 @@ describe('client party game switch', () => {
     expect(res.status).toBe(404)
   })
 })
+
+describe('client lookup', () => {
+  it('reports a Riot ID that belongs to a current member as inParty', async () => {
+    // The member's party IGN snapshot says one thing; their registered profile
+    // says another. The client only asks about Riot IDs its own matching
+    // already failed on, so this is the answer that stops a renamed member
+    // being flagged "not in party".
+    await makeParty('g-lookup', 'LCU100', OWNER, [MEMBER])
+    await saveUserIgn(env.DB, MEMBER, 'League of Legends', 'RenamedAccount#NA1')
+    const token = await linkUser(OWNER, 'Owner', 'g-lookup')
+
+    const res = await req('POST', '/client/lookup', {
+      body: { riotIds: ['RenamedAccount#NA1'] }, token,
+    })
+    expect(res.status).toBe(200)
+    const { players } = await res.json() as any
+    expect(players['RenamedAccount#NA1']).toEqual({
+      userId: MEMBER,
+      displayName: `User ${MEMBER}`,
+      inParty: true,
+    })
+  })
+
+  it('returns null for a Riot ID nobody has registered', async () => {
+    await makeParty('g-lookup2', 'LCU101', OWNER, [])
+    const token = await linkUser(OWNER, 'Owner', 'g-lookup2')
+
+    const res = await req('POST', '/client/lookup', { body: { riotIds: ['Nobody#NA1'] }, token })
+    expect(res.status).toBe(200)
+    const { players } = await res.json() as any
+    expect(players['Nobody#NA1']).toBeNull()
+  })
+
+  it('matches a tagline-less registration against any tagline', async () => {
+    await makeParty('g-lookup3', 'LCU102', OWNER, [MEMBER])
+    await saveUserIgn(env.DB, MEMBER, 'League of Legends', 'NoTagPlayer')
+    const token = await linkUser(OWNER, 'Owner', 'g-lookup3')
+
+    const res = await req('POST', '/client/lookup', { body: { riotIds: ['NoTagPlayer#EUW'] }, token })
+    const { players } = await res.json() as any
+    expect(players['NoTagPlayer#EUW']).toMatchObject({ userId: MEMBER, inParty: true })
+  })
+
+  it('404s when the caller is not in a party', async () => {
+    const token = await linkUser(OWNER, 'Owner', 'g-lookup4')
+    const res = await req('POST', '/client/lookup', { body: { riotIds: ['Anyone#NA1'] }, token })
+    expect(res.status).toBe(404)
+  })
+})

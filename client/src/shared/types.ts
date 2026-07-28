@@ -93,15 +93,17 @@ export interface LobbyRow {
   riotId: string
   isLeader: boolean
   status: LobbySlotStatus
+  userId: string | null       // Discord id when this slot is you or a matched party member
   displayName: string | null  // party display name when matched
   tag: string | null          // user-set custom label, when status is 'tagged'
   known: KnownPlayer | null   // set for intruders who are a registered Discord user (looked up async)
 }
 
-/** A lobby intruder recognized as a registered Discord user, keyed by riotId. */
+/** A lobby player the bot recognizes as a registered Discord user, keyed by riotId. */
 export interface KnownPlayer {
   userId: string
   displayName: string
+  inParty: boolean  // already a member — the party's IGN snapshot just didn't match
 }
 
 export interface LobbyView {
