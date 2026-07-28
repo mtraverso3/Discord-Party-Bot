@@ -10,6 +10,7 @@ import type {
   Session, SessionMember, SessionQueued, TaggedPlayer,
 } from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
+import { ignMatches, parseRiotId } from '../shared/match'
 import { Avatar, Badge, Button, Card, EmptyState, Input, Select, StatusDot, Switch } from './ui'
 
 declare global {
@@ -370,8 +371,23 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
   refreshSession: () => Promise<void>
 }) {
   const party = session.party!
-  const inLobbyNames = new Set(lobby.rows.filter(r => r.status === 'party').map(r => r.displayName))
-  const inLobbyCount = party.members.filter(m => m.userId === session.userId || inLobbyNames.has(m.displayName)).length
+  // Keyed by Discord id, not display name — two members can share a name, and a
+  // name can change mid-party while the roster still holds the old one.
+  const inLobbyIds = new Set(lobby.rows.map(r => r.userId).filter((id): id is string => id !== null))
+  const inLobby = (m: SessionMember) => m.userId === session.userId || inLobbyIds.has(m.userId)
+  const inLobbyCount = party.members.filter(inLobby).length
+  // A member matched by Discord identity rather than by their IGN string is
+  // playing on an account the roster doesn't know about. Show which one, so the
+  // drift is visible and fixable with /party ign instead of silently papered over.
+  const playingAs = new Map<string, string>()
+  for (const r of lobby.rows) {
+    if (r.status !== 'party' || !r.userId) continue
+    const member = party.members.find(m => m.userId === r.userId)
+    const parsed = parseRiotId(r.riotId)
+    if (member && parsed && !ignMatches(member.ign, parsed.name, parsed.tag ?? '')) {
+      playingAs.set(r.userId, r.riotId)
+    }
+  }
   const guests = lobby.rows.filter(r => r.status === 'tagged' || r.status === 'intruder')
   // A closed party queues everyone who joins. The owner can wave them in from
   // here instead of going back to Discord — or deny them, which works even at
@@ -411,7 +427,7 @@ function SquadCard({ session, lcu, lobby, game, setTagFor, showToast, refreshLob
           <MemberRow key={m.userId} member={m} isSelf={m.userId === session.userId}
             lobbyExists={lobby.exists} champion={game.byUserId[m.userId] ?? null}
             ban={game.bansByUserId[m.userId] ?? null}
-            inLobby={m.userId === session.userId || inLobbyNames.has(m.displayName)} />
+            inLobby={inLobby(m)} playingAs={playingAs.get(m.userId) ?? null} />
         ))}
       </div>
 
@@ -502,11 +518,12 @@ function BanChip({ ban }: { ban: BanCheck }) {
   )
 }
 
-function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion, ban }: {
+function MemberRow({ member: m, isSelf, lobbyExists, inLobby, playingAs, champion, ban }: {
   member: SessionMember
   isSelf: boolean
   lobbyExists: boolean
   inLobby: boolean
+  playingAs: string | null  // live Riot ID, when it differs from the roster's IGN
   champion: ChampionPick | null
   ban: BanCheck | null
 }) {
@@ -528,8 +545,11 @@ function MemberRow({ member: m, isSelf, lobbyExists, inLobby, champion, ban }: {
           <span className="truncate">{m.displayName}{isSelf ? ' (you)' : ''}</span>
           {m.isOwner && <Crown className="size-3.5 shrink-0 text-warning" aria-label="Party owner" />}
         </p>
-        <p className="truncate text-[0.7rem] text-muted-foreground">
-          {m.ign ?? 'No IGN — set with /party ign in Discord'}
+        <p className="truncate text-[0.7rem] text-muted-foreground"
+          title={playingAs ? `In the lobby as ${playingAs} — update it with /party ign in Discord` : undefined}>
+          {playingAs
+            ? <>in lobby as <span className="text-foreground">{playingAs}</span>{m.ign ? ` · IGN says ${m.ign}` : ''}</>
+            : m.ign ?? 'No IGN — set with /party ign in Discord'}
         </p>
       </div>
       {chip}

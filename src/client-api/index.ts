@@ -20,7 +20,7 @@ const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 //   GET    /client/session     (Bearer)  -> { userId, displayName, guildId, canInvite, party | null }
 //   DELETE /client/session     (Bearer)  -> { ok }
 //   POST   /client/party/game  (Bearer) { game } -> { ok, game? } | { ok: false, error }
-//   POST   /client/lookup      (Bearer) { riotIds } -> { players: Record<riotId, { userId, displayName } | null> }
+//   POST   /client/lookup      (Bearer) { riotIds } -> { players: Record<riotId, { userId, displayName, inParty } | null> }
 //   POST   /client/party/add   (Bearer) { userId } -> { ok, party? } | { ok: false, error }
 //   POST   /client/party/approve (Bearer) { userId } -> { ok } | { ok: false, error }
 //   POST   /client/party/deny    (Bearer) { userId } -> { ok } | { ok: false, error }
@@ -236,11 +236,18 @@ function parseRiotId(raw: string): { name: string; tag: string } | null {
 export interface LookupHit {
   userId: string
   displayName: string
+  /** True when this Riot ID belongs to someone already in the caller's party. */
+  inParty: boolean
 }
 
 // Reverse-looks-up Riot IDs the client saw in the live League lobby against
 // registered player profiles, so it can tell "not in the party" apart from
 // "not in the system at all" and offer to add the former straight from the app.
+//
+// Hits that resolve to a current member are reported too, with `inParty: true`.
+// The client asks about a Riot ID precisely because its own IGN snapshot didn't
+// match it, so "that's your own member, renamed" is the answer it most needs —
+// swallowing it here is what made renamed members show up as intruders.
 async function lookupPlayers(req: Request, env: AppBindings): Promise<Response> {
   const auth = await authenticate(req, env)
   if (!auth) return json({ error: 'Not linked.' }, 401)
@@ -261,17 +268,28 @@ async function lookupPlayers(req: Request, env: AppBindings): Promise<Response> 
   const party = await parties.getParty(env.DB, rec.guildId, partyId)
   if (!party) return json({ error: 'Party not found.' }, 404)
 
-  const memberIds = new Set(party.members.map(m => m.userId))
+  const membersById = new Map(party.members.map(m => [m.userId, m]))
   const players: Record<string, LookupHit | null> = {}
 
   await Promise.all(riotIds.map(async (riotId) => {
     const parsed = parseRiotId(riotId)
     if (!parsed) { players[riotId] = null; return }
     const userId = await findUserIdByRiotId(env.DB, party.game, parsed.name, parsed.tag)
-    if (!userId || memberIds.has(userId)) { players[riotId] = null; return }
+    if (!userId) { players[riotId] = null; return }
+    // Already a member: answer from the roster the client is rendering, so the
+    // name it shows lines up with the party list — and skip the Discord fetch.
+    const partyMember = membersById.get(userId)
+    if (partyMember) {
+      players[riotId] = { userId, displayName: partyMember.displayName, inParty: true }
+      return
+    }
     const member = await getGuildMember(env.DISCORD_BOT_TOKEN, rec.guildId, userId).catch(() => null)
     if (!member?.user) { players[riotId] = null; return } // left the server, or never joined it
-    players[riotId] = { userId, displayName: member.nick ?? member.user.global_name ?? member.user.username }
+    players[riotId] = {
+      userId,
+      displayName: member.nick ?? member.user.global_name ?? member.user.username,
+      inParty: false,
+    }
   }))
 
   return json({ players })

@@ -9,7 +9,10 @@ import {
   getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode, lookupPlayers, reportGame, setAutoJoinSettings, setPartyGame,
   setTaggedPlayers, type ChampionCatalog,
 } from './bot'
-import { crossReference, formatRiotId, ignMatches, parseRiotId, type LobbyEntry, type PartyEntry } from '../shared/match'
+import {
+  crossReference, formatRiotId, ignMatches, parseRiotId, reconcileKnownPlayers,
+  type LobbyEntry, type PartyEntry,
+} from '../shared/match'
 import type {
   AutoJoinSettings, BanCheck, ChampionPick, GamePhase, GameView, InviteOutcome, InviteResult, LcuStatus,
   LobbyMode, LobbyView, Session, SessionResult, SummonerInfo, TaggedPlayer,
@@ -389,17 +392,15 @@ async function lobbyStatus(): Promise<LobbyView> {
 
   const view = crossReference(roster, lobby, lastSession?.userId ?? null, summoner?.puuid ?? null, getTaggedPlayers())
 
-  // Recognize intruders who are registered PartyBot users, so the UI can show
-  // their Discord tag and offer to add them instead of just flagging them.
+  // Ask the bot who these Riot IDs actually belong to. That answers two
+  // questions at once: which intruders are registered PartyBot users (so the UI
+  // can name them instead of just flagging them), and which are party members
+  // whose IGN snapshot has drifted from the account they're playing on — those
+  // are reclassified rather than accused of crashing the lobby.
   const intruderIds = view.rows.filter(r => r.status === 'intruder').map(r => r.riotId)
-  if (intruderIds.length > 0) {
-    const known = await lookupPlayers(intruderIds)
-    for (const row of view.rows) {
-      if (row.status === 'intruder') row.known = known[row.riotId] ?? null
-    }
-  }
+  if (intruderIds.length === 0) return view
 
-  return view
+  return reconcileKnownPlayers(view, roster, await lookupPlayers(intruderIds))
 }
 
 // ── Champion picks (champ select + live game) ────────────────────────────────
