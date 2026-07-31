@@ -77,55 +77,91 @@ export interface ChampSelectPick {
 
 export interface ChampSelectData {
   picks: ChampSelectPick[]   // hovered/locked champions, both teams
-  bannedIds: number[]        // champion ids banned so far, both teams
-  banPhaseDone: boolean      // true once every ban action in the draft is completed
+  bannedIds: number[]        // champion ids revealed as banned so far, both teams
+  banPhaseDone: boolean      // true once every ban in the draft has been revealed
+}
+
+/** Champion ids out of one of the `bans.myTeamBans`-style arrays. The client
+ *  has sent these as bare ids and as `{ championId }` objects depending on the
+ *  version, and pads them with 0/-1 for bans not revealed yet. */
+function collectBanIds(raw: unknown, into: Set<number>): void {
+  if (!Array.isArray(raw)) return
+  for (const entry of raw) {
+    const id = Number(entry !== null && typeof entry === 'object' ? (entry as any).championId : entry)
+    if (Number.isFinite(id) && id > 0) into.add(id)
+  }
+}
+
+/**
+ * Picks and bans out of a raw `/lol-champ-select/v1/session` body.
+ *
+ * Bans come back as a flat set of champion ids: the client hides who cast an
+ * enemy ban, and the inhouse assigns each member a distinct champion, so
+ * "was this champion banned at all" is the only thing worth reading here.
+ */
+export function parseChampSelect(body: any): ChampSelectData {
+  const picks: ChampSelectPick[] = []
+  for (const team of [body?.myTeam, body?.theirTeam]) {
+    if (!Array.isArray(team)) continue
+    for (const cell of team) {
+      const puuid: unknown = cell?.puuid
+      // An unlocked cell reports championId 0 and carries the hover in
+      // championPickIntent, so fall through on 0 rather than only on nullish.
+      const locked = Number(cell?.championId ?? 0)
+      const intent = Number(cell?.championPickIntent ?? 0)
+      const pick = Number.isFinite(locked) && locked > 0 ? locked : intent
+      if (typeof puuid === 'string' && puuid && Number.isFinite(pick) && pick > 0) {
+        picks.push({ puuid, championId: pick })
+      }
+    }
+  }
+
+  // Bans arrive by two routes and neither is complete on its own. `actions`
+  // carries each ban as it's cast, but now that both teams ban simultaneously
+  // the client withholds the enemy's picks there — those actions complete with
+  // championId 0 and the real ids only ever show up in `bans.theirTeamBans`
+  // at the reveal. Union both, so a champion counts however it was revealed.
+  const banned = new Set<number>()
+  let banActions = 0
+  let bansPending = 0
+  if (Array.isArray(body?.actions)) {
+    for (const phase of body.actions) {
+      if (!Array.isArray(phase)) continue
+      for (const a of phase) {
+        if (a?.type !== 'ban') continue
+        banActions++
+        // An incomplete ban's championId is the caster's hover, not a ban yet.
+        if (!a?.completed) { bansPending++; continue }
+        const championId = Number(a?.championId ?? 0)
+        if (championId > 0) banned.add(championId)
+      }
+    }
+  }
+  collectBanIds(body?.bans?.myTeamBans, banned)
+  collectBanIds(body?.bans?.theirTeamBans, banned)
+
+  // Completion normally comes from the actions. Should a future client stop
+  // exposing ban actions entirely, fall back to the draft's declared ban count
+  // so the phase can't hang as permanently in-progress.
+  const numBans = Number(body?.bans?.numBans ?? 0)
+  const banPhaseDone = banActions > 0
+    ? bansPending === 0
+    : numBans > 0 && banned.size >= numBans
+
+  return { picks, bannedIds: [...banned], banPhaseDone }
 }
 
 /**
  * Picks and bans from the local champ-select session. Works for every lobby
  * type (customs included, unlike the Spectator API) and updates live as players
  * hover/lock/ban. Empty when not in champ select.
- *
- * Bans come back as a flat set of champion ids: the client hides who cast an
- * enemy ban, and the inhouse assigns each member a distinct champion, so
- * "was this champion banned at all" is the only thing worth reading here.
  */
 export async function fetchChampSelect(creds: LcuCreds): Promise<ChampSelectData> {
   const empty: ChampSelectData = { picks: [], bannedIds: [], banPhaseDone: false }
   try {
     const res = await lcuRequest(creds, 'GET', '/lol-champ-select/v1/session')
     if (res.status !== 200) return empty
-    const body = res.body
-
-    const picks: ChampSelectPick[] = []
-    for (const team of [body?.myTeam, body?.theirTeam]) {
-      if (!Array.isArray(team)) continue
-      for (const cell of team) {
-        const puuid: unknown = cell?.puuid
-        const pick = Number(cell?.championId ?? cell?.championPickIntent ?? 0)
-        if (typeof puuid === 'string' && puuid && Number.isFinite(pick) && pick > 0) {
-          picks.push({ puuid, championId: pick })
-        }
-      }
-    }
-
-    // Every ban action across the draft; the phase is done once none are pending.
-    const bannedIds: number[] = []
-    let banActions = 0
-    let bansPending = 0
-    if (Array.isArray(body?.actions)) {
-      for (const phase of body.actions) {
-        if (!Array.isArray(phase)) continue
-        for (const a of phase) {
-          if (a?.type !== 'ban') continue
-          banActions++
-          if (!a?.completed) { bansPending++; continue }
-          const championId = Number(a?.championId ?? 0)
-          if (championId > 0) bannedIds.push(championId)
-        }
-      }
-    }
-    return { picks, bannedIds, banPhaseDone: banActions > 0 && bansPending === 0 }
+    return parseChampSelect(res.body)
   } catch {
     return empty
   }
