@@ -24,6 +24,10 @@ export default defineConfig(async () => {
       }),
     ],
     test: {
+      // Only this project's tests. Everything here runs inside the Workers
+      // runtime, which has no node builtins — the desktop client's suite is
+      // plain Node and runs from client/ with its own config.
+      include: ['test/**/*.spec.ts'],
       setupFiles: ['./test/apply-migrations.ts'],
     },
   }
