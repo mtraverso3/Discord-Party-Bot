@@ -525,7 +525,11 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
     return c.followup({ content: 'Only the party owner or a designated bumper can bump the party.', flags: 64 })
   }
 
-  await repostPartyEmbed(c.env, party, channelId)
+  // A bump that lost the race to a simultaneous one posted nothing — the
+  // party has already been moved to the bottom of the channel.
+  if (await repostPartyEmbed(c.env, party, channelId) === 'superseded') {
+    return c.followup({ content: 'Someone bumped this party at the same time — their message is the live one.', flags: 64 })
+  }
 
   return c.followup({ content: 'Party bumped!', flags: 64 })
 }

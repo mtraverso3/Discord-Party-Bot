@@ -45,6 +45,23 @@ export async function deleteMessage(
   await discordFetch(token, `/channels/${channelId}/messages/${messageId}`, { method: 'DELETE' })
 }
 
+export interface ChannelMessage {
+  id: string
+  author?: { id: string; bot?: boolean }
+  embeds?: Array<{ timestamp?: string; footer?: { text?: string } }>
+}
+
+/** Most recent messages in a channel, newest first. Needs READ_MESSAGE_HISTORY. */
+export async function getChannelMessages(
+  token: string,
+  channelId: string,
+  limit: number,
+): Promise<ChannelMessage[]> {
+  const res = await discordFetch(token, `/channels/${channelId}/messages?limit=${limit}`)
+  if (!res.ok) throw new Error(`getChannelMessages failed: ${res.status}`)
+  return res.json<ChannelMessage[]>()
+}
+
 // Edits the deferred response for an interaction (uses the interaction token,
 // not the bot token — no auth header needed).
 export async function editInteractionResponse(
