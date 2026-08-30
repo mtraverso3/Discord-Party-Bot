@@ -1,8 +1,8 @@
 import type { AppBindings, PartyData } from '../types'
-import { createParty, disbandParty, setEmbedMessage } from '../store/parties'
+import { claimEmbedRepost, createParty, disbandParty, getParty, setEmbedMessage } from '../store/parties'
 import { randomId } from './id'
-import { deleteMessage, editMessage, postMessage } from './discord'
-import { buildDisbandedEmbed, buildPartyComponents, buildPartyEmbed } from './embeds'
+import { deleteMessage, editMessage, getChannelMessages, postMessage } from './discord'
+import { buildDisbandedEmbed, buildPartyComponents, buildPartyEmbed, isPartyEmbedMessage } from './embeds'
 
 // Orchestration that spans the store and the Discord API: posting/refreshing
 // party embeds and the create-party flow.
@@ -112,17 +112,98 @@ export async function createPartyAndEmbed(
   return { ok: true, party: final ?? party }
 }
 
-/** Delete the old embed (if any) and post a fresh one in the given channel. */
+// How far back a bump looks for duplicate embeds to clean up, and how many it
+// will delete in one pass — both bounded so a bump stays a handful of calls.
+const STALE_SCAN_LIMIT = 50
+const STALE_DELETE_LIMIT = 10
+
+export type RepostResult =
+  | 'reposted'    // this call posted the new embed
+  | 'superseded'  // someone else's concurrent bump won; nothing was posted
+
+/**
+ * Move the party's embed to the bottom of the channel: post a fresh one and
+ * delete the old one.
+ *
+ * Concurrent bumps used to each post their own embed and then race to record
+ * it, leaving every loser's message orphaned in the channel forever. The
+ * repost is now claimed in the database *before* anything is posted, so only
+ * one caller of a concurrent set posts at all; the rest get 'superseded'.
+ */
 export async function repostPartyEmbed(
   env: AppBindings,
   party: PartyData,
   channelId: string,
-): Promise<void> {
-  if (party.embedMessageId && party.embedChannelId) {
-    try { await deleteMessage(env.DISCORD_BOT_TOKEN, party.embedChannelId, party.embedMessageId) } catch { /* already gone */ }
+): Promise<RepostResult> {
+  const previousId = party.embedMessageId
+  const previousChannelId = party.embedChannelId
+
+  if (previousId) {
+    const claimed = await claimEmbedRepost(env.DB, party.guildId, party.id, previousId)
+    if (!claimed) return 'superseded'
   }
-  const msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, party)
+
+  // Re-read: the caller's snapshot may predate a join that landed while we
+  // were claiming, and the new embed should show the party as it is now.
+  const fresh = await getParty(env.DB, party.guildId, party.id) ?? party
+
+  let msg: { id: string }
+  try {
+    msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, fresh)
+  } catch (e) {
+    // Nothing was posted and the old message is still there — hand the
+    // pointer back so the party doesn't end up with no embed at all.
+    if (previousId && previousChannelId) {
+      await setEmbedMessage(env.DB, party.guildId, party.id, previousId, previousChannelId).catch(() => {})
+    }
+    throw e
+  }
+
   await setEmbedMessage(env.DB, party.guildId, party.id, msg.id, channelId)
+
+  if (previousId && previousChannelId) {
+    try { await deleteMessage(env.DISCORD_BOT_TOKEN, previousChannelId, previousId) } catch { /* already gone */ }
+  }
+  await deleteStalePartyEmbeds(env, fresh, channelId, msg.id)
+  return 'reposted'
+}
+
+/**
+ * Failsafe: delete this party's older embeds left in the channel — duplicates
+ * from a bump that raced before the claim existed, or an old message whose
+ * delete failed. A message has to clear every check to go:
+ *   * posted by this bot,
+ *   * carries this party's ID (see isPartyEmbedMessage),
+ *   * belongs to this run of that ID, not an earlier party that reused it,
+ *   * older than the embed we just posted — so two sweeps can never delete
+ *     each other's message and leave the party with none.
+ * Cleanup never fails a bump: the embed is already posted by this point.
+ */
+async function deleteStalePartyEmbeds(
+  env: AppBindings,
+  party: PartyData,
+  channelId: string,
+  keepMessageId: string,
+): Promise<void> {
+  try {
+    const keep = BigInt(keepMessageId)
+    const messages = await getChannelMessages(env.DISCORD_BOT_TOKEN, channelId, STALE_SCAN_LIMIT)
+    const stale = messages
+      .filter(m =>
+        m.id !== keepMessageId
+        && m.author?.id === env.DISCORD_APPLICATION_ID
+        && isPartyEmbedMessage(m, party)
+        && BigInt(m.id) < keep)
+      .slice(0, STALE_DELETE_LIMIT)
+    for (const m of stale) {
+      await deleteMessage(env.DISCORD_BOT_TOKEN, channelId, m.id)
+    }
+    if (stale.length > 0) {
+      console.warn(`cleaned up ${stale.length} duplicate embed(s) for party ${party.id} in guild ${party.guildId}`)
+    }
+  } catch (e) {
+    console.warn(`duplicate-embed cleanup failed for party ${party.id} in guild ${party.guildId}:`, e)
+  }
 }
 
 // ── Interaction helpers ──────────────────────────────────────────────────────

@@ -745,6 +745,23 @@ export async function updateParty(db: D1Database, guildId: string, partyId: stri
   return { status: 'updated', data: after, promoted, nameChanged, gameChanged }
 }
 
+/**
+ * Claim the right to repost this party's embed, parking the pointer at NULL
+ * until the caller lands the new message id. Concurrent bumps all read the
+ * same `expectedMessageId`, but D1 serializes the writes so only the first
+ * UPDATE matches it — the losers see changes = 0 and must not post a second
+ * embed. Returns false when someone else already claimed it.
+ */
+export async function claimEmbedRepost(
+  db: D1Database, guildId: string, partyId: string, expectedMessageId: string,
+): Promise<boolean> {
+  const res = await db.prepare(`
+    UPDATE parties SET embed_message_id = NULL
+    WHERE guild_id = ?1 AND id = ?2 AND embed_message_id = ?3
+  `).bind(guildId, partyId, expectedMessageId).run()
+  return !!res.meta.changes
+}
+
 export async function setEmbedMessage(
   db: D1Database, guildId: string, partyId: string, messageId: string, channelId: string,
 ): Promise<PartyData | null> {

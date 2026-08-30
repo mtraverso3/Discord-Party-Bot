@@ -1,5 +1,11 @@
 import type { PartyData } from '../types'
 
+// The party ID as it appears in the embed footer — also what
+// isPartyEmbedMessage matches on, so the two stay in step.
+function partyIdFooter(party: PartyData): string {
+  return `ID: ${party.id}`
+}
+
 function embedColor(party: PartyData): number {
   if (party.isClosed) return 0xed4245
   if (party.members.length >= party.maxSize) return 0xfee75c
@@ -50,10 +56,29 @@ export function buildPartyEmbed(party: PartyData) {
     color: embedColor(party),
     fields,
     footer: {
-      text: `${party.game} · ${statusLabel} · ID: ${party.id}`,
+      text: `${party.game} · ${statusLabel} · ${partyIdFooter(party)}`,
     },
     timestamp: new Date(party.createdAt).toISOString(),
   }
+}
+
+/**
+ * Whether `message` is one of our embeds for this exact party *run*. The
+ * footer ID pins the party, and the embed timestamp — which is the party's
+ * creation time — pins the run, so a leftover message from an older party
+ * that happened to draw the same short ID never matches. Callers still have
+ * to confirm the message was posted by the bot.
+ */
+export function isPartyEmbedMessage(
+  message: { embeds?: Array<{ timestamp?: string; footer?: { text?: string } }> },
+  party: PartyData,
+): boolean {
+  const embed = message.embeds?.[0]
+  if (!embed?.footer?.text?.endsWith(partyIdFooter(party))) return false
+  // Discord echoes the timestamp back with its own precision and offset
+  // format, so compare the instants at second granularity, not the strings.
+  const posted = Date.parse(embed.timestamp ?? '')
+  return !Number.isNaN(posted) && Math.floor(posted / 1000) === Math.floor(party.createdAt / 1000)
 }
 
 export function buildPartyComponents(party: PartyData) {
