@@ -33,6 +33,50 @@ added to the **Desktop client inviters** list in the bot's admin UI.
 > Windows SmartScreen may warn on first run because the executable is not
 > code-signed. Choose "More info → Run anyway".
 
+## Troubleshooting
+
+The app has a built-in version of this page: when League isn't connected or no
+party is showing, a **Troubleshoot** button appears under the header, and the
+causes that match what the app is currently seeing are flagged at the top.
+
+**The badge says "League offline" while League is open.**
+
+The app finds your client by reading the `LeagueClientUx.exe` command line —
+that's where League publishes the port and auth token for its local API. A few
+things stop that from working:
+
+- **Elevation mismatch — the usual cause.** If League or the Riot Client runs
+  as administrator and PartyBot doesn't, Windows hands back the process with a
+  blank command line, so the app can't see the client at all. Either run
+  PartyBot as administrator too, or stop running Riot Client and League as
+  administrator — they only have to match. To see what's elevated, open Task
+  Manager → **Details**, right-click any column heading → **Select columns**,
+  and tick **Elevated**.
+- **Only the Riot Client is open.** The League client proper has to be up; the
+  launcher/login screen alone isn't enough.
+- **Antivirus.** PartyBot shells out to PowerShell every few seconds and then
+  makes HTTPS calls to `127.0.0.1`, which some security software blocks.
+
+To tell which one it is, open PowerShell with League running:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='LeagueClientUx.exe'" |
+  Select-Object -ExpandProperty CommandLine
+```
+
+A long line of `--flag=value` pairs means discovery works and the problem is on
+the HTTPS side — allow-list the exe in your antivirus. Blank output while
+League is open is the elevation case; retry in an administrator PowerShell to
+confirm. An error means WMI itself is broken on that machine.
+
+**Your party never shows up.**
+
+The link created by `/party link` is tied to the Discord server you ran the
+command in, and the bot only looks for your party inside that server. Link from
+one server while your party lives in another and the app sits on "No active
+party" forever. Fix it by hitting **Unlink account** at the bottom of the app
+and running `/party link` again in the same server as the party.
+
 ## Development
 
 ```sh

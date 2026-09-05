@@ -146,3 +146,5 @@ A portable Windows app (`client/`) for party leaders running League of Legends. 
 When a linked member starts a League match, the client also reports the game (its ID + region) to the bot, which records it against the party and — with `RIOT_API_KEY` set — resolves the participants and champions from the Riot Match-v5 API on the next cron sweep. Those games show up under the party's **Games** tab and in the **History** view.
 
 Built as a single portable `.exe` (Electron) by the **Desktop client** GitHub Actions workflow — run it manually or push a `client-v*` tag to publish a release. See [client/README.md](client/README.md).
+
+If the app shows **League offline** with the client open, it is almost always an administrator mismatch between League and PartyBot — see [Troubleshooting](client/README.md#troubleshooting).
