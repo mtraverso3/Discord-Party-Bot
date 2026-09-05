@@ -11,6 +11,7 @@ import type {
 } from '../shared/types'
 import { LOBBY_MODES } from '../shared/types'
 import { ignMatches, parseRiotId } from '../shared/match'
+import { hasTrouble, TroubleshootingButton, TroubleshootingPage, type TroubleContext } from './Troubleshooting'
 import { Avatar, Badge, Button, Card, EmptyState, Input, Select, StatusDot, Switch } from './ui'
 
 declare global {
@@ -65,7 +66,7 @@ export function App() {
   const [game, setGame] = useState<GameView>(EMPTY_GAME)
   const [autoJoin, setAutoJoin] = useState<AutoJoinSettings>({ enabled: false, targetName: '', inviteParty: false })
   const [tagged, setTagged] = useState<TaggedPlayer[]>([])
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [page, setPage] = useState<Page>('main')
   const { toast, show } = useToast()
 
   // Latest values for the interval callbacks.
@@ -146,14 +147,23 @@ export function App() {
 
   const screen = !link.linked ? 'link' : !session?.party ? 'no-party' : 'party'
 
+  // What the troubleshooting page highlights. An unlinked client isn't "no
+  // party" — it has its own screen walking you through linking.
+  const trouble: TroubleContext = { leagueOffline: !lcu.connected, noParty: screen === 'no-party' }
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex min-h-full w-full max-w-xl flex-col gap-3 p-4">
-        <Header lcu={lcu} link={link} settingsOpen={settingsOpen} onToggleSettings={() => setSettingsOpen(o => !o)} />
-        {settingsOpen ? (
+        <Header lcu={lcu} link={link} page={page} onNav={setPage} />
+        {page === 'settings' ? (
           <SettingsPage tagged={tagged} setTagFor={setTagFor} showToast={show} />
+        ) : page === 'troubleshooting' ? (
+          <TroubleshootingPage ctx={trouble} />
         ) : (
           <>
+            {hasTrouble(trouble) && (
+              <TroubleshootingButton ctx={trouble} onOpen={() => setPage('troubleshooting')} />
+            )}
             <AutoJoinCard autoJoin={autoJoin} onChange={saveAutoJoin} />
             {screen === 'link' && (
               <LinkScreen onLinked={async (name) => {
@@ -200,19 +210,28 @@ function StatusPill({ on, children }: { on: boolean; children: ReactNode }) {
   )
 }
 
-function Header({ lcu, link, settingsOpen, onToggleSettings }: {
+export type Page = 'main' | 'settings' | 'troubleshooting'
+
+const PAGE_TITLES: Record<Page, string> = {
+  main: 'PartyBot',
+  settings: 'Settings',
+  troubleshooting: 'Troubleshooting',
+}
+
+function Header({ lcu, link, page, onNav }: {
   lcu: LcuStatus
   link: LinkState
-  settingsOpen: boolean
-  onToggleSettings: () => void
+  page: Page
+  onNav: (page: Page) => void
 }) {
+  const atRoot = page === 'main'
   return (
     <header className="flex items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
           <Gamepad2 className="size-4" />
         </span>
-        <h1 className="truncate text-[0.95rem] font-bold tracking-tight">{settingsOpen ? 'Settings' : 'PartyBot'}</h1>
+        <h1 className="truncate text-[0.95rem] font-bold tracking-tight">{PAGE_TITLES[page]}</h1>
       </div>
       <StatusPill on={lcu.connected}>
         {lcu.connected ? (lcu.summoner ? `${lcu.summoner.gameName}#${lcu.summoner.tagLine}` : 'League') : 'League offline'}
@@ -220,8 +239,8 @@ function Header({ lcu, link, settingsOpen, onToggleSettings }: {
       <StatusPill on={link.linked}>
         {link.linked ? (link.displayName ?? 'Linked') : 'Not linked'}
       </StatusPill>
-      <Button variant="ghost" size="icon" title={settingsOpen ? 'Back' : 'Settings'} onClick={onToggleSettings}>
-        {settingsOpen ? <ArrowLeft /> : <SettingsIcon />}
+      <Button variant="ghost" size="icon" title={atRoot ? 'Settings' : 'Back'} onClick={() => onNav(atRoot ? 'settings' : 'main')}>
+        {atRoot ? <SettingsIcon /> : <ArrowLeft />}
       </Button>
     </header>
   )
