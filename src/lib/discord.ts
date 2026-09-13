@@ -1,14 +1,39 @@
 const BASE = 'https://discord.com/api/v10'
 
-function discordFetch(token: string, path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bot ${token}`,
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
-  })
+// Discord throttles per message and per channel, and an embed can take a burst
+// of edits (joins, BRB toggles, bumps) before something important like the
+// disband tombstone lands. Without this a 429 is just a failed request the
+// caller logs and forgets, leaving the message stale on screen. Waits come
+// from Discord's own Retry-After header and are bounded, since this runs
+// inside a Worker.
+const RATE_LIMIT_RETRIES = 2
+const MAX_RETRY_WAIT_MS = 5000
+
+/** Retry-After in ms, or null when it's absent or longer than we'll wait. */
+function retryAfterMs(res: Response): number | null {
+  const header = res.headers.get('retry-after')
+  if (!header) return null
+  const ms = Number(header) * 1000
+  if (!Number.isFinite(ms) || ms < 0 || ms > MAX_RETRY_WAIT_MS) return null
+  return ms
+}
+
+async function discordFetch(token: string, path: string, init: RequestInit = {}): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${BASE}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bot ${token}`,
+        'Content-Type': 'application/json',
+        ...(init.headers ?? {}),
+      },
+    })
+    // Only the header is read, so the body is still intact for the caller.
+    const wait = res.status === 429 && attempt < RATE_LIMIT_RETRIES ? retryAfterMs(res) : null
+    if (wait === null) return res
+    console.warn(`Discord rate-limited ${path} — retrying in ${wait}ms`)
+    await new Promise(resolve => setTimeout(resolve, wait))
+  }
 }
 
 export async function postMessage(

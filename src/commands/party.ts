@@ -583,7 +583,7 @@ async function clearAll(c: CommandContext<AppEnv>, guildId: string) {
   const cleared = await parties.disbandAllParties(c.env.DB, guildId)
   if (cleared.length === 0) return c.followup({ content: 'No active parties to clear.', flags: 64 })
 
-  await Promise.all(cleared.map(party => tryMarkDisbanded(c.env.DISCORD_BOT_TOKEN, party)))
+  await Promise.all(cleared.map(party => tryMarkDisbanded(c.env, party)))
 
   return c.followup({ content: `Cleared ${cleared.length} ${cleared.length === 1 ? 'party' : 'parties'}.`, flags: 64 })
 }
@@ -651,7 +651,13 @@ async function disband(c: CommandContext<AppEnv>, guildId: string, userId: strin
   if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can disband the party.', flags: 64 })
 
-  await tryMarkDisbanded(c.env.DISCORD_BOT_TOKEN, result.data!)
+  const party = result.data!
+  const updated = await tryMarkDisbanded(c.env, party)
+  // Saying "disbanded" while the embed still sits there with live buttons is
+  // worse than saying nothing — the party is gone either way.
+  const note = updated === 0 && party.embedChannelId
+    ? " I couldn't update the party message in the channel, so you may need to delete it yourself."
+    : ''
 
-  return c.followup({ content: `**${result.data!.name}** has been disbanded.`, flags: 64 })
+  return c.followup({ content: `**${party.name}** has been disbanded.${note}`, flags: 64 })
 }
