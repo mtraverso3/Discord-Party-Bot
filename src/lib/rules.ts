@@ -91,12 +91,17 @@ export function rulesAccess(env: AppBindings): RulesAccess {
 
 /**
  * Whether this member is only getting in because they are an admin — true when
- * the guild gates parties, they have not passed the check, and they are on the
- * admin list. The reply paths use it to warn them rather than refuse them.
+ * the party asked for the check, the guild has one, they have not passed it,
+ * and they are on the admin list. The reply paths use it to warn them rather
+ * than refuse them.
+ *
+ * `partyRequiresRules` is not optional on purpose: without it a call site can
+ * quietly warn someone who joined a party that never asked for a check.
  */
 export async function exemptFromRules(
-  env: AppBindings, guildId: string, userId: string,
+  env: AppBindings, guildId: string, userId: string, partyRequiresRules: boolean,
 ): Promise<boolean> {
+  if (!partyRequiresRules) return false
   const gate = await getRulesGate(env.DB, guildId)
   if (!gate?.enabled) return false
   if ((await filterApproved(env.DB, guildId, [userId])).length > 0) return false

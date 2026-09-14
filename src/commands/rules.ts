@@ -113,12 +113,17 @@ export async function handleRulesPage(c: ComponentContext<AppEnv>) {
   const guildId = c.interaction.guild_id!
   const { userId } = extractMemberInfo(c.interaction)
   const page = parseInt((c.interaction.data as any).custom_id as string, 10)
-  const [config, member] = await Promise.all([
-    getRulesConfig(c.env.DB, guildId),
-    getMember(c.env.DB, guildId, userId),
-  ])
-  const { flags, ...payload } = renderRulesPage(config, Number.isFinite(page) ? page : 0, member.state === 'approved')
-  return c.resUpdate(payload)
+  try {
+    const [config, member] = await Promise.all([
+      getRulesConfig(c.env.DB, guildId),
+      getMember(c.env.DB, guildId, userId),
+    ])
+    const { flags, ...payload } = renderRulesPage(config, Number.isFinite(page) ? page : 0, member.state === 'approved')
+    return c.resUpdate(payload)
+  } catch (e) {
+    console.error('rules page failed:', e)
+    return c.resUpdate({ content: 'Could not load that page. Try `/party rules` again.', embeds: [], components: [] })
+  }
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────

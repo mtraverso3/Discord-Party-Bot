@@ -46,7 +46,7 @@ async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boole
     await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
     const data = result.data!
-    const warning = await exemptFromRules(c.env, guildId, userId) ? RULES_EXEMPT_WARNING : ''
+    const warning = await exemptFromRules(c.env, guildId, userId, data.rulesRequired) ? RULES_EXEMPT_WARNING : ''
     if (result.status === 'joined') {
       return c.followup({
         content: (fromQueueButton

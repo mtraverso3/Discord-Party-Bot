@@ -268,7 +268,7 @@ describe('admin exemption', () => {
     await revoke(guildId, ADMIN)
     await expect(rulesAccess(env).require(guildId, ADMIN)).rejects.toThrow('revoked')
     await expect(parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)).rejects.toThrow('revoked')
-    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(false)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(false)
   })
 
   it('removes a revoked admin on the next sweep', async () => {
@@ -292,7 +292,7 @@ describe('admin exemption', () => {
     // "Require retake without penalty" is the undo for a revocation.
     await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'Sorted out', false, false)
     await rulesAccess(env).require(guildId, ADMIN)
-    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(true)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
   })
 
   it('restores the exemption once a revoked admin passes the check', async () => {
@@ -307,7 +307,22 @@ describe('admin exemption', () => {
 
     // A later non-disciplinary lapse leaves them exempt again.
     await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'New season', false, false)
-    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(true)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
+  })
+
+  it('does not warn an admin who joined a party that never asked for the check', async () => {
+    // The guild has a check and the admin has not passed it, but this party is
+    // open — so there is nothing to excuse and nothing to warn about.
+    const guildId = String(BigInt(G) + BigInt(9700 + seq++))
+    await saveRulesGate(env.DB, guildId, { enabled: true })
+    await makeAdmin(guildId)
+    await parties.createParty(env.DB, {
+      id: `N${seq++}`, guildId, name: 'Open', description: '', game: 'Other',
+      owner: user(ADMIN), maxSize: 4,
+    }, rulesAccess(env))
+
+    expect(await exemptFromRules(env, guildId, ADMIN, false)).toBe(false)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
   })
 
   it('only exempts admins of that server', async () => {
@@ -321,14 +336,14 @@ describe('admin exemption', () => {
   it('flags an exempt admin for warning, but not an approved one', async () => {
     const { guildId } = await make()
     await makeAdmin(guildId)
-    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(true)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
 
     // An admin who has passed is not "let in because they are an admin".
     await approve(guildId, ADMIN)
-    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(false)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(false)
 
     // Nor is anyone in a guild that does not gate.
-    expect(await exemptFromRules(env, String(BigInt(G) + 9500n), ADMIN)).toBe(false)
+    expect(await exemptFromRules(env, String(BigInt(G) + 9500n), ADMIN, true)).toBe(false)
   })
 })
 

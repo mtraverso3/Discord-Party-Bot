@@ -178,7 +178,7 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     })
     if (!result.ok) return reply(result.error)
 
-    const warning = await exemptFromRules(env, guildId, userId) ? RULES_EXEMPT_WARNING : ''
+    const warning = await exemptFromRules(env, guildId, userId, result.party.rulesRequired) ? RULES_EXEMPT_WARNING : ''
     const gated = result.party.rulesRequired ? ' Members must pass the rules check to join.' : ''
     return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)${gated}` + warning)
   } catch (e) {
@@ -225,7 +225,7 @@ async function join(
   const msg = result.status === 'joined'
     ? `You joined **${result.data!.name}**!`
     : `**${result.data!.name}** is ${result.data!.isClosed ? 'closed' : 'full'} — you're in the queue at position ${result.data!.queue.length}.`
-  const warning = await exemptFromRules(c.env, guildId, userId) ? RULES_EXEMPT_WARNING : ''
+  const warning = await exemptFromRules(c.env, guildId, userId, result.data!.rulesRequired) ? RULES_EXEMPT_WARNING : ''
 
   return c.followup({ content: msg + warning, flags: 64 })
 }
@@ -478,7 +478,7 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
-  const warning = await exemptFromRules(c.env, guildId, targetId)
+  const warning = await exemptFromRules(c.env, guildId, targetId, result.data!.rulesRequired)
     ? `
 
 ⚠️ <@${targetId}> hasn't passed the rules check — added because they're an admin.`

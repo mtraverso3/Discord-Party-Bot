@@ -7,6 +7,7 @@ import { GAMES } from '../lib/games'
 import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings } from '../store/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../store/templates'
 import { appendAudit, getAudit } from '../store/audit'
+import { getRulesGate } from '../store/rules'
 import { addAdmin, getAdminDisplayName, listAdmins, removeAdmin } from '../store/adminAuth'
 import * as history from '../store/history'
 import * as games from '../store/games'
@@ -422,7 +423,10 @@ async function spawnParty(env: AppBindings, guildId: string, body: any): Promise
     game,
     maxSize,
     voiceChannelId: (body.voiceChannelId ?? '').toString() || undefined,
-    rulesRequired: !!body.rulesRequired,
+    // Same default the create form and /party create use, so the three agree.
+    rulesRequired: body.rulesRequired != null
+      ? !!body.rulesRequired
+      : (await getRulesGate(env.DB, guildId))?.defaultRequired ?? false,
   })
   if (!result.ok) return json({ error: result.error }, 400)
 
