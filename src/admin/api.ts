@@ -575,13 +575,13 @@ async function disbandOne(env: AppBindings, guildId: string, partyId: string): P
   if (result.status !== 'disbanded' || !result.data) {
     return json({ error: 'already gone' }, 404)
   }
-  await tryMarkDisbanded(env.DISCORD_BOT_TOKEN, result.data, 'disbanded by admin')
-  return json({ status: 'disbanded' })
+  const updated = await tryMarkDisbanded(env, result.data, 'disbanded by admin')
+  return json({ status: 'disbanded', embedsUpdated: updated })
 }
 
 async function clearAllParties(env: AppBindings, guildId: string): Promise<Response> {
   const cleared = await parties.disbandAllParties(env.DB, guildId)
-  await Promise.all(cleared.map(party => tryMarkDisbanded(env.DISCORD_BOT_TOKEN, party, 'cleared by admin')))
+  await Promise.all(cleared.map(party => tryMarkDisbanded(env, party, 'cleared by admin')))
   return json({ status: 'cleared', count: cleared.length })
 }
 

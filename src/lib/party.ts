@@ -36,18 +36,46 @@ export async function postPartyEmbed(
   })
 }
 
-export async function markDisbanded(token: string, party: PartyData, reason?: string): Promise<void> {
-  if (!party.embedMessageId || !party.embedChannelId) return
-  await editMessage(token, party.embedChannelId, party.embedMessageId, {
-    embeds: [buildDisbandedEmbed(party, reason)],
-    components: [],
-  })
-}
+/**
+ * Grey out the party's message(s) in the channel. Returns how many were
+ * updated — 0 means the party still looks live on screen, which the caller
+ * should say out loud rather than reporting a clean disband.
+ *
+ * The message the database points at is only the one we know about: a bump
+ * that raced before the embed claim existed could leave duplicates behind, and
+ * the pointer names whichever of them was recorded last — not necessarily the
+ * one at the bottom of the channel. If the pointer was lost mid-bump there may
+ * be no tracked message at all. So the channel is also scanned for anything
+ * carrying this party's embed, and every match is tombstoned; otherwise a
+ * disbanded party keeps advertising itself with live buttons.
+ *
+ * Never throws: a disband has already happened by the time this runs.
+ */
+export async function tryMarkDisbanded(env: AppBindings, party: PartyData, reason?: string): Promise<number> {
+  const channelId = party.embedChannelId
+  if (!channelId) return 0
+  const body = { embeds: [buildDisbandedEmbed(party, reason)], components: [] }
 
-export async function tryMarkDisbanded(token: string, party: PartyData, reason?: string): Promise<void> {
-  try { await markDisbanded(token, party, reason) } catch (e) {
-    console.warn(`markDisbanded failed for party ${party.id} in guild ${party.guildId}:`, e)
+  const targets = party.embedMessageId ? [party.embedMessageId] : []
+  // Untracked copies are best-effort — a channel we can't read must not stop
+  // the tracked message from being greyed out.
+  try {
+    const found = await findPartyEmbedMessages(env, party, channelId)
+    for (const id of found) if (!targets.includes(id)) targets.push(id)
+  } catch (e) {
+    console.warn(`embed scan failed for party ${party.id} in guild ${party.guildId}:`, e)
   }
+
+  let updated = 0
+  for (const id of targets.slice(0, DISBAND_EDIT_LIMIT)) {
+    try {
+      await editMessage(env.DISCORD_BOT_TOKEN, channelId, id, body)
+      updated++
+    } catch (e) {
+      console.warn(`markDisbanded failed for message ${id} of party ${party.id} in guild ${party.guildId}:`, e)
+    }
+  }
+  return updated
 }
 
 // ── Party lifecycle (shared by slash commands and the admin API) ─────────────
@@ -116,6 +144,8 @@ export async function createPartyAndEmbed(
 // will delete in one pass — both bounded so a bump stays a handful of calls.
 const STALE_SCAN_LIMIT = 50
 const STALE_DELETE_LIMIT = 10
+// Untracked copies a disband will grey out in one pass.
+const DISBAND_EDIT_LIMIT = 10
 
 export type RepostResult =
   | 'reposted'    // this call posted the new embed
@@ -169,6 +199,23 @@ export async function repostPartyEmbed(
 }
 
 /**
+ * Every message in `channelId` that is one of this bot's embeds for this run
+ * of the party — the database pointer plus any untracked copy. Throws when the
+ * channel can't be read (no Read Message History), so callers decide whether
+ * that's fatal.
+ */
+async function findPartyEmbedMessages(
+  env: AppBindings,
+  party: PartyData,
+  channelId: string,
+): Promise<string[]> {
+  const messages = await getChannelMessages(env.DISCORD_BOT_TOKEN, channelId, STALE_SCAN_LIMIT)
+  return messages
+    .filter(m => m.author?.id === env.DISCORD_APPLICATION_ID && isPartyEmbedMessage(m, party))
+    .map(m => m.id)
+}
+
+/**
  * Failsafe: delete this party's older embeds left in the channel — duplicates
  * from a bump that raced before the claim existed, or an old message whose
  * delete failed. A message has to clear every check to go:
@@ -187,16 +234,11 @@ async function deleteStalePartyEmbeds(
 ): Promise<void> {
   try {
     const keep = BigInt(keepMessageId)
-    const messages = await getChannelMessages(env.DISCORD_BOT_TOKEN, channelId, STALE_SCAN_LIMIT)
-    const stale = messages
-      .filter(m =>
-        m.id !== keepMessageId
-        && m.author?.id === env.DISCORD_APPLICATION_ID
-        && isPartyEmbedMessage(m, party)
-        && BigInt(m.id) < keep)
+    const stale = (await findPartyEmbedMessages(env, party, channelId))
+      .filter(id => id !== keepMessageId && BigInt(id) < keep)
       .slice(0, STALE_DELETE_LIMIT)
-    for (const m of stale) {
-      await deleteMessage(env.DISCORD_BOT_TOKEN, channelId, m.id)
+    for (const id of stale) {
+      try { await deleteMessage(env.DISCORD_BOT_TOKEN, channelId, id) } catch { /* try the rest */ }
     }
     if (stale.length > 0) {
       console.warn(`cleaned up ${stale.length} duplicate embed(s) for party ${party.id} in guild ${party.guildId}`)

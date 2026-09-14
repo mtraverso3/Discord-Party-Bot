@@ -101,7 +101,7 @@ export default {
       for (const { party, thresholdMs } of disbanded) {
         const reason = `inactive for ${Math.round(thresholdMs / HOUR)}h`
         console.log(`Auto-disbanding party ${party.id} in guild ${party.guildId} — ${reason}`)
-        await tryMarkDisbanded(env.DISCORD_BOT_TOKEN, party, reason)
+        await tryMarkDisbanded(env, party, reason)
       }
       await sweepExpiredAuth(env.DB)
       await sweepExpiredAdminAuth(env.DB)
