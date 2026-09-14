@@ -156,7 +156,10 @@ export async function saveRulesGate(
 ): Promise<RulesGate> {
   const current = await getRulesGate(db, guildId)
   const next: RulesGate = {
-    enabled: gate.enabled ?? current?.enabled ?? true,
+    // A row created as a side effect — posting the Start button, say — must not
+    // turn the gate on. Only an explicit `enabled: true` does that, so nothing
+    // starts refusing members without someone choosing it.
+    enabled: gate.enabled ?? current?.enabled ?? false,
     roleId: gate.roleId !== undefined ? gate.roleId : current?.roleId,
     channelId: gate.channelId !== undefined ? gate.channelId : current?.channelId,
   }
