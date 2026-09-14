@@ -16,7 +16,7 @@ interface RulesConfig {
   agreement: string
 }
 interface Status {
-  online: boolean; roleId: string; channelId: string; queueConnected: boolean
+  online: boolean; roleId: string; channelId: string; queueConnected: boolean; defaultRequired: boolean
   config: RulesConfig; counts: { total: number; approved: number; pending: number }
 }
 interface RosterMember {
@@ -154,16 +154,41 @@ export function Rules() {
         <div className="grid grid-cols-3 gap-3">
           {[[status.counts.approved, 'Approved'], [status.counts.total, 'Tracked members'], [status.counts.pending, 'Role updates pending']].map(([value, label]) => <div className="rounded-lg border bg-muted/30 p-3" key={label}><div className="text-xl font-semibold">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div>)}
         </div>
+        {status.queueConnected && (
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent">
+            <Checkbox
+              className="mt-0.5"
+              checked={status.defaultRequired}
+              disabled={busy}
+              onChange={e => void action(async () => {
+                const result = await api<Status>('/rules/connect', {
+                  method: 'POST', body: JSON.stringify({ defaultRequired: e.target.checked }),
+                })
+                setStatus(result)
+                toast(result.defaultRequired ? 'New parties will require it' : 'New parties will not require it')
+              })}
+            />
+            <span>
+              New parties require the check by default
+              <span className="block text-xs text-muted-foreground">
+                Off means each party opts in — from a template, with <code>/party create rules:True</code>, or in the
+                Parties tab. Either way a party can be changed later with <code>/party edit rules:True</code>.
+              </span>
+            </span>
+          </label>
+        )}
         <p className="text-xs text-muted-foreground">
           {status.roleId
             ? <>Approved members are also given role <Mono>{status.roleId}</Mono>, for anything else that reads it.</>
             : 'Approval is held by this bot — no Discord role is involved.'}
         </p>
         <div className="flex flex-wrap items-end gap-2">
-          {!status.queueConnected && <Button busy={busy} onClick={() => void action(async () => {
-            if (!await confirm('Require every party in this server to be joined only by members who have passed the rules check?', 'Require the rules check')) return
-            const result = await api<Status>('/rules/connect', { method: 'POST', body: '{}' }); setStatus(result); toast('Rules check now required')
-          })}><ShieldCheck />Require the rules check</Button>}
+          <Button busy={busy} onClick={() => void action(async () => {
+            const turningOff = status.queueConnected
+            if (turningOff && !await confirm('Switch the rules check off for this server? Parties that ask for it stop being gated, and their settings are kept.', 'Switch off')) return
+            const result = await api<Status>('/rules/connect', { method: 'POST', body: JSON.stringify({ enabled: !turningOff }) })
+            setStatus(result); toast(turningOff ? 'Rules check switched off' : 'Rules check available')
+          })}><ShieldCheck />{status.queueConnected ? 'Switch the rules check off' : 'Switch the rules check on'}</Button>
           <Label className="min-w-56 flex-1">Rules channel
             <ChannelSelect channels={channels} value={channel} onChange={setChannel} placeholder="Pick the channel to post in" />
           </Label>

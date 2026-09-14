@@ -32,6 +32,7 @@ interface PartyRow {
   max_size: number
   voice_channel_id: string | null
   is_closed: number
+  rules_required: number
   embed_message_id: string | null
   embed_channel_id: string | null
   created_at: number
@@ -109,6 +110,7 @@ function toParty(row: PartyRow, memberRows: MemberRow[], banRows: BanRow[]): Par
     maxSize: row.max_size,
     voiceChannelId: row.voice_channel_id ?? undefined,
     isClosed: !!row.is_closed,
+    rulesRequired: !!row.rules_required,
     embedMessageId: row.embed_message_id ?? undefined,
     embedChannelId: row.embed_channel_id ?? undefined,
     createdAt: row.created_at,
@@ -123,6 +125,25 @@ function toParty(row: PartyRow, memberRows: MemberRow[], banRows: BanRow[]): Par
 // queue in explicit position order (the owner can reorder it). The two roles
 // are split apart in JS, so the CASE only has to sort correctly within a role.
 const MEMBER_ORDER = `ORDER BY CASE role WHEN 'member' THEN joined_at ELSE position END, position`
+
+/**
+ * The rules check is per party: the server says whether it has one, and only
+ * parties that asked for it are gated. One indexed read, and only when a policy
+ * was supplied at all.
+ */
+async function requirePartyApproval(
+  db: D1Database, rules: RulesAccess | undefined, guildId: string, partyId: string, userId: string,
+): Promise<void> {
+  if (!rules) return
+  if (!await partyRequiresRules(db, guildId, partyId)) return
+  await rules.require(guildId, userId)
+}
+
+async function partyRequiresRules(db: D1Database, guildId: string, partyId: string): Promise<boolean> {
+  const row = await db.prepare('SELECT rules_required FROM parties WHERE guild_id = ?1 AND id = ?2')
+    .bind(guildId, partyId).first<{ rules_required: number }>()
+  return !!row?.rules_required
+}
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
@@ -217,10 +238,11 @@ function freeBanStmt(db: D1Database, guildId: string, partyId: string, userId: s
  * live capacity at execution time (re-computed inside the statement).
  */
 async function promoteStmt(db: D1Database, guildId: string, partyId: string, now: number, rules?: RulesAccess) {
-  const queued = rules ? await db.prepare("SELECT user_id FROM party_members WHERE guild_id=?1 AND party_id=?2 AND role='queued'")
+  const gated = rules ? await partyRequiresRules(db, guildId, partyId) : false
+  const queued = gated ? await db.prepare("SELECT user_id FROM party_members WHERE guild_id=?1 AND party_id=?2 AND role='queued'")
     .bind(guildId, partyId).all<{ user_id: string }>() : null
   let eligible: string[] | null = null
-  if (rules) {
+  if (gated && rules) {
     try { eligible = await rules.eligible(guildId, queued!.results.map(row => row.user_id)) }
     catch { eligible = [] } // A Discord outage must not block leaving; promote nobody until a later operation.
   }
@@ -263,6 +285,7 @@ export interface CreatePartyInput {
   owner: UserRef
   maxSize: number
   voiceChannelId?: string
+  rulesRequired?: boolean
 }
 
 export type CreatePartyResult =
@@ -270,7 +293,8 @@ export type CreatePartyResult =
   | { ok: false; error: 'owner_in_party' | 'id_taken' | 'invalid'; message: string }
 
 export async function createParty(db: D1Database, input: CreatePartyInput, rules?: RulesAccess): Promise<CreatePartyResult> {
-  await rules?.require(input.guildId, input.owner.userId)
+  // No row to consult yet — the caller says whether this party is gated.
+  if (input.rulesRequired) await rules?.require(input.guildId, input.owner.userId)
 
   if (!input.id || !input.guildId || !input.owner.userId) {
     return { ok: false, error: 'invalid', message: 'create requires id, guildId, and an owner' }
@@ -288,10 +312,11 @@ export async function createParty(db: D1Database, input: CreatePartyInput, rules
     await db.batch([
       db.prepare(`
         INSERT INTO parties (guild_id, id, name, description, game, owner_id, max_size,
-                             voice_channel_id, is_closed, created_at, last_activity_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?9)
+                             voice_channel_id, is_closed, rules_required, created_at, last_activity_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?10, ?9, ?9)
       `).bind(input.guildId, input.id, name, input.description, input.game,
-        input.owner.userId, input.maxSize, input.voiceChannelId ?? null, now),
+        input.owner.userId, input.maxSize, input.voiceChannelId ?? null, now,
+        input.rulesRequired ? 1 : 0),
       db.prepare(`
         INSERT INTO party_members (guild_id, user_id, party_id, role, username, display_name, ign, position, joined_at)
         VALUES (?1, ?2, ?3, 'member', ?4, ?5, ?6, 1, ?7)
@@ -320,7 +345,7 @@ export async function createParty(db: D1Database, input: CreatePartyInput, rules
 // ── Membership mutations ─────────────────────────────────────────────────────
 
 export async function joinParty(db: D1Database, guildId: string, partyId: string, user: UserRef, rules?: RulesAccess): Promise<JoinResult> {
-  await rules?.require(guildId, user.userId)
+  await requirePartyApproval(db, rules, guildId, partyId, user.userId)
 
   const existing = await getUserMembership(db, guildId, user.userId)
   if (existing) {
@@ -369,7 +394,7 @@ export async function joinParty(db: D1Database, guildId: string, partyId: string
 
 export async function forceAdd(
   db: D1Database, guildId: string, partyId: string, requesterId: string, user: UserRef, rules?: RulesAccess): Promise<ForceAddResult> {
-  await rules?.require(guildId, user.userId)
+  await requirePartyApproval(db, rules, guildId, partyId, user.userId)
 
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
@@ -465,7 +490,7 @@ export async function removeMember(
 
 export async function approveQueued(
   db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string, rules?: RulesAccess): Promise<ApproveResult> {
-  await rules?.require(guildId, userId)
+  await requirePartyApproval(db, rules, guildId, partyId, userId)
 
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
@@ -551,7 +576,7 @@ export async function moveQueued(
 
 export async function promoteOwner(
   db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string, rules?: RulesAccess): Promise<PromoteResult> {
-  await rules?.require(guildId, userId)
+  await requirePartyApproval(db, rules, guildId, partyId, userId)
 
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
@@ -684,6 +709,7 @@ export interface UpdatePartyInput {
   game?: string
   voiceChannelId?: string
   ignMap?: Record<string, string>
+  rulesRequired?: boolean   // toggle this party’s rules gate; omitted = unchanged
 }
 
 export async function updateParty(db: D1Database, guildId: string, partyId: string, input: UpdatePartyInput, rules?: RulesAccess): Promise<UpdateResult> {
@@ -717,9 +743,14 @@ export async function updateParty(db: D1Database, guildId: string, partyId: stri
   const gameChanged = input.game != null && party.game !== input.game
   const now = Date.now()
 
+  // Turning the gate on does not evict anyone here — the sweep reconciles the
+  // roster within the minute, the same as losing approval any other way.
+  const rulesRequired = input.rulesRequired != null ? !!input.rulesRequired : party.rulesRequired
+
   const stmts: D1PreparedStatement[] = [
     db.prepare(`
-      UPDATE parties SET name = ?3, max_size = ?4, description = ?5, game = ?6, voice_channel_id = ?7, last_activity_at = ?8
+      UPDATE parties SET name = ?3, max_size = ?4, description = ?5, game = ?6, voice_channel_id = ?7,
+                         rules_required = ?9, last_activity_at = ?8
       WHERE guild_id = ?1 AND id = ?2
     `).bind(
       guildId, partyId, name, maxSize,
@@ -727,6 +758,7 @@ export async function updateParty(db: D1Database, guildId: string, partyId: stri
       gameChanged ? input.game! : party.game,
       input.voiceChannelId != null ? input.voiceChannelId : party.voiceChannelId ?? null,
       now,
+      rulesRequired ? 1 : 0,
     ),
   ]
 

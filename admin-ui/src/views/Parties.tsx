@@ -9,7 +9,7 @@ import { Avatar } from '../components/Avatar'
 import { GameList } from '../components/GameList'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
 import { ChannelSelect } from '../components/ChannelSelect'
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorNote, Input, Label, Mono, Segmented, Select, Spinner, StatusDot, Switch, Textarea } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Checkbox, EmptyState, ErrorNote, Input, Label, Mono, Segmented, Select, Spinner, StatusDot, Switch, Textarea } from '../components/ui'
 import { useGuildData } from '../lib/guildData'
 import { deadlineOf, fmtAbs, relTime } from '../lib/time'
 import type { ChannelInfo, GuildSettings, Party, PartyGamesResponse, PartyMember, QueueEntry, VoiceStatus } from '../types'
@@ -303,7 +303,15 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
   const [channel, setChannel] = useState('')
   const [voice, setVoice] = useState('')
   const [desc, setDesc] = useState('')
+  const [rules, setRules] = useState(false)
+  const [rulesAvailable, setRulesAvailable] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api<{ queueConnected: boolean; defaultRequired: boolean }>('/rules/status')
+      .then(r => { setRulesAvailable(r.queueConnected); setRules(r.defaultRequired) })
+      .catch(() => setRulesAvailable(false))
+  }, [])
 
   const submit = async () => {
     const ownerId = ownerPicker.current?.getId()
@@ -320,6 +328,7 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
           channelId: channel || textChannels[0]?.id,
           voiceChannelId: voice || undefined,
           description: desc,
+          rulesRequired: rules,
         }),
       })
       toast('Party created')
@@ -351,6 +360,17 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
             <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
           </Label>
           <Label className="sm:col-span-2">Description<Textarea value={desc} placeholder="Description (optional)" onChange={e => setDesc(e.target.value)} /></Label>
+          {rulesAvailable && (
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent sm:col-span-2">
+              <Checkbox className="mt-0.5" checked={rules} onChange={e => setRules(e.target.checked)} />
+              <span>
+                Require the rules check
+                <span className="block text-xs text-muted-foreground">
+                  Only members who have passed can join this party.
+                </span>
+              </span>
+            </label>
+          )}
           <div className="flex gap-2 sm:col-span-2">
             <Button type="submit" busy={busy}>{busy ? 'Creating…' : 'Create party'}</Button>
             <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>

@@ -70,6 +70,7 @@ async function status(env: AppBindings, guildId: string): Promise<Response> {
     roleId: gate?.roleId ?? '',
     channelId: gate?.channelId ?? '',
     queueConnected: !!gate?.enabled,
+    defaultRequired: !!gate?.defaultRequired,
     config,
     counts,
   })
@@ -92,7 +93,13 @@ async function roster(env: AppBindings, guildId: string): Promise<Response> {
 async function connect(env: AppBindings, guildId: string, body: any): Promise<Response> {
   const roleId = (body?.roleId ?? '').toString().trim()
   if (roleId && !/^\d{5,25}$/.test(roleId)) return json({ error: 'That is not a valid role ID.' }, 400)
-  await saveRulesGate(env.DB, guildId, { enabled: true, ...(roleId ? { roleId } : {}) })
+  // `enabled` says the server has a check at all; parties opt in individually.
+  const enabled = body?.enabled === undefined ? true : body.enabled === true
+  await saveRulesGate(env.DB, guildId, {
+    enabled,
+    ...(roleId ? { roleId } : {}),
+    ...(body?.defaultRequired === undefined ? {} : { defaultRequired: body.defaultRequired === true }),
+  })
   return await status(env, guildId)
 }
 

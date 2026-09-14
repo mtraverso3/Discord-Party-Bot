@@ -136,7 +136,7 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
     const data = await parties.getParty(env.DB, rec.guildId, partyId)
     // The desktop client requests this immediately before inviting. Ordinary
     // UI polling must not refetch an entire Discord roster every few seconds.
-    if (data && new URL(req.url).searchParams.get('verifyRules') === '1') {
+    if (data?.rulesRequired && new URL(req.url).searchParams.get('verifyRules') === '1') {
       const allowed = await rulesAccess(env).eligible(rec.guildId, [...data.members, ...data.queue].map(m => m.userId))
       if (allowed !== null) {
         const ids = new Set(allowed)

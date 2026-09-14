@@ -146,9 +146,14 @@ export function validateRulesConfig(raw: any): ValidationResult {
 
 export async function getRulesGate(db: D1Database, guildId: string): Promise<RulesGate | null> {
   const row = await db.prepare('SELECT * FROM rules_gate WHERE guild_id = ?1').bind(guildId)
-    .first<{ enabled: number; role_id: string | null; channel_id: string | null }>()
+    .first<{ enabled: number; default_required: number; role_id: string | null; channel_id: string | null }>()
   if (!row) return null
-  return { enabled: !!row.enabled, roleId: row.role_id ?? undefined, channelId: row.channel_id ?? undefined }
+  return {
+    enabled: !!row.enabled,
+    defaultRequired: !!row.default_required,
+    roleId: row.role_id ?? undefined,
+    channelId: row.channel_id ?? undefined,
+  }
 }
 
 export async function saveRulesGate(
@@ -160,13 +165,16 @@ export async function saveRulesGate(
     // turn the gate on. Only an explicit `enabled: true` does that, so nothing
     // starts refusing members without someone choosing it.
     enabled: gate.enabled ?? current?.enabled ?? false,
+    defaultRequired: gate.defaultRequired ?? current?.defaultRequired ?? false,
     roleId: gate.roleId !== undefined ? gate.roleId : current?.roleId,
     channelId: gate.channelId !== undefined ? gate.channelId : current?.channelId,
   }
   await db.prepare(`
-    INSERT INTO rules_gate (guild_id, enabled, role_id, channel_id) VALUES (?1, ?2, ?3, ?4)
-    ON CONFLICT (guild_id) DO UPDATE SET enabled = ?2, role_id = ?3, channel_id = ?4
-  `).bind(guildId, next.enabled ? 1 : 0, next.roleId || null, next.channelId || null).run()
+    INSERT INTO rules_gate (guild_id, enabled, role_id, channel_id, default_required)
+    VALUES (?1, ?2, ?3, ?4, ?5)
+    ON CONFLICT (guild_id) DO UPDATE SET enabled = ?2, role_id = ?3, channel_id = ?4, default_required = ?5
+  `).bind(guildId, next.enabled ? 1 : 0, next.roleId || null, next.channelId || null,
+    next.defaultRequired ? 1 : 0).run()
   return next
 }
 

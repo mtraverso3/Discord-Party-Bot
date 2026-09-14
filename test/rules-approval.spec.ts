@@ -63,7 +63,8 @@ async function make(maxSize = 2) {
   await approve(guildId, OWNER, GOOD, ACTIVE)
   const policy = rulesAccess(env)
   await parties.createParty(env.DB, {
-    id, guildId, name: 'Arena', description: '', game: 'Other', owner: user(OWNER), maxSize,
+    id, guildId, name: 'Arena', description: '', game: 'Other',
+    owner: user(OWNER), maxSize, rulesRequired: true,
   }, policy)
   return { id, guildId, policy }
 }
@@ -103,7 +104,8 @@ describe('queue operations', () => {
   it('gates party creators, direct joins, and owner force-adds', async () => {
     const { id, guildId, policy } = await make(4)
     await expect(parties.createParty(env.DB, {
-      id: 'BAD', guildId, name: 'x', description: '', game: 'Other', owner: user(BAD), maxSize: 4,
+      id: 'BAD', guildId, name: 'x', description: '', game: 'Other',
+      owner: user(BAD), maxSize: 4, rulesRequired: true,
     }, policy)).rejects.toThrow('rules check')
     await expect(parties.joinParty(env.DB, guildId, id, user(BAD), policy)).rejects.toThrow('rules check')
     await expect(parties.forceAdd(env.DB, guildId, id, OWNER, user(BAD), policy)).rejects.toThrow('rules check')
@@ -327,5 +329,65 @@ describe('admin exemption', () => {
 
     // Nor is anyone in a guild that does not gate.
     expect(await exemptFromRules(env, String(BigInt(G) + 9500n), ADMIN)).toBe(false)
+  })
+})
+
+describe('per-party opt-in', () => {
+  /** Same gated server, but a party that never asked for the check. */
+  async function openParty() {
+    const guildId = String(BigInt(G) + BigInt(8000 + seq++))
+    await saveRulesGate(env.DB, guildId, { enabled: true })
+    await approve(guildId, OWNER)
+    const id = `O${seq++}`
+    await parties.createParty(env.DB, {
+      id, guildId, name: 'Pick-up', description: '', game: 'Other', owner: user(OWNER), maxSize: 4,
+    }, rulesAccess(env))
+    return { id, guildId }
+  }
+
+  it('lets anyone into a party that did not ask for the check', async () => {
+    const { id, guildId } = await openParty()
+    const policy = rulesAccess(env)
+    expect((await parties.joinParty(env.DB, guildId, id, user(BAD), policy)).status).toBe('joined')
+    expect((await parties.forceAdd(env.DB, guildId, id, OWNER, user('900000000000000123'), policy)).status).toBe('added')
+  })
+
+  it('creates an unchecked party even for an owner who has not passed', async () => {
+    const guildId = String(BigInt(G) + BigInt(8500 + seq++))
+    await saveRulesGate(env.DB, guildId, { enabled: true })
+    const created = await parties.createParty(env.DB, {
+      id: `U${seq++}`, guildId, name: 'Open', description: '', game: 'Other', owner: user(BAD), maxSize: 4,
+    }, rulesAccess(env))
+    expect(created.ok).toBe(true)
+    expect(created.ok && created.party.rulesRequired).toBe(false)
+  })
+
+  it('starts checking when the owner turns it on, and stops when turned off', async () => {
+    const { id, guildId } = await openParty()
+    const policy = rulesAccess(env)
+
+    const on = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, rulesRequired: true }, policy)
+    expect(on.data!.rulesRequired).toBe(true)
+    await expect(parties.joinParty(env.DB, guildId, id, user(BAD), policy)).rejects.toThrow('rules check')
+
+    const off = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, rulesRequired: false }, policy)
+    expect(off.data!.rulesRequired).toBe(false)
+    expect((await parties.joinParty(env.DB, guildId, id, user(BAD), policy)).status).toBe('joined')
+  })
+
+  it('leaves an unchecked party alone during the sweep', async () => {
+    const { id, guildId } = await openParty()
+    await parties.joinParty(env.DB, guildId, id, user(BAD), rulesAccess(env))
+    await sweepRulesApproval(env)
+    expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).toContain(BAD)
+  })
+
+  it('an edit that says nothing about rules leaves the setting alone', async () => {
+    const { id, guildId } = await openParty()
+    const policy = rulesAccess(env)
+    await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, rulesRequired: true }, policy)
+    const renamed = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, name: 'Renamed' }, policy)
+    expect(renamed.data!.name).toBe('Renamed')
+    expect(renamed.data!.rulesRequired).toBe(true)
   })
 })

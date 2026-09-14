@@ -15,7 +15,7 @@ import { generateAdminToken, isAdmin, writeAdminLinkToken } from '../store/admin
 import { normalizeBaseUrl } from '../auth/session'
 import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
-import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
+import { buildCreateModalJSON, buildEditModalJSON, createModalRules, parseCreateModalSubmit, parseEditModalCustomId, parseEditModalSubmit } from '../lib/modal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +25,12 @@ function sub(c: CommandContext<AppEnv>): { name: string; opts: Record<string, an
   const opts: Record<string, any> = {}
   for (const o of subCmd?.options ?? []) opts[o.name] = o.value
   return { name: subCmd?.name ?? '', opts }
+}
+
+/** The optional `rules:` True/False on /party create and /party edit. */
+function peekRulesOption(c: CommandContext<AppEnv>): boolean | undefined {
+  const value = sub(c).opts['rules']
+  return typeof value === 'boolean' ? value : undefined
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -105,7 +111,18 @@ async function openCreateModal(c: CommandContext<AppEnv>) {
     return c.ephemeral().res({ content: `There are already ${settings.maxParties} active parties. Wait for one to disband.`, flags: 64 })
   }
 
-  return c.resModal(buildCreateModalJSON(displayName, settings))
+  const wantsRules = peekRulesOption(c)
+  if (wantsRules) {
+    const gate = await getRulesGate(c.env.DB, guildId)
+    if (!gate?.enabled) {
+      return c.ephemeral().res({
+        content: "This server hasn't set up a rules check — an admin turns it on in the dashboard.",
+        flags: 64,
+      })
+    }
+  }
+
+  return c.resModal(buildCreateModalJSON(displayName, settings, wantsRules))
 }
 
 // Invoked from src/index.ts after we verify the Discord signature ourselves —
@@ -119,6 +136,7 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     const channelId = interaction.channel_id as string
     const { userId, username, displayName } = extractMemberInfo(interaction)
 
+    const requested = createModalRules(interaction.data?.custom_id ?? '')
     const fields = parseCreateModalSubmit(interaction)
 
     const maxSize = Number(fields.capacity)
@@ -150,11 +168,13 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
       game,
       maxSize,
       voiceChannelId: fields.voiceChannelId,
+      rulesRequired: requested ?? (await getRulesGate(env.DB, guildId))?.defaultRequired ?? false,
     })
     if (!result.ok) return reply(result.error)
 
     const warning = await exemptFromRules(env, guildId, userId) ? RULES_EXEMPT_WARNING : ''
-    return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)` + warning)
+    const gated = result.party.rulesRequired ? ' Members must pass the rules check to join.' : ''
+    return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)${gated}` + warning)
   } catch (e) {
     console.error('handleCreateModalRaw error:', e)
     return reply(rulesErrorMessage(e) ?? 'Something went wrong.')
@@ -314,7 +334,18 @@ async function openEditModal(c: CommandContext<AppEnv>) {
     return c.ephemeral().res({ content: 'Only the party owner can edit the party.', flags: 64 })
   }
 
-  return c.resModal(buildEditModalJSON(party, settings))
+  const rulesChange = peekRulesOption(c)
+  if (rulesChange) {
+    const gate = await getRulesGate(c.env.DB, guildId)
+    if (!gate?.enabled) {
+      return c.ephemeral().res({
+        content: "This server hasn't set up a rules check — an admin turns it on in the dashboard.",
+        flags: 64,
+      })
+    }
+  }
+
+  return c.resModal(buildEditModalJSON(party, settings, rulesChange))
 }
 
 // Invoked from src/index.ts after we verify the Discord signature ourselves —
@@ -324,8 +355,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
     editInteractionResponse(env.DISCORD_APPLICATION_ID, interaction.token, { content })
 
   try {
-    const customId = interaction.data.custom_id as string
-    const partyId = customId.slice(`${EDIT_MODAL_PREFIX};`.length)
+    const { partyId, rulesRequired } = parseEditModalCustomId(interaction.data.custom_id as string)
     const guildId = interaction.guild_id as string
     const { userId } = extractMemberInfo(interaction)
 
@@ -351,6 +381,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
       maxSize: Number(fields.capacity),
       game: fields.game,
       voiceChannelId: fields.voiceChannelId || undefined,
+      rulesRequired,
       ignMap,
     }, rulesAccess(env))
 

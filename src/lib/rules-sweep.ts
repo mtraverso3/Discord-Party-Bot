@@ -11,9 +11,11 @@ export async function sweepRulesApproval(env: AppBindings): Promise<void> {
   const guilds = await env.DB.prepare(`
     SELECT DISTINCT p.guild_id FROM parties p
     JOIN rules_gate g ON g.guild_id = p.guild_id AND g.enabled = 1
+    WHERE p.rules_required = 1
   `).all<{ guild_id: string }>()
   for (const { guild_id: guildId } of guilds.results) {
     for (const party of await parties.listParties(env.DB, guildId)) {
+      if (!party.rulesRequired) continue
       try {
         const roster = [...party.members, ...party.queue]
         const allowed = await policy.eligible(guildId, roster.map(m => m.userId))

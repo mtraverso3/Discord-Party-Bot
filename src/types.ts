@@ -26,6 +26,7 @@ export interface PartyData {
   maxSize: number
   voiceChannelId?: string
   isClosed: boolean
+  rulesRequired: boolean    // this party enforces the server’s rules check
   embedMessageId?: string
   embedChannelId?: string
   createdAt: number
@@ -90,6 +91,8 @@ export interface RulesEvent {
 
 export interface RulesGate {
   enabled: boolean
+  /** What a newly created party gets when nobody says either way. */
+  defaultRequired: boolean
   roleId?: string      // optional Discord role mirroring approval
   channelId?: string   // where the Start button was posted
 }
@@ -244,6 +247,7 @@ export interface PartyTemplate {
   maxSize: number
   voiceChannelId?: string
   banlist?: string          // newline-separated champion list, as pasted
+  rulesRequired: boolean    // parties made from this template require the check
   createdAt: number
   updatedAt: number
 }

@@ -56,7 +56,9 @@ export function buildPartyEmbed(party: PartyData) {
     color: embedColor(party),
     fields,
     footer: {
-      text: `${party.game} · ${statusLabel} · ${partyIdFooter(party)}`,
+      text: `${party.game} · ${statusLabel}`
+        + (party.rulesRequired ? ' · 🔒 Rules check required' : '')
+        + ` · ${partyIdFooter(party)}`,
     },
     timestamp: new Date(party.createdAt).toISOString(),
   }

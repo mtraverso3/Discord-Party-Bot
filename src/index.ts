@@ -78,7 +78,7 @@ export default {
     // runs in waitUntil and edits the @original message via the webhook.
     const modalId = interaction.type === 5 ? interaction.data?.custom_id : null
     if (typeof modalId === 'string') {
-      if (modalId === CREATE_MODAL_PREFIX) {
+      if (modalId === CREATE_MODAL_PREFIX || modalId.startsWith(`${CREATE_MODAL_PREFIX};`)) {
         ctx.waitUntil(handleCreateModalRaw(interaction, env))
         return Response.json({ type: 5, data: { flags: 64 } })
       }

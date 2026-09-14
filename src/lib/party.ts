@@ -90,6 +90,7 @@ export interface CreatePartyOpts {
   game: string
   maxSize: number
   voiceChannelId?: string
+  rulesRequired?: boolean
 }
 
 export async function createPartyAndEmbed(
@@ -115,6 +116,7 @@ export async function createPartyAndEmbed(
       },
       maxSize: opts.maxSize,
       voiceChannelId: opts.voiceChannelId,
+      rulesRequired: opts.rulesRequired,
     }, rulesAccess(env))
     if (created.ok || created.error !== 'id_taken') break
   }

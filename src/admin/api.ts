@@ -369,6 +369,7 @@ async function patchOne(env: AppBindings, guildId: string, partyId: string, body
     maxSize: body.maxSize,
     game: body.game,
     voiceChannelId: body.voiceChannelId,
+    rulesRequired: body.rulesRequired,
     ignMap,
   }, rulesAccess(env))
 
@@ -421,6 +422,7 @@ async function spawnParty(env: AppBindings, guildId: string, body: any): Promise
     game,
     maxSize,
     voiceChannelId: (body.voiceChannelId ?? '').toString() || undefined,
+    rulesRequired: !!body.rulesRequired,
   })
   if (!result.ok) return json({ error: result.error }, 400)
 
@@ -473,6 +475,8 @@ async function applyTemplate(env: AppBindings, guildId: string, templateId: stri
     // Let the apply form override the template's voice channel when given.
     voiceChannelId: (body.voiceChannelId ?? '').toString() || template.voiceChannelId,
     banlist: template.banlist,
+    // The apply form may override, but the template's setting is the default.
+    rulesRequired: body.rulesRequired != null ? !!body.rulesRequired : template.rulesRequired,
   })
 }
 

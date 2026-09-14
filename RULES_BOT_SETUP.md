@@ -7,13 +7,36 @@ There is no second bot and nothing else to host.
 ## Turn it on
 
 1. Open the admin dashboard, pick your server, and go to **Rules & verification**.
-2. Press **Require the rules check**. Until you do, nothing is gated.
+2. Press **Switch the rules check on**. That makes it *available*; it does not
+   gate anything on its own.
 3. Edit the rules pages, quiz and agreement if you want — the defaults are the
    text the old Python bot shipped with. Press **Publish rules & quiz**.
 4. Choose a **rules channel** and press **Post Start button**. That posts one
    public message with a button; everything after it is private to the member.
 
 That is the whole setup. No secrets, no tunnel, no `wrangler secret put`.
+
+## Which parties require it
+
+Parties opt in one at a time, so open pick-up games and verified customs can run
+side by side:
+
+- **Templates** — tick *Require the rules check* on a template and every party
+  made from it starts gated.
+- **Parties tab** — the *New party* form has the same checkbox.
+- **`/party create rules:True`** — Discord shows a True/False picker before the
+  create form opens.
+- **`/party edit rules:True`** on an existing party, or `rules:False` to stop.
+  Leave the option off and the party keeps its current setting.
+
+If you want everything gated instead, tick **New parties require the check by
+default** under Rules & verification. Individual parties can still be changed
+afterwards.
+
+Gated parties show `🔒 Rules check required` in their embed footer, so a refused
+Join is not a mystery. Turning the check on for a party that already has
+unapproved members does not kick them on the spot — the sweep reconciles the
+roster within the minute.
 
 ## What members see
 

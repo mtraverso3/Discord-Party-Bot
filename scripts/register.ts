@@ -40,6 +40,12 @@ const commands = [
         type: 1,
         name: 'create',
         description: 'Create a new party (opens a modal)',
+        options: [
+          {
+            type: 5, name: 'rules', required: false,
+            description: 'Require the server rules check to join this party',
+          },
+        ],
       },
       {
         type: 1,
@@ -80,6 +86,12 @@ const commands = [
         type: 1,
         name: 'edit',
         description: 'Edit name, description, cap, game, and voice channel in one modal (owner only)',
+        options: [
+          {
+            type: 5, name: 'rules', required: false,
+            description: "Turn this party's rules check on or off (blank leaves it as is)",
+          },
+        ],
       },
       {
         type: 1,
