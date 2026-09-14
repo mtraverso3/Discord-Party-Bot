@@ -1,76 +1,79 @@
-# Connect the Arena Rules verification bot
+# Rules check
 
-**Admin-panel edition:** Use [ADMIN_RULES_SETUP.md](ADMIN_RULES_SETUP.md) for the current setup. It adds normal admin-panel controls and a one-time private service connection. The older manual instructions below describe the original role-only integration; the new `0007_rules_panel.sql` migration is required for this updated version.
+Members prove they have read the rules before they can join a party. It runs in
+this Worker — the same bot, the same deploy, the same database as the queue.
+There is no second bot and nothing else to host.
 
-This update is based on `mtraverso3/Discord-Party-Bot` master at commit `8f2eff6`. It connects the separate Python rules bot through one Discord role. Champion bans, queue ordering, party capacity, and verification lifetime counters retain their existing responsibilities.
+## Turn it on
 
-## Enable it
+1. Open the admin dashboard, pick your server, and go to **Rules & verification**.
+2. Press **Require the rules check**. Until you do, nothing is gated.
+3. Edit the rules pages, quiz and agreement if you want — the defaults are the
+   text the old Python bot shipped with. Press **Publish rules & quiz**.
+4. Choose a **rules channel** and press **Post Start button**. That posts one
+   public message with a button; everything after it is private to the member.
 
-1. Set up the Python verification bot using its README. Create **Arena Rules Approved** and enter that role ID as its `APPROVAL_ROLE_ID`.
-2. In this queue bot's Cloudflare Worker configuration, add `RULES_APPROVAL_ROLES` as a JSON string mapping the server ID to the same role ID:
+That is the whole setup. No secrets, no tunnel, no `wrangler secret put`.
 
-   ```json
-   {"123456789012345678":"234567890123456789"}
-   ```
+## What members see
 
-   Replace BOTH example IDs. Use the Cloudflare dashboard's Worker variables/secrets or, from this project, run:
+One public message with **Start rules check**. Clicking it opens a private
+message only they can see, which is then edited in place through the rules
+pages, the quiz, and the agreement — never a wall of new messages.
 
-   ```sh
-   npx wrangler secret put RULES_APPROVAL_ROLES
-   ```
+Answers are buttons labelled A onward. Positions are reshuffled every time a
+question is drawn, so a leaked answer key of letters is worthless. A wrong
+answer is explained and can be retried, with no penalty and no attempt limit —
+the quiz is a teaching gate, not an exam. A correct answer is explained too,
+heading whatever comes next.
 
-   Paste the JSON when prompted. This is a queue-bot setting, not the verification bot's token. The queue bot continues using its own `DISCORD_BOT_TOKEN` to read member roles.
+`/party rules` shows a member their own status at any time.
 
-3. Deploy this updated Worker using your existing deployment process. No D1 schema migration or new slash command registration is required for this integration. Preserve the existing D1 database, secrets, and domain settings.
-4. Enable the additional every-minute scheduled trigger included in `wrangler.toml`. Keep the existing 15-minute maintenance trigger too.
-5. Rebuild and distribute the updated desktop client to everyone who uses lobby invitations. Old desktop binaries do not perform the new immediate pre-invite check. The normal client build instructions are in `client/README.md`.
-6. Test in a test server before enabling your live queue.
+## What is gated
 
-The setting is opt-in per server. **Until `RULES_APPROVAL_ROLES` is set correctly, that server keeps its previous behavior.** Every party/game in a listed server requires approval, including party creators, owners being added as players, admin adds, and desktop adds. There is no staff bypass. Unlisted servers keep their existing behavior. Invalid JSON or invalid IDs stop approval operations instead of disabling the gate silently.
+Joining, both Join buttons, party creation, `/party adduser`, admin and desktop
+adds, manual queue approval, auto-promotion from the queue, capacity increases,
+ownership transfer, and desktop lobby invites. There is no staff bypass.
 
-## What is enforced
+Members who lose approval are removed from parties and queues within about a
+minute. A party owner who loses it has their party closed rather than disbanded,
+so the queue survives for a moderator to sort out.
 
-| Route | Check |
-| --- | --- |
-| `/party join`, Join, Join Queue | Fresh member role check before insertion |
-| Party creation, including templates/admin creation | Owner must have approval |
-| `/party adduser`, admin adds, desktop adds | Target member must have approval |
-| Manual approval from Discord/admin/desktop | Target queued member must still have approval |
-| Auto-promotion after leave/remove, reopen, or capacity increase | Only freshly approved queue IDs can be promoted; FIFO among eligible players |
-| Ownership transfer | New owner must have approval |
-| Desktop lobby invitations | Fresh server-filtered roster immediately before invitation; revoked caller cannot invite |
-| Scheduled cleanup | Remove confirmed-unapproved queue entries and non-owner members, return assigned bans, and update embeds |
+## Moderation
 
-Cleanup normally runs about once per minute after Discord successfully removes the approval role; scheduling and API outages can delay it. Entry/promotion/invite checks do not wait for cleanup. An already-issued game invitation or a player already in a game cannot be undone by this bot.
+**Rules & verification** has a member lookup with lifetime counters and history,
+and a sortable list of everyone tracked.
 
-If the owner loses approval, cleanup closes the party and preserves other players rather than disbanding everyone's queue. The owner is excluded from the checked invitation roster and cannot invite. A moderator can arrange re-verification or transfer ownership to an approved member, then reopen the party. The owner's stored membership remains for this repair process.
+- **Revoke approval** takes away a live approval and counts against the member
+  for good. It needs a reason, which is recorded with the admin's identity.
+- **Require retake without penalty** asks them to take the check again without
+  touching that counter.
+- **Require everyone to verify again** on publish does the same for the whole
+  server at once. Lifetime counters are untouched.
 
-Discord and the party database are separate systems: checks cannot be one atomic transaction with a Discord role change. A role removed immediately after a successful lookup can briefly overlap an insertion/invite; subsequent checks and cleanup reconcile it. If the verification bot reports a failed role removal, fix that first—the role is the integration's source of truth.
+Any of these invalidates a quiz already in progress: the member is told to start
+a fresh one rather than being graded against rules that have changed.
 
-## Error and retry behavior
+## The optional Discord role
 
-- Missing role: explain that the member must complete `#arena-rules`.
-- Discord unavailable, rate-limited, or missing permissions: deny new admissions/manual approvals/invites and allow retry.
-- A member can still leave during an outage. Auto-promotion selects nobody if approval cannot be verified.
-- Cleanup does not remove anyone when the roster check fails. It retries on the next tick.
-- After an outage prevents auto-promotion, an owner can manually approve eligible players or close/reopen to fill the available slots.
-- Ordinary desktop UI polling uses the stored roster; it does not poll Discord for every member every few seconds. The immediate invite check uses `GET /client/session?verifyRules=1`.
+Approval lives in this bot's database, so no Discord role is needed. If you set
+one anyway, approved members are given it and revoked members lose it — useful
+when something else in your server keys off a role. It is a mirror, not the
+source of truth: queue access never waits on Discord applying it, and the
+every-minute trigger retries anything Discord refused.
 
-## Live acceptance check
+## Limits
 
-1. Before verification, try both Discord join buttons and `/party join`; all should refuse.
-2. Try adding an unapproved member from owner commands, the admin dashboard, and the desktop client; all should refuse.
-3. Pass the verification bot's quiz and agreement. Join and confirm the original champion-ban assignment still works.
-4. Revoke a queued member. Open a spot and confirm that member is skipped; cleanup should remove their entry.
-5. Revoke an active non-owner member. Confirm cleanup removes them and their ban returns to the pool.
-6. Revoke a member just before desktop invitations. Confirm the refreshed roster excludes them.
-7. Revoke a party owner. Confirm the party closes without deleting the other players and their client cannot invite.
-8. Have the member pass again. Confirm the verification bot retains their lifetime revocation count and queue access returns.
+Rules pages 1–8. Quiz questions 0–15 — none is allowed, in which case members
+read the rules and go straight to the agreement. Each question needs 1–4 correct
+answers and up to 4 incorrect ones; members pick one and it counts if it is in
+the correct set.
 
-## Review and local testing
+A quiz left untouched for 15 minutes is abandoned; starting again is free.
 
-Run `npm ci`, `npm test`, and `npx tsc --noEmit` at the repository root. In `client/`, run `npm ci`, `npm test`, `npm run typecheck`, and `npm run build`.
+## Migrating from the two-bot setup
 
-The new regression suite is `test/rules-approval.spec.ts`. It tests denial/approval, changing roles, Discord failures, every promotion trigger, ban allocation, cleanup, buttons, admin adds, desktop adds, and the invitation roster. No live credentials are included. The code has not been pushed to GitHub or deployed to Cloudflare.
-
-Validation on this copy: **161 server tests and 28 desktop tests passed**, and server/desktop TypeScript checks passed. Desktop tests used the same test configuration supplied programmatically because the local sandbox blocked the bundler's parent-directory scan. The standard desktop bundle/package build was blocked by that filesystem restriction; rebuild and test the executable in your normal development environment. No live Discord/League session was available for end-to-end testing.
+The old Python bot's approvals are not read by this. Either have members take
+the check again, or add them from the dashboard before switching it on. The
+`RULES_BOT_API_URL`, `RULES_BOT_API_TOKEN` and `RULES_APPROVAL_ROLES` secrets
+are no longer read and can be deleted with `wrangler secret delete`.

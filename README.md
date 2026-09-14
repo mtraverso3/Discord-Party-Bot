@@ -1,6 +1,6 @@
 # Discord Party Bot
 
-This copy includes **Rules & verification** in the existing admin panel, plus approval-role enforcement for the separate Arena Rules bot. See [ADMIN_RULES_SETUP.md](ADMIN_RULES_SETUP.md) for the current setup and [RULES_BOT_SETUP.md](RULES_BOT_SETUP.md) for the underlying queue behavior.
+Optionally gate parties behind a rules check — rules pages, a quiz and an agreement that members complete in Discord, managed from **Rules & verification** in the admin panel. It runs in this same Worker, with no second bot to host. See [RULES_BOT_SETUP.md](RULES_BOT_SETUP.md).
 
 A Discord bot for managing inhouse gaming lobbies. Create parties with a player cap, game label, and optional voice channel. Members join via slash command or button. When full or closed, new joiners enter a queue. The embed updates live in the channel on every state change.
 

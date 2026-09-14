@@ -36,9 +36,9 @@ id = "32fff28077814cbcac824ebd05c0ce66"
 [triggers]
 crons = ["*/15 * * * *", "* * * * *"]
 
-# Optional role integration: set RULES_APPROVAL_ROLES using wrangler secret put.
-# Value: {"YOUR_SERVER_ID":"ARENA_RULES_APPROVED_ROLE_ID"}
-# Listed servers require the role for every party/game; unlisted servers are unchanged.
+# The every-minute trigger drops members who lose rules approval, settles any
+# Discord role mirroring it, and clears abandoned quizzes. The rules check is
+# configured per guild from the admin UI and needs no secrets.
 
 # The PartyState Durable Object is retired — state moved to D1.
 [[migrations]]
