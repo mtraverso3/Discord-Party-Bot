@@ -56,6 +56,12 @@ export interface AppBindings extends Record<string, unknown> {
   DISCORD_PUBLIC_KEY: string
   DISCORD_BOT_TOKEN: string
   DISCORD_APPLICATION_ID: string
+  // JSON object mapping guild IDs to the verification bot's approval role IDs.
+  // Unlisted guilds retain existing behavior. Invalid configuration fails closed.
+  RULES_APPROVAL_ROLES?: string
+  // Server-only bridge credentials; never returned to the admin browser.
+  RULES_BOT_API_URL?: string
+  RULES_BOT_API_TOKEN?: string
   // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
   CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
   CF_ACCESS_AUD?: string    // Application AUD tag from the Access app

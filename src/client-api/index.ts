@@ -1,3 +1,4 @@
+import { rulesAccess, rulesErrorMessage } from '../lib/rules'
 import type { AppBindings } from '../types'
 import { GAMES } from '../lib/games'
 import * as parties from '../store/parties'
@@ -40,6 +41,15 @@ function json(body: unknown, status = 200): Response {
 }
 
 export async function handleClientApi(req: Request, env: AppBindings, url: URL): Promise<Response> {
+  try { return await routeClientApi(req, env, url) }
+  catch (error) {
+    const message = rulesErrorMessage(error)
+    if (message) return json({ ok: false, error: message }, 403)
+    throw error
+  }
+}
+
+async function routeClientApi(req: Request, env: AppBindings, url: URL): Promise<Response> {
   if (url.pathname === '/client/auth' && req.method === 'POST') {
     return await auth(req, env)
   }
@@ -124,6 +134,16 @@ async function session(req: Request, env: AppBindings): Promise<Response> {
   let canInvite = false
   if (partyId) {
     const data = await parties.getParty(env.DB, rec.guildId, partyId)
+    // The desktop client requests this immediately before inviting. Ordinary
+    // UI polling must not refetch an entire Discord roster every few seconds.
+    if (data && new URL(req.url).searchParams.get('verifyRules') === '1') {
+      const allowed = await rulesAccess(env).eligible(rec.guildId, [...data.members, ...data.queue].map(m => m.userId))
+      if (allowed !== null) {
+        const ids = new Set(allowed)
+        data.members = data.members.filter(m => ids.has(m.userId))
+        data.queue = data.queue.filter(m => ids.has(m.userId))
+      }
+    }
     if (data && data.members.some(m => m.userId === rec.userId)) {
       const settings = await getGuildSettings(env.DB, rec.guildId)
       const isOwner = data.ownerId === rec.userId
@@ -212,7 +232,7 @@ async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
     requesterId: rec.userId,
     game,
     ignMap,
-  })
+  }, rulesAccess(env))
   if (result.status === 'not_found') return json({ ok: false, error: 'Party not found.' }, 404)
   if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can change the game.' }, 403)
   if (result.status === 'invalid') return json({ ok: false, error: result.message ?? 'Invalid input.' }, 400)
@@ -332,7 +352,7 @@ async function addPartyMember(req: Request, env: AppBindings): Promise<Response>
     username: member.user.username,
     displayName: member.nick ?? member.user.global_name ?? member.user.username,
     ign,
-  })
+  }, rulesAccess(env))
   if (result.status === 'not_found') return json({ ok: false, error: 'Party not found.' }, 404)
   if (result.status === 'already_member') return json({ ok: false, error: 'Already a member.' }, 400)
   if (result.status === 'in_other_party') return json({ ok: false, error: 'That player is already in another party.' }, 400)
@@ -377,7 +397,7 @@ async function approvePartyQueued(req: Request, env: AppBindings): Promise<Respo
   if (ctx instanceof Response) return ctx
   const { guildId, partyId, requesterId, targetId } = ctx
 
-  const result = await parties.approveQueued(env.DB, guildId, partyId, requesterId, targetId)
+  const result = await parties.approveQueued(env.DB, guildId, partyId, requesterId, targetId, rulesAccess(env))
   if (result.status === 'not_found')    return json({ ok: false, error: 'Party not found.' }, 404)
   if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can approve members.' }, 403)
   if (result.status === 'not_queued')   return json({ ok: false, error: 'That player is no longer in the queue.' }, 400)

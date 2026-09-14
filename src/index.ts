@@ -15,6 +15,7 @@ import { sweepExpiredAuth } from './store/clientAuth'
 import { sweepExpiredAdminAuth } from './store/adminAuth'
 import { resolvePendingGames } from './store/games'
 import { landingPage } from './landing'
+import { sweepRulesApproval } from './lib/rules-sweep'
 
 const inner = new DiscordHono<AppEnv>()
   .command('party', handleParty)
@@ -96,6 +97,10 @@ export default {
   // tier's threshold are disbanded and their embeds greyed out; expired link
   // codes and client tokens are purged alongside.
   async scheduled(_event: ScheduledController, env: AppBindings, ctx: ExecutionContext): Promise<void> {
+    if (_event.cron === '* * * * *') {
+      ctx.waitUntil(sweepRulesApproval(env).catch(e => console.error('Rules approval sweep failed:', e)))
+      return
+    }
     ctx.waitUntil((async () => {
       const disbanded = await sweepInactiveParties(env.DB)
       for (const { party, thresholdMs } of disbanded) {

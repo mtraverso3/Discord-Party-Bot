@@ -1,3 +1,4 @@
+import { rulesAccess, rulesErrorMessage } from '../lib/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
 import {
@@ -67,7 +68,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
       }
     } catch (e) {
       console.error('handleParty error:', e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+      return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
     }
   })
 }
@@ -152,7 +153,7 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)`)
   } catch (e) {
     console.error('handleCreateModalRaw error:', e)
-    return reply('Something went wrong.')
+    return reply(rulesErrorMessage(e) ?? 'Something went wrong.')
   }
 }
 
@@ -182,7 +183,7 @@ async function join(
   if (!target) return c.followup({ content: 'Party not found. Use `/party list` to see active parties.', flags: 64 })
 
   const ign = await getUserIgn(c.env.DB, userId, target.game)
-  const result = await parties.joinParty(c.env.DB, guildId, targetId, { userId, username, displayName, ign })
+  const result = await parties.joinParty(c.env.DB, guildId, targetId, { userId, username, displayName, ign }, rulesAccess(c.env))
 
   if (result.status === 'not_found')      return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'in_other_party') return c.followup({ content: "You're already in another party. Leave it first.", flags: 64 })
@@ -204,7 +205,7 @@ async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string)
   const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId)
+  const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId, 'left', rulesAccess(c.env))
 
   if (result.status === 'is_owner') {
     return c.followup({ content: "You're the party owner — use `/party disband` to end it.", flags: 64 })
@@ -346,7 +347,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
       game: fields.game,
       voiceChannelId: fields.voiceChannelId || undefined,
       ignMap,
-    })
+    }, rulesAccess(env))
 
     if (result.status === 'not_found')    return reply('Party not found.')
     if (result.status === 'unauthorized') return reply('Only the party owner can edit the party.')
@@ -360,7 +361,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
     return reply(`Party updated.${promotedNote}`)
   } catch (e) {
     console.error('handleEditModalRaw error:', e)
-    return reply('Something went wrong.')
+    return reply(rulesErrorMessage(e) ?? 'Something went wrong.')
   }
 }
 
@@ -386,7 +387,7 @@ async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: str
   const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const result = await parties.openParty(c.env.DB, guildId, partyId, userId)
+  const result = await parties.openParty(c.env.DB, guildId, partyId, userId, rulesAccess(c.env))
 
   if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can open the party.', flags: 64 })
@@ -425,7 +426,7 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   const ign = await getUserIgn(c.env.DB, targetId, party.game)
   const result = await parties.forceAdd(c.env.DB, guildId, partyId, requesterId, {
     userId: targetId, username: resolved.username, displayName: resolved.displayName, ign,
-  })
+  }, rulesAccess(c.env))
 
   if (result.status === 'not_found')      return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can add members directly.', flags: 64 })
@@ -445,7 +446,7 @@ async function approve(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const result = await parties.approveQueued(c.env.DB, guildId, partyId, requesterId, targetId)
+  const result = await parties.approveQueued(c.env.DB, guildId, partyId, requesterId, targetId, rulesAccess(c.env))
 
   if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can approve members.', flags: 64 })
@@ -482,7 +483,7 @@ async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, r
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const result = await parties.removeMember(c.env.DB, guildId, partyId, requesterId, targetId)
+  const result = await parties.removeMember(c.env.DB, guildId, partyId, requesterId, targetId, rulesAccess(c.env))
 
   if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can remove members.', flags: 64 })
@@ -500,7 +501,7 @@ async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const result = await parties.promoteOwner(c.env.DB, guildId, partyId, requesterId, targetId)
+  const result = await parties.promoteOwner(c.env.DB, guildId, partyId, requesterId, targetId, rulesAccess(c.env))
 
   if (result.status === 'not_found')     return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized')  return c.followup({ content: 'Only the party owner can transfer ownership.', flags: 64 })

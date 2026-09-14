@@ -1,3 +1,4 @@
+import type { RulesAccess } from '../lib/rules'
 import type {
   ApproveResult, BanList, CloseResult, DenyResult, DisbandResult, ForceAddResult,
   JoinResult, LeaveResult, MoveQueueResult, OpenResult, PartyData, PartyMember,
@@ -215,18 +216,26 @@ function freeBanStmt(db: D1Database, guildId: string, partyId: string, userId: s
  * Promote queued users into open member slots, in queue order, capped by the
  * live capacity at execution time (re-computed inside the statement).
  */
-function promoteStmt(db: D1Database, guildId: string, partyId: string, now: number) {
+async function promoteStmt(db: D1Database, guildId: string, partyId: string, now: number, rules?: RulesAccess) {
+  const queued = rules ? await db.prepare("SELECT user_id FROM party_members WHERE guild_id=?1 AND party_id=?2 AND role='queued'")
+    .bind(guildId, partyId).all<{ user_id: string }>() : null
+  let eligible: string[] | null = null
+  if (rules) {
+    try { eligible = await rules.eligible(guildId, queued!.results.map(row => row.user_id)) }
+    catch { eligible = [] } // A Discord outage must not block leaving; promote nobody until a later operation.
+  }
   return db.prepare(`
     UPDATE party_members SET role = 'member', joined_at = ?3, queued_at = NULL
     WHERE guild_id = ?1 AND party_id = ?2 AND role = 'queued' AND user_id IN (
       SELECT user_id FROM party_members
       WHERE guild_id = ?1 AND party_id = ?2 AND role = 'queued'
+        AND (?4 IS NULL OR user_id IN (SELECT value FROM json_each(?4)))
       ORDER BY position
       LIMIT MAX(0,
         (SELECT max_size FROM parties WHERE guild_id = ?1 AND id = ?2)
         - (SELECT COUNT(*) FROM party_members WHERE guild_id = ?1 AND party_id = ?2 AND role = 'member'))
     )
-  `).bind(guildId, partyId, now)
+  `).bind(guildId, partyId, now, eligible === null ? null : JSON.stringify(eligible))
 }
 
 function nextPositionSql(): string {
@@ -260,7 +269,9 @@ export type CreatePartyResult =
   | { ok: true; party: PartyData }
   | { ok: false; error: 'owner_in_party' | 'id_taken' | 'invalid'; message: string }
 
-export async function createParty(db: D1Database, input: CreatePartyInput): Promise<CreatePartyResult> {
+export async function createParty(db: D1Database, input: CreatePartyInput, rules?: RulesAccess): Promise<CreatePartyResult> {
+  await rules?.require(input.guildId, input.owner.userId)
+
   if (!input.id || !input.guildId || !input.owner.userId) {
     return { ok: false, error: 'invalid', message: 'create requires id, guildId, and an owner' }
   }
@@ -308,7 +319,9 @@ export async function createParty(db: D1Database, input: CreatePartyInput): Prom
 
 // ── Membership mutations ─────────────────────────────────────────────────────
 
-export async function joinParty(db: D1Database, guildId: string, partyId: string, user: UserRef): Promise<JoinResult> {
+export async function joinParty(db: D1Database, guildId: string, partyId: string, user: UserRef, rules?: RulesAccess): Promise<JoinResult> {
+  await rules?.require(guildId, user.userId)
+
   const existing = await getUserMembership(db, guildId, user.userId)
   if (existing) {
     if (existing.partyId !== partyId) return { status: 'in_other_party' }
@@ -355,8 +368,9 @@ export async function joinParty(db: D1Database, guildId: string, partyId: string
 }
 
 export async function forceAdd(
-  db: D1Database, guildId: string, partyId: string, requesterId: string, user: UserRef,
-): Promise<ForceAddResult> {
+  db: D1Database, guildId: string, partyId: string, requesterId: string, user: UserRef, rules?: RulesAccess): Promise<ForceAddResult> {
+  await rules?.require(guildId, user.userId)
+
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
   if (party.ownerId !== requesterId) return { status: 'unauthorized', data: party }
@@ -401,8 +415,7 @@ export async function forceAdd(
 
 export async function leaveParty(
   db: D1Database, guildId: string, partyId: string, userId: string,
-  logAs: 'left' | 'removed' = 'left',
-): Promise<LeaveResult> {
+  logAs: 'left' | 'removed' = 'left', rules?: RulesAccess): Promise<LeaveResult> {
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
   if (userId === party.ownerId) return { status: 'is_owner', data: party }
@@ -419,7 +432,7 @@ export async function leaveParty(
   ]
   if (wasMember) {
     stmts.push(freeBanStmt(db, guildId, partyId, userId))
-    if (!party.isClosed) stmts.push(promoteStmt(db, guildId, partyId, now))
+    if (!party.isClosed) stmts.push(await promoteStmt(db, guildId, partyId, now, rules))
   }
   stmts.push(touchStmt(db, guildId, partyId, now))
   await db.batch(stmts)
@@ -438,22 +451,22 @@ export async function leaveParty(
 }
 
 export async function removeMember(
-  db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string,
-): Promise<RemoveResult> {
+  db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string, rules?: RulesAccess): Promise<RemoveResult> {
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
   if (party.ownerId !== requesterId) return { status: 'unauthorized', data: party }
   if (userId === party.ownerId) return { status: 'is_owner', data: party }
   if (!party.members.some(m => m.userId === userId)) return { status: 'not_in', data: party }
 
-  const result = await leaveParty(db, guildId, partyId, userId, 'removed')
+  const result = await leaveParty(db, guildId, partyId, userId, 'removed', rules)
   if (result.status !== 'left') return { status: 'not_in', data: result.data ?? party }
   return { status: 'removed', data: result.data, promoted: result.promoted }
 }
 
 export async function approveQueued(
-  db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string,
-): Promise<ApproveResult> {
+  db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string, rules?: RulesAccess): Promise<ApproveResult> {
+  await rules?.require(guildId, userId)
+
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
   if (party.ownerId !== requesterId) return { status: 'unauthorized', data: party }
@@ -537,8 +550,9 @@ export async function moveQueued(
 }
 
 export async function promoteOwner(
-  db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string,
-): Promise<PromoteResult> {
+  db: D1Database, guildId: string, partyId: string, requesterId: string, userId: string, rules?: RulesAccess): Promise<PromoteResult> {
+  await rules?.require(guildId, userId)
+
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found' }
   if (party.ownerId !== requesterId) return { status: 'unauthorized', data: party }
@@ -577,7 +591,7 @@ export async function closeParty(db: D1Database, guildId: string, partyId: strin
   return { status: 'closed', data: after ?? undefined }
 }
 
-export async function openParty(db: D1Database, guildId: string, partyId: string, requesterId: string): Promise<OpenResult> {
+export async function openParty(db: D1Database, guildId: string, partyId: string, requesterId: string, rules?: RulesAccess): Promise<OpenResult> {
   const party = await getParty(db, guildId, partyId)
   if (!party) return { status: 'not_found', promoted: [] }
   if (party.ownerId !== requesterId) return { status: 'unauthorized', data: party, promoted: [] }
@@ -587,7 +601,7 @@ export async function openParty(db: D1Database, guildId: string, partyId: string
   await db.batch([
     db.prepare('UPDATE parties SET is_closed = 0, last_activity_at = ?3 WHERE guild_id = ?1 AND id = ?2')
       .bind(guildId, partyId, now),
-    promoteStmt(db, guildId, partyId, now),
+    await promoteStmt(db, guildId, partyId, now, rules),
   ])
 
   let after = await getParty(db, guildId, partyId)
@@ -672,7 +686,7 @@ export interface UpdatePartyInput {
   ignMap?: Record<string, string>
 }
 
-export async function updateParty(db: D1Database, guildId: string, partyId: string, input: UpdatePartyInput): Promise<UpdateResult> {
+export async function updateParty(db: D1Database, guildId: string, partyId: string, input: UpdatePartyInput, rules?: RulesAccess): Promise<UpdateResult> {
   const party = await getParty(db, guildId, partyId)
   const fail = (message: string, status: 'invalid' | 'unauthorized' = 'invalid'): UpdateResult =>
     ({ status, data: party ?? undefined, promoted: [], nameChanged: false, gameChanged: false, message })
@@ -727,7 +741,7 @@ export async function updateParty(db: D1Database, guildId: string, partyId: stri
   }
 
   // Growing the cap on an open party opens spots — pull from the queue.
-  if (!party.isClosed) stmts.push(promoteStmt(db, guildId, partyId, now))
+  if (!party.isClosed) stmts.push(await promoteStmt(db, guildId, partyId, now, rules))
   await db.batch(stmts)
 
   let after = await getParty(db, guildId, partyId)

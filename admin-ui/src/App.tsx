@@ -16,6 +16,7 @@ import { History } from './views/History'
 import { Audit } from './views/Audit'
 import { Admins } from './views/Admins'
 import { Settings } from './views/Settings'
+import { Rules } from './views/Rules'
 
 const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard />, desc: 'Live overview of parties in this server.' },
@@ -26,6 +27,7 @@ const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
   { id: 'audit', label: 'Audit log', icon: <ScrollText />, desc: 'Every admin action taken through this panel.' },
   { id: 'admins', label: 'Admins', icon: <ShieldCheck />, desc: 'Discord users allowed to sign in to this server via /party admin.' },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon />, desc: 'Guild-wide limits enforced by the bot.' },
+  { id: 'rules', label: 'Rules & verification', icon: <ShieldCheck />, desc: 'Manage the rules quiz, queue approval, and member verification history.' },
 ]
 
 function currentTab(): string {
@@ -272,6 +274,7 @@ function TabView({ tab, superAdmin }: { tab: string; superAdmin: boolean }) {
     case 'audit': return <Audit />
     case 'admins': return <Admins superAdmin={superAdmin} />
     case 'settings': return <Settings />
+    case 'rules': return <Rules />
     default: return <Dashboard />
   }
 }

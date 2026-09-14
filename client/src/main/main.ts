@@ -294,15 +294,18 @@ function lobbyPayload(mode: LobbyMode, partyName: string): unknown {
 // this never falls back to creating a new one).
 async function inviteAllToCurrentLobby(createdNew: boolean): Promise<InviteResult> {
   if (!creds || !summoner) return { ok: false, error: 'League client is not connected.', outcomes: [] }
-  const party = lastSession?.party
+  const fresh = await fetchSession(true)
+  if (!fresh.ok) return { ok: false, error: fresh.error ?? 'Could not verify rules approval.', outcomes: [] }
+  const verifiedSession = fresh.session as Session
+  const party = verifiedSession.party
   if (!party) return { ok: false, error: 'You are not in a party.', outcomes: [] }
-  if (!lastSession?.canInvite) return { ok: false, error: 'You are not allowed to invite for this party.', outcomes: [] }
+  if (!verifiedSession.canInvite) return { ok: false, error: 'You are not allowed to invite for this party.', outcomes: [] }
 
   const outcomes: InviteOutcome[] = []
   const invites: { toSummonerId: number }[] = []
 
   for (const m of party.members) {
-    if (m.userId === lastSession!.userId) {
+    if (m.userId === verifiedSession.userId) {
       outcomes.push({ displayName: m.displayName, ign: m.ign, status: 'self' })
       continue
     }

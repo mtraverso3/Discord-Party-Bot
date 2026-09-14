@@ -1,3 +1,4 @@
+import { rulesAccess, rulesErrorMessage } from '../lib/rules'
 import type { AppBindings, PartyData } from '../types'
 import { createPartyAndEmbed, repostPartyEmbed, tryMarkDisbanded, trySyncEmbed } from '../lib/party'
 import * as parties from '../store/parties'
@@ -12,6 +13,7 @@ import * as games from '../store/games'
 import * as notes from '../store/notes'
 import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 import { importFromKv } from './import'
+import { handleRulesAdmin } from './rules'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -74,11 +76,12 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     }
   }
 
-  const body = (method === 'POST' || method === 'PATCH') && req.headers.get('content-type')?.includes('json')
+  const body = !path.startsWith('/rules/') && (method === 'POST' || method === 'PATCH') && req.headers.get('content-type')?.includes('json')
     ? await req.json<any>().catch(() => ({}))
     : {}
 
   const route = async (): Promise<Response> => {
+    if (path.startsWith('/rules/')) return handleRulesAdmin(req, env, guildId!, path, email || identity.userId || 'Admin panel')
     if (path === '/me' && method === 'GET') return await meRoute(env, identity, email)
     if (path === '/guilds' && method === 'GET') return await listGuilds(env, identity)
     if (path === '/import-kv' && method === 'POST') return await importFromKv(env)
@@ -176,6 +179,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     }
     return res
   } catch (e) {
+    if (rulesErrorMessage(e)) return json({ error: rulesErrorMessage(e) }, 403)
     console.error('admin api error:', e)
     return json({ error: (e as Error).message ?? 'internal error' }, 500)
   }
@@ -366,7 +370,7 @@ async function patchOne(env: AppBindings, guildId: string, partyId: string, body
     game: body.game,
     voiceChannelId: body.voiceChannelId,
     ignMap,
-  })
+  }, rulesAccess(env))
 
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'invalid') return json({ error: result.message }, 400)
@@ -597,7 +601,7 @@ async function closeOne(env: AppBindings, guildId: string, partyId: string): Pro
 async function openOne(env: AppBindings, guildId: string, partyId: string): Promise<Response> {
   const party = await parties.getParty(env.DB, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
-  const result = await parties.openParty(env.DB, guildId, partyId, party.ownerId)
+  const result = await parties.openParty(env.DB, guildId, partyId, party.ownerId, rulesAccess(env))
   if (result.status === 'already_open') return json({ error: 'already open' }, 400)
   await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
   return json(result.data)
@@ -632,7 +636,7 @@ async function addMember(env: AppBindings, guildId: string, partyId: string, bod
     username: member.user.username,
     displayName: member.nick ?? member.user.global_name ?? member.user.username,
     ign,
-  })
+  }, rulesAccess(env))
 
   if (result.status === 'not_found')      return json({ error: 'Party not found' }, 404)
   if (result.status === 'already_member') return json({ error: 'Already a member' }, 400)
@@ -646,7 +650,7 @@ async function addMember(env: AppBindings, guildId: string, partyId: string, bod
 async function removeMemberRoute(env: AppBindings, guildId: string, partyId: string, userId: string): Promise<Response> {
   const party = await parties.getParty(env.DB, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
-  const result = await parties.removeMember(env.DB, guildId, partyId, party.ownerId, userId)
+  const result = await parties.removeMember(env.DB, guildId, partyId, party.ownerId, userId, rulesAccess(env))
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'is_owner') return json({ error: "Can't remove the owner — promote someone else first" }, 400)
   if (result.status === 'not_in')   return json({ error: 'Not in party' }, 404)
@@ -657,7 +661,7 @@ async function removeMemberRoute(env: AppBindings, guildId: string, partyId: str
 async function approveQueuedRoute(env: AppBindings, guildId: string, partyId: string, userId: string): Promise<Response> {
   const party = await parties.getParty(env.DB, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
-  const result = await parties.approveQueued(env.DB, guildId, partyId, party.ownerId, userId)
+  const result = await parties.approveQueued(env.DB, guildId, partyId, party.ownerId, userId, rulesAccess(env))
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'not_queued') return json({ error: 'Not in queue' }, 404)
   if (result.status === 'full')       return json({ error: 'Party is full' }, 400)
@@ -678,7 +682,7 @@ async function denyQueuedRoute(env: AppBindings, guildId: string, partyId: strin
 async function promoteMemberRoute(env: AppBindings, guildId: string, partyId: string, userId: string): Promise<Response> {
   const party = await parties.getParty(env.DB, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
-  const result = await parties.promoteOwner(env.DB, guildId, partyId, party.ownerId, userId)
+  const result = await parties.promoteOwner(env.DB, guildId, partyId, party.ownerId, userId, rulesAccess(env))
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'already_owner') return json({ error: 'Already owner' }, 400)
   if (result.status === 'not_in')        return json({ error: 'Not in party' }, 404)

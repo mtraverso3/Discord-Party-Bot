@@ -1,3 +1,4 @@
+import { rulesAccess, rulesErrorMessage } from '../lib/rules'
 import type { ComponentContext } from 'discord-hono'
 import type { AppEnv } from '../types'
 import { extractMemberInfo, trySyncEmbed } from '../lib/party'
@@ -35,7 +36,7 @@ async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boole
     if (!party) return c.followup({ content: 'This party no longer exists.', flags: 64 })
 
     const ign = await getUserIgn(c.env.DB, userId, party.game)
-    const result = await parties.joinParty(c.env.DB, guildId, partyId, { userId, username, displayName, ign })
+    const result = await parties.joinParty(c.env.DB, guildId, partyId, { userId, username, displayName, ign }, rulesAccess(c.env))
 
     if (result.status === 'not_found')      return c.followup({ content: 'This party no longer exists.', flags: 64 })
     if (result.status === 'in_other_party') return c.followup({ content: "You're already in another party. Leave it first.", flags: 64 })
@@ -62,7 +63,7 @@ async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boole
     })
   } catch (e) {
     console.error(`party button error (party ${partyId}):`, e)
-    return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+    return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
   }
 }
 
@@ -98,7 +99,7 @@ export async function handleAwayButton(c: ComponentContext<AppEnv>) {
       return c.followup({ content: msg, flags: 64 })
     } catch (e) {
       console.error(`party button error (party ${partyId}):`, e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+      return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
     }
   })
 }
@@ -112,7 +113,7 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
     const { userId } = extractMemberInfo(c.interaction)
 
     try {
-      const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId)
+      const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId, 'left', rulesAccess(c.env))
 
       if (result.status === 'not_found') return c.followup({ content: 'This party no longer exists.', flags: 64 })
       if (result.status === 'is_owner') {
@@ -130,7 +131,7 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
       return c.followup({ content: msg, flags: 64 })
     } catch (e) {
       console.error(`party button error (party ${partyId}):`, e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+      return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
     }
   })
 }

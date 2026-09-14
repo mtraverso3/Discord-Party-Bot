@@ -1,3 +1,4 @@
+import { rulesAccess } from './rules'
 import type { AppBindings, PartyData } from '../types'
 import { claimEmbedRepost, createParty, disbandParty, getParty, setEmbedMessage } from '../store/parties'
 import { randomId } from './id'
@@ -114,7 +115,7 @@ export async function createPartyAndEmbed(
       },
       maxSize: opts.maxSize,
       voiceChannelId: opts.voiceChannelId,
-    })
+    }, rulesAccess(env))
     if (created.ok || created.error !== 'id_taken') break
   }
   if (!created || !created.ok) {

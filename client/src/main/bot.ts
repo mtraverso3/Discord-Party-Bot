@@ -96,12 +96,12 @@ export async function linkWithCode(code: string): Promise<{ ok: boolean; error?:
   return { ok: true, displayName: res.body.displayName }
 }
 
-export async function fetchSession(): Promise<{ ok: boolean; authExpired?: boolean; error?: string; session?: any }> {
+export async function fetchSession(verifyRules = false): Promise<{ ok: boolean; authExpired?: boolean; error?: string; session?: any }> {
   const token = loadConfig().token
   if (!token) return { ok: false, authExpired: true, error: 'Not linked.' }
   let res: { status: number; body: any }
   try {
-    res = await botFetch('GET', '/client/session', undefined, token)
+    res = await botFetch('GET', verifyRules ? '/client/session?verifyRules=1' : '/client/session', undefined, token)
   } catch (e) {
     return { ok: false, error: `Could not reach PartyBot: ${(e as Error).message}` }
   }
