@@ -229,7 +229,7 @@ export function Rules() {
     <fieldset disabled={busy} className="space-y-5">
       <Card>
         <CardHeader><CardTitle>Rules pages</CardTitle><CardDescription>Members read these pages before starting the quiz, 1–8 of them. Changes stay in this editor until published.</CardDescription></CardHeader>
-        <CardContent className="space-y-3">{draft.pages.map((page, i) => <details key={i} className="rounded-lg border p-3" open={i === 0}>
+        <CardContent className="space-y-3">{draft.pages.map((page, i) => <details key={i} className="rounded-lg border p-3">
           <summary className="cursor-pointer text-sm font-medium">Page {i + 1}: {page.title}</summary>
           <div className="mt-3 space-y-3"><Label>Title<Input maxLength={200} value={page.title} onChange={e => setDraft({ ...draft, pages: draft.pages.map((p, j) => j === i ? { ...p, title: e.target.value } : p) })} /></Label><Label>Rules<Textarea rows={12} maxLength={3800} value={page.text} onChange={e => setDraft({ ...draft, pages: draft.pages.map((p, j) => j === i ? { ...p, text: e.target.value } : p) })} /></Label>
             {draft.pages.length > 1 && <Button variant="destructive-outline" size="sm" onClick={() => setDraft({ ...draft, pages: draft.pages.filter((_, j) => j !== i) })}><Trash2 />Remove page</Button>}
