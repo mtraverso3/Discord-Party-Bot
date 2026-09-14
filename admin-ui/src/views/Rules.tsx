@@ -10,7 +10,7 @@ import { cn } from '../lib/cn'
 interface RulesConfig {
   version: string
   pages: { title: string; text: string }[]
-  questions: { text: string; answers: string[]; explanation: string }[]
+  questions: { text: string; correct: string[]; incorrect: string[]; explanation: string }[]
   agreement: string
 }
 interface Status {
@@ -25,6 +25,11 @@ interface RosterMember {
   version: string | null
 }
 type RosterKey = keyof Pick<RosterMember, 'user_id' | 'state' | 'revocations' | 'completions' | 'version'>
+
+// The rules bot refuses a question outside these, so the editor enforces them.
+// Wrong answers are optional: a question may offer only correct choices.
+const ANSWER_MIN = { correct: 1, incorrect: 0 }
+const ANSWER_MAX = 4
 
 // Ascending runs best-to-worst: approved, the two in-flight states, unverified.
 const STATE_RANK: Record<string, number> = { approved: 0, granting: 1, revoking: 2, unapproved: 3 }
@@ -215,17 +220,34 @@ export function Rules() {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Quiz · {draft.questions.length} questions</CardTitle><CardDescription>Keep the first six core checks. Members must answer every question correctly; answer positions are shuffled.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Quiz · {draft.questions.length} questions</CardTitle><CardDescription>Keep the first six core checks. Each question needs 1–4 correct answers and up to 4 incorrect ones; members pick one, positions are shuffled, and the explanation is shown either way.</CardDescription></CardHeader>
         <CardContent className="space-y-3">{draft.questions.map((question, i) => {
           const update = (patch: Partial<RulesConfig['questions'][number]>) => setDraft({ ...draft, questions: draft.questions.map((q, j) => i === j ? { ...q, ...patch } : q) })
           return <details key={i} className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">{i + 1}. {question.text || 'New question'} {i < 6 && <span className="ml-1 text-xs text-muted-foreground">Core check</span>}</summary>
             <div className="mt-3 space-y-3"><Label>Question<Input maxLength={600} value={question.text} onChange={e => update({ text: e.target.value })} /></Label>
-              {question.answers.map((answer, index) => <Label key={index}>{index === 0 ? 'Correct answer' : `Incorrect answer ${index}`}<Input maxLength={400} value={answer} onChange={e => update({ answers: question.answers.map((a, j) => j === index ? e.target.value : a) })} /></Label>)}
-              <Label>Explanation after a wrong answer<Textarea maxLength={1000} value={question.explanation} onChange={e => update({ explanation: e.target.value })} /></Label>
+              {(['correct', 'incorrect'] as const).map(group => (
+                <div key={group} className="space-y-2">
+                  {question[group].map((answer, index) => (
+                    <Label key={index}>
+                      {group === 'correct' ? 'Correct answer' : 'Incorrect answer'} {question[group].length > 1 ? index + 1 : ''}
+                      <div className="flex gap-2">
+                        <Input maxLength={400} value={answer} onChange={e => update({ [group]: question[group].map((a, j) => j === index ? e.target.value : a) })} />
+                        {question[group].length > ANSWER_MIN[group] && (
+                          <Button variant="destructive-outline" size="icon" title={`Remove this ${group} answer`} onClick={() => update({ [group]: question[group].filter((_, j) => j !== index) })}><Trash2 /></Button>
+                        )}
+                      </div>
+                    </Label>
+                  ))}
+                  {question[group].length < ANSWER_MAX
+                    ? <Button variant="outline" size="sm" onClick={() => update({ [group]: [...question[group], ''] })}>Add {group} answer</Button>
+                    : <p className="text-xs text-muted-foreground">{ANSWER_MAX} is the maximum the rules bot accepts.</p>}
+                </div>
+              ))}
+              <Label>Explanation, shown after any answer<Textarea maxLength={1000} value={question.explanation} onChange={e => update({ explanation: e.target.value })} /></Label>
               {i >= 6 && draft.questions.length > 10 && <Button variant="destructive-outline" size="sm" onClick={() => setDraft({ ...draft, questions: draft.questions.filter((_, j) => j !== i) })}>Remove question</Button>}
             </div></details>
         })}
-          {draft.questions.length < 15 && <Button variant="outline" onClick={() => setDraft({ ...draft, questions: [...draft.questions, { text: '', answers: ['', '', ''], explanation: '' }] })}>Add question</Button>}
+          {draft.questions.length < 15 && <Button variant="outline" onClick={() => setDraft({ ...draft, questions: [...draft.questions, { text: '', correct: [''], incorrect: [] as string[], explanation: '' }] })}>Add question</Button>}
         </CardContent>
       </Card>
       <Card><CardHeader><CardTitle>Final agreement</CardTitle><CardDescription>Shown after the member passes every question.</CardDescription></CardHeader><CardContent><Textarea aria-label="Final agreement" rows={7} maxLength={3000} value={draft.agreement} onChange={e => setDraft({ ...draft, agreement: e.target.value })} /></CardContent></Card>

@@ -20,8 +20,10 @@ export const DEV_RULES_CONFIG = {
   "questions": [
     {
       "text": "You can beat the content creators' team. What should you do?",
-      "answers": [
-        "Compete honestly within the rules.",
+      "correct": [
+        "Compete honestly within the rules."
+      ],
+      "incorrect": [
         "Deliberately lose.",
         "Stop attacking to extend their run."
       ],
@@ -29,8 +31,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "Before Round 8, may you eliminate a team other than the content creators' team?",
-      "answers": [
-        "No.",
+      "correct": [
+        "No."
+      ],
+      "incorrect": [
         "Yes, if they are weak.",
         "Only if your teammate agrees."
       ],
@@ -38,8 +42,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "What should guide your Round 4/6 purchases?",
-      "answers": [
-        "Check lobby tempo, especially the content creators' team, and buy accordingly.",
+      "correct": [
+        "Check lobby tempo, especially the content creators' team, and buy accordingly."
+      ],
+      "incorrect": [
         "Maximum damage regardless of the lobby.",
         "Always buy nothing."
       ],
@@ -47,8 +53,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "You select Bravery. What are you responsible for?",
-      "answers": [
-        "Make creative choices; coordinate in another voice channel if needed.",
+      "correct": [
+        "Make creative choices; coordinate in another voice channel if needed."
+      ],
+      "incorrect": [
         "Nothing: the random pick excuses your build.",
         "Always copy the strongest standard build."
       ],
@@ -56,8 +64,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "While waiting during voting, what should you avoid?",
-      "answers": [
-        "Hitting blast cones or disrupting voting to get attention.",
+      "correct": [
+        "Hitting blast cones or disrupting voting to get attention."
+      ],
+      "incorrect": [
         "Following instructions.",
         "Waiting for the creators' vote."
       ],
@@ -65,8 +75,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "The content creators' team says 'leave.' What should you do?",
-      "answers": [
-        "Alt-F4 as instructed; keep all-chat enabled for game instructions.",
+      "correct": [
+        "Alt-F4 as instructed; keep all-chat enabled for game instructions."
+      ],
+      "incorrect": [
         "Finish the round first.",
         "Decide by a separate team vote."
       ],
@@ -74,8 +86,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "During Guest of Honor, what must you do?",
-      "answers": [
-        "Vote with the content creators' team and keep the process orderly.",
+      "correct": [
+        "Vote with the content creators' team and keep the process orderly."
+      ],
+      "incorrect": [
         "Vote randomly.",
         "Repeatedly switch votes as a joke."
       ],
@@ -83,8 +97,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "Which approach follows the gameplay restrictions?",
-      "answers": [
-        "Avoid stat-only anvil builds, Clothesline, and Pinball.",
+      "correct": [
+        "Avoid stat-only anvil builds, Clothesline, and Pinball."
+      ],
+      "incorrect": [
         "Go only stat anvils.",
         "Use Clothesline or Pinball if your teammate agrees."
       ],
@@ -92,8 +108,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "When should you respond to a recruitment ping, and what must you do about your assigned ban?",
-      "answers": [
-        "Respond only when you can play; ban the champion assigned by the queue bot.",
+      "correct": [
+        "Respond only when you can play; ban the champion assigned by the queue bot."
+      ],
+      "incorrect": [
         "Respond even if unavailable; choose any ban.",
         "Respond if you might watch; ignore the assigned ban."
       ],
@@ -101,8 +119,10 @@ export const DEV_RULES_CONFIG = {
     },
     {
       "text": "How should you handle a ruling or an unresolved conduct issue?",
-      "answers": [
-        "Follow rulings without defensiveness; promptly report unresolved issues to the host.",
+      "correct": [
+        "Follow rulings without defensiveness; promptly report unresolved issues to the host."
+      ],
+      "incorrect": [
         "Argue until the lobby agrees.",
         "Retaliate in voice chat."
       ],
