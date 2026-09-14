@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronUp, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Segmented, Spinner, Table, TBody, THead, Textarea } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Spinner, Table, TBody, THead, Textarea } from '../components/ui'
+import { cn } from '../lib/cn'
 
 interface RulesConfig {
   version: string
@@ -23,10 +24,26 @@ interface RosterMember {
   completions: number
   version: string | null
 }
-type RosterSort = 'approval' | 'infractions'
+type RosterKey = keyof Pick<RosterMember, 'user_id' | 'state' | 'revocations' | 'completions' | 'version'>
 
-// Approved first, then the two in-flight states, then everyone unverified.
+// Ascending runs best-to-worst: approved, the two in-flight states, unverified.
 const STATE_RANK: Record<string, number> = { approved: 0, granting: 1, revoking: 2, unapproved: 3 }
+
+const ROSTER_COLUMNS: { key: RosterKey; label: string; align: string }[] = [
+  { key: 'user_id', label: 'Member', align: 'text-left' },
+  { key: 'state', label: 'State', align: 'text-left' },
+  { key: 'revocations', label: 'Infractions', align: 'text-right' },
+  { key: 'completions', label: 'Completions', align: 'text-right' },
+  { key: 'version', label: 'Rules version', align: 'text-right' },
+]
+
+/** Ascending comparison for one column; the caller flips it for descending. */
+function compareRoster(a: RosterMember, b: RosterMember, key: RosterKey): number {
+  if (key === 'state') return (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9)
+  if (key === 'revocations' || key === 'completions') return a[key] - b[key]
+  // IDs and versions are digit strings, so compare them as numbers, not text.
+  return (a[key] ?? '').localeCompare(b[key] ?? '', undefined, { numeric: true })
+}
 
 interface MemberStatus {
   member: { user_id: string; state: string; revocations: number; completions: number; version: string | null }
@@ -44,7 +61,8 @@ export function Rules() {
   const picker = useRef<UserPickerHandle>(null)
   const [member, setMember] = useState<MemberStatus | null>(null)
   const [roster, setRoster] = useState<RosterMember[] | null>(null)
-  const [sort, setSort] = useState<RosterSort>('approval')
+  const [sortKey, setSortKey] = useState<RosterKey>('state')
+  const [sortDesc, setSortDesc] = useState(false)
   const [reason, setReason] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -138,17 +156,28 @@ export function Rules() {
         {roster && (roster.length === 0
           ? <p className="text-sm text-muted-foreground">No members are tracked yet.</p>
           : <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">Sort by</span>
-                <Segmented<RosterSort> value={sort} onChange={setSort} options={[['approval', 'Approval'], ['infractions', 'Infractions']]} />
-                <span className="text-xs text-muted-foreground">{roster.length} tracked</span>
-              </div>
+              <p className="text-xs text-muted-foreground">{roster.length} tracked — click a column to sort, again to reverse.</p>
               <Table>
-                <THead><tr><th className="text-left">Member</th><th className="text-left">State</th><th className="text-right">Infractions</th><th className="text-right">Completions</th><th className="text-right">Rules version</th></tr></THead>
+                <THead><tr>{ROSTER_COLUMNS.map(col => {
+                  const active = sortKey === col.key
+                  return (
+                    <th key={col.key} className={col.align} aria-sort={active ? (sortDesc ? 'descending' : 'ascending') : 'none'}>
+                      <button
+                        type="button"
+                        className={cn('inline-flex cursor-pointer items-center gap-1 rounded transition-colors hover:text-foreground', !active && 'text-muted-foreground')}
+                        onClick={() => { active ? setSortDesc(d => !d) : (setSortKey(col.key), setSortDesc(false)) }}
+                      >
+                        {col.label}
+                        {active && (sortDesc ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />)}
+                      </button>
+                    </th>
+                  )
+                })}</tr></THead>
                 <TBody>
-                  {[...roster].sort((a, b) => sort === 'infractions'
-                    ? b.revocations - a.revocations || b.completions - a.completions
-                    : (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || b.revocations - a.revocations,
+                  {[...roster].sort((a, b) =>
+                    (sortDesc ? -1 : 1) * compareRoster(a, b, sortKey)
+                    // Stable order for equal values, so rows don't shuffle.
+                    || a.user_id.localeCompare(b.user_id, undefined, { numeric: true }),
                   ).map(m => (
                     <tr key={m.user_id} className="cursor-pointer hover:bg-accent" onClick={() => void openFromRoster(m.user_id)} title="Load this member">
                       <td className="font-mono text-xs">{m.user_id}</td>
