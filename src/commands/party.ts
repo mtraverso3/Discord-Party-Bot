@@ -640,15 +640,20 @@ async function rulesHistory(c: CommandContext<AppEnv>, guildId: string, opts: Re
     getMember(c.env.DB, guildId, targetId),
     memberHistory(c.env.DB, guildId, targetId),
   ])
+  // A reason can be 500 characters and there can be ten of them, which is well
+  // past Discord's 2000-character message limit — so each line is trimmed, and
+  // the whole reply is clipped as a backstop.
   const lines = history.length === 0
     ? '*No history yet.*'
     : history.map(e => {
       const when = `<t:${Math.floor(e.createdAt / 1000)}:d>`
-      return `\`${e.kind}\` ${when} — ${e.reason}${e.actor ? ` *(${e.actor})*` : ''}`
+      const reason = e.reason.length > 120 ? e.reason.slice(0, 119) + '…' : e.reason
+      return `\`${e.kind}\` ${when} — ${reason}${e.actor ? ` *(${e.actor})*` : ''}`
     }).join('\n')
 
+  const content = `**<@${targetId}>**\n${formatStatus(member)}\n\n**Last ${history.length} entries**\n${lines}`
   return c.followup({
-    content: `**<@${targetId}>**\n${formatStatus(member)}\n\n**Last ${history.length} entries**\n${lines}`,
+    content: content.length > 1990 ? content.slice(0, 1989) + '…' : content,
     flags: 64,
   })
 }

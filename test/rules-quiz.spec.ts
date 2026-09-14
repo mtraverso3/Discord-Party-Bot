@@ -255,4 +255,41 @@ describe('rules quiz', () => {
     expect((await getMember(env.DB, guildId, MEMBER)).state).toBe('granting')
     expect((await getMember(env.DB, guildId, MEMBER)).completions).toBe(1)
   })
+
+  it('keeps the biggest question Discord will allow inside its embed limit', async () => {
+    // Every value here is the maximum the editor accepts, which together came
+    // to 4889 characters — past the 4096 Discord takes.
+    const long = (n: number) => 'x'.repeat(n)
+    // Distinct, as the validator requires, but still the full 400 each.
+    // Not named `answer`: that would shadow the helper this test calls.
+    const maxAnswer = (tag: string) => 'x'.repeat(399) + tag
+    const huge = {
+      pages: [{ title: 'P', text: 'read' }],
+      questions: [{
+        text: long(600),
+        correct: ['a', 'b', 'c', 'd'].map(maxAnswer),
+        incorrect: ['e', 'f', 'g', 'h'].map(maxAnswer),
+        explanation: long(1000),
+      }],
+      agreement: long(3000),
+    }
+    const guildId = await setup(huge)
+    // One page here, so walk it directly rather than via the shared helper.
+    const start = context(guildId, 'rules_start;go')
+    await handleRulesStart(start)
+    const q1 = context(guildId, buttonFor(start, 'Continue to quiz'))
+    await handleRulesStep(q1)
+    expect(lastEmbed(q1).description.length).toBeLessThanOrEqual(4096)
+
+    // And again with a wrong answer, when the explanation is carried in too.
+    const retry = await answer(guildId, q1, false)
+    expect(lastEmbed(retry).description.length).toBeLessThanOrEqual(4096)
+    // The answers survive the trim — they are what the member has to act on.
+    for (const letter of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']) {
+      expect(() => buttonFor(retry, letter)).not.toThrow()
+    }
+
+    const agreement = await answer(guildId, retry, true)
+    expect(lastEmbed(agreement).description.length).toBeLessThanOrEqual(4096)
+  })
 })

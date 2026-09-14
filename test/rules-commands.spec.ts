@@ -232,6 +232,21 @@ describe('rules moderator commands', () => {
       expect((await page(g, 'nonsense')).embeds[0].title).toBe('First page')
     })
 
+    it('keeps a long history inside the message limit', async () => {
+      const g = guild()
+      await gated(g)
+      for (let i = 0; i < 12; i++) {
+        await env.DB.prepare(`
+          INSERT INTO rules_events (guild_id, user_id, kind, actor, reason, created_at)
+          VALUES (?1, ?2, 'revoked', 'Moderator Name (610000000000000009)', ?3, ?4)
+        `).bind(g, TARGET, 'r'.repeat(500), Date.now() + i).run()
+      }
+      // Ten entries at 500 characters each came to 5817 — Discord takes 2000.
+      const text = await run(g, 'rules-history', { member: TARGET })
+      expect(text.length).toBeLessThanOrEqual(2000)
+      expect(text).toContain(`<@${TARGET}>`)
+    })
+
     it('does not show the built-in sample rules as if they were the server’s', async () => {
       const untouched = guild()
       expect(await run(untouched, 'rules', {}, NO_PERMS)).toContain("hasn't set up a rules check")

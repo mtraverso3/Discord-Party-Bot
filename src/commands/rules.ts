@@ -30,6 +30,26 @@ function stepId(step: number, action: string): string {
 
 const LETTERS = 'ABCDEFGH'
 
+// Discord rejects an embed whose description passes this, and the editor's own
+// limits allow a question that would: 600 for the question, 400 per answer with
+// up to eight of them, and 1000 for the explanation carried in as feedback.
+const EMBED_DESCRIPTION_MAX = 4096
+
+/**
+ * Question, answers, and the explanation from the last one, trimmed to fit.
+ * The answers are what the member has to act on, so the explanation gives way
+ * first and only then is the whole thing clipped.
+ */
+function questionDescription(feedback: string, question: string, answers: string): string {
+  const body = question + '\n\n' + answers
+  if (!feedback) return body.slice(0, EMBED_DESCRIPTION_MAX)
+
+  const room = EMBED_DESCRIPTION_MAX - body.length - 2   // the blank line
+  if (room >= feedback.length) return feedback + '\n\n' + body
+  if (room > 40) return feedback.slice(0, room - 1) + '…' + '\n\n' + body
+  return body.slice(0, EMBED_DESCRIPTION_MAX)
+}
+
 export function buildStartComponents() {
   return [{
     type: 1,
@@ -134,7 +154,7 @@ export function renderStep(config: RulesConfig, session: RulesSession) {
     return {
       embeds: [{
         title: `Question ${session.question + 1}/${total}`,
-        description: (session.feedback ? session.feedback + '\n\n' : '') + question.text + '\n\n' + lines,
+        description: questionDescription(session.feedback, question.text, lines),
         color: 0x5865f2,
         footer: { text: 'Every answer is explained. A wrong one can be retried.' },
       }],
@@ -149,7 +169,8 @@ export function renderStep(config: RulesConfig, session: RulesSession) {
     embeds: [{
       title: total === 0 ? 'Final agreement' : `${total}/${total} correct — final agreement`,
       // Carries the last question's explanation, which nothing else would show.
-      description: (session.feedback ? session.feedback + '\n\n' : '') + config.agreement,
+      description: ((session.feedback ? session.feedback + '\n\n' : '') + config.agreement)
+        .slice(0, EMBED_DESCRIPTION_MAX),
       color: 0x5865f2,
       footer: { text: `Rules version ${config.version} · Agreeing gives you queue access.` },
     }],
