@@ -1,4 +1,5 @@
 import type { AppBindings } from '../types'
+import { devRulesUpstream } from './rules-dev'
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } })
 
@@ -34,15 +35,21 @@ export async function handleRulesAdmin(req: Request, env: AppBindings, guildId: 
     if (text.length > 131072) return json({ error: 'Request too large.' }, 413)
     try { body = JSON.parse(text) } catch { return json({ error: 'Invalid JSON.' }, 400) }
   }
+  // TEMPORARY (local preview): swap only the call to the Python service — every
+  // check above and every database write below still runs. See rules-dev.ts.
+  const devStub = env.RULES_BOT_DEV_STUB
+    && ['localhost', '127.0.0.1'].includes(new URL(req.url).hostname)
+
   let response: Response
   try {
-    response = await fetch(url.toString(), {
+    const request = {
       method: connect ? 'GET' : req.method,
       headers: { Authorization: `Bearer ${env.RULES_BOT_API_TOKEN}`, 'X-Arena-Guild': guildId,
         'X-Arena-Actor': actor, 'Content-Type': 'application/json' },
       body: req.method === 'POST' && !connect ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(15000), redirect: 'error',
-    })
+      signal: AbortSignal.timeout(15000), redirect: 'error' as const,
+    }
+    response = devStub ? await devRulesUpstream(url, request) : await fetch(url.toString(), request)
   } catch { return json({ error: 'The rules bot could not be reached. If you submitted a change, refresh its status before retrying.' }, 503) }
   let data: any
   try { data = await response.json() }

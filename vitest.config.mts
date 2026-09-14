@@ -19,6 +19,13 @@ export default defineConfig(async () => {
             DISCORD_BOT_TOKEN: 'test-token',
             DISCORD_APPLICATION_ID: 'test-app',
             TEST_MIGRATIONS: migrations,
+            // The pool also loads .dev.vars, so a developer's local setup
+            // would otherwise decide whether "not configured" tests pass.
+            // Blank them here; tests that need them set them per case.
+            ADMIN_DEV_EMAIL: '',
+            RULES_BOT_API_URL: '',
+            RULES_BOT_API_TOKEN: '',
+            RULES_BOT_DEV_STUB: '',
           },
         },
       }),

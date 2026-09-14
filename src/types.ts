@@ -66,6 +66,9 @@ export interface AppBindings extends Record<string, unknown> {
   // verifying a Cloudflare Access JWT, and only for requests to localhost.
   // Set it in .dev.vars — never as a deployed secret.
   ADMIN_DEV_EMAIL?: string
+  // Local development only: serve the rules panel from an in-memory stand-in
+  // instead of the Python service. Only honoured for localhost requests.
+  RULES_BOT_DEV_STUB?: string
   // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
   CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
   CF_ACCESS_AUD?: string    // Application AUD tag from the Access app
