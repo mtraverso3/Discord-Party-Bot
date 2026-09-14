@@ -67,7 +67,7 @@ export interface RulesConfig {
   agreement: string
 }
 
-export type ApprovalState = 'unapproved' | 'granting' | 'approved' | 'revoking'
+export type ApprovalState = 'unapproved' | 'approved'
 
 export interface RulesMemberRow {
   guild_id: string
@@ -93,7 +93,6 @@ export interface RulesGate {
   enabled: boolean
   /** What a newly created party gets when nobody says either way. */
   defaultRequired: boolean
-  roleId?: string      // optional Discord role mirroring approval
   channelId?: string   // where the Start button was posted
 }
 

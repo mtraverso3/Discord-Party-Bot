@@ -4,7 +4,7 @@ import { api } from '../api'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Mono, Spinner, Table, TBody, THead, Textarea } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Spinner, Table, TBody, THead, Textarea } from '../components/ui'
 import { ChannelSelect } from '../components/ChannelSelect'
 import type { ChannelInfo } from '../types'
 import { cn } from '../lib/cn'
@@ -16,8 +16,8 @@ interface RulesConfig {
   agreement: string
 }
 interface Status {
-  online: boolean; roleId: string; channelId: string; queueConnected: boolean; defaultRequired: boolean
-  config: RulesConfig; counts: { total: number; approved: number; pending: number }
+  online: boolean; channelId: string; queueConnected: boolean; defaultRequired: boolean
+  config: RulesConfig; counts: { total: number; approved: number }
 }
 interface RosterMember {
   user_id: string
@@ -134,8 +134,8 @@ export function Rules() {
     if (picker.current?.getId() !== id) { toast('Load the selected member before taking action.', 'err'); return }
     if (!await confirm(mode === 'revoke' ? `Revoke approval for member ${id}? This counts an active approval revocation and requires a fresh quiz.` : `Require member ${id} to retake the quiz without increasing their disciplinary count?`, mode === 'revoke' ? 'Revoke approval' : 'Require retake')) return
     await action(async () => {
-      const result = await api<{ message: string; pending: boolean }>(`/rules/members/${id}/${mode}`, { method: 'POST', body: JSON.stringify({ reason }) })
-      setNotice(result.message); toast(result.pending ? 'Role removal is pending — see the notice below.' : result.message, result.pending ? 'err' : undefined)
+      const result = await api<{ message: string }>(`/rules/members/${id}/${mode}`, { method: 'POST', body: JSON.stringify({ reason }) })
+      setNotice(result.message); toast(result.message)
       setMember(await api<MemberStatus>(`/rules/members/${id}`))
     })
   }
@@ -151,8 +151,8 @@ export function Rules() {
           <Badge variant={status.queueConnected ? 'success' : 'warning'}>{status.queueConnected ? 'Required to join' : 'Not required yet'}</Badge>
           <Badge>Rules version {status.config.version}</Badge>
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          {[[status.counts.approved, 'Approved'], [status.counts.total, 'Tracked members'], [status.counts.pending, 'Role updates pending']].map(([value, label]) => <div className="rounded-lg border bg-muted/30 p-3" key={label}><div className="text-xl font-semibold">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div>)}
+        <div className="grid grid-cols-2 gap-3">
+          {[[status.counts.approved, 'Approved'], [status.counts.total, 'Tracked members']].map(([value, label]) => <div className="rounded-lg border bg-muted/30 p-3" key={label}><div className="text-xl font-semibold">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div>)}
         </div>
         {status.queueConnected && (
           <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent">
@@ -178,9 +178,8 @@ export function Rules() {
           </label>
         )}
         <p className="text-xs text-muted-foreground">
-          {status.roleId
-            ? <>Approved members are also given role <Mono>{status.roleId}</Mono>, for anything else that reads it.</>
-            : 'Approval is held by this bot — no Discord role is involved.'}
+          Approval is this bot's own record of who passed. No Discord role is involved, so it cannot fall out of step
+          with one.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <Button busy={busy} onClick={() => void action(async () => {

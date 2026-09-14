@@ -53,7 +53,7 @@ it('serves the built-in rules until a guild publishes its own', async () => {
   expect(body.queueConnected).toBe(false)
   expect(body.config.version).toBe(1)
   expect(body.config.pages.length).toBeGreaterThan(0)
-  expect(body.counts).toEqual({ total: 0, approved: 0, pending: 0 })
+  expect(body.counts).toEqual({ total: 0, approved: 0 })
 })
 
 it('rejects cross-guild access', async () => {
@@ -80,13 +80,6 @@ it('switches the gate on, and off again, from the dashboard', async () => {
 
   await saveRulesGate(env.DB, g, { enabled: false })
   await rulesAccess(env).require(g, MEMBER)
-})
-
-it('stores an optional mirror role but refuses a bogus one', async () => {
-  const g = guild()
-  expect((await call('connect', g, 'POST', { roleId: 'not-a-role' })).status).toBe(400)
-  await call('connect', g, 'POST', { roleId: '900000000000000001' })
-  expect((await getRulesGate(env.DB, g))?.roleId).toBe('900000000000000001')
 })
 
 it('publishes a new version and refuses a stale editor', async () => {

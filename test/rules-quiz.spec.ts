@@ -64,7 +64,7 @@ function buttonFor(c: any, label: string): string {
   throw new Error(`no button labelled ${label}`)
 }
 
-async function setup(config: any = CONFIG, gate: { roleId?: string } = {}) {
+async function setup(config: any = CONFIG, gate: { defaultRequired?: boolean } = {}) {
   const guildId = guild()
   await saveRulesGate(env.DB, guildId, { enabled: true, ...gate })
   const published = await publishRulesConfig(env.DB, guildId, config, 1, false, 'admin')
@@ -229,31 +229,16 @@ describe('rules quiz', () => {
     expect(lastText(start)).toContain('not switched on')
   })
 
-  it('mirrors approval into the Discord role when one is configured', async () => {
-    const roleId = '900000000000000009'
-    const guildId = await setup(CONFIG, { roleId })
-    const agreement = await answer(guildId, await answer(guildId, await toFirstQuestion(guildId), true), true)
-    await handleRulesStep(context(guildId, buttonFor(agreement, 'I understand and agree')))
-
-    const [url, init] = discord.mock.calls.at(-1) as any
-    expect(url).toContain(`/guilds/${guildId}/members/${MEMBER}/roles/${roleId}`)
-    expect(init.method).toBe('PUT')
-    expect((await getMember(env.DB, guildId, MEMBER)).state).toBe('approved')
-  })
-
-  it('still approves when Discord will not apply the role, leaving it pending', async () => {
-    discord = vi.fn(async () => new Response('nope', { status: 403 }))
-    globalThis.fetch = discord as any
-
-    const guildId = await setup(CONFIG, { roleId: '900000000000000009' })
+  it('approves immediately, with nothing left pending', async () => {
+    const guildId = await setup()
     const agreement = await answer(guildId, await answer(guildId, await toFirstQuestion(guildId), true), true)
     const done = context(guildId, buttonFor(agreement, 'I understand and agree'))
     await handleRulesStep(done)
 
-    expect(lastText(done)).toContain('still being applied')
-    // Queue access does not wait on the role; only the role is behind.
-    expect((await getMember(env.DB, guildId, MEMBER)).state).toBe('granting')
-    expect((await getMember(env.DB, guildId, MEMBER)).completions).toBe(1)
+    // No Discord role to wait on, so approval is final the moment it is given.
+    expect((await getMember(env.DB, guildId, MEMBER)).state).toBe('approved')
+    expect(lastText(done)).not.toContain('still being applied')
+    expect(discord).not.toHaveBeenCalled()
   })
 
   it('keeps the biggest question Discord will allow inside its embed limit', async () => {

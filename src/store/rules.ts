@@ -1,5 +1,5 @@
 import type {
-  ApprovalState, RulesConfig, RulesEvent, RulesGate, RulesMemberRow, RulesQuestion, RulesSession,
+  RulesConfig, RulesEvent, RulesGate, RulesMemberRow, RulesQuestion, RulesSession,
 } from '../types'
 import { DEFAULT_RULES } from '../lib/rules-content'
 
@@ -76,17 +76,26 @@ export async function publishRulesConfig(
 
   let requeued = 0
   if (requireReapproval) {
-    const res = await db.prepare(`
-      UPDATE rules_members SET state = 'revoking', generation = generation + 1
-      WHERE guild_id = ?1 AND state IN ('approved', 'granting')
-    `).bind(guildId).run()
-    requeued = res.meta.changes ?? 0
+    // Who is losing approval has to be read before the update, since
+    // afterwards they are indistinguishable from everyone else unapproved.
+    const { results } = await db.prepare(
+      "SELECT user_id FROM rules_members WHERE guild_id = ?1 AND state = 'approved'",
+    ).bind(guildId).all<{ user_id: string }>()
+    requeued = results.length
+
     if (requeued > 0) {
       await db.prepare(`
+        UPDATE rules_members SET state = 'unapproved', generation = generation + 1,
+          version = NULL, accepted_at = NULL
+        WHERE guild_id = ?1 AND state = 'approved'
+      `).bind(guildId).run()
+      // Not disciplinary, so revoked_at stays clear and an exempt admin keeps
+      // their exemption.
+      await db.prepare(`
         INSERT INTO rules_events (guild_id, user_id, kind, actor, reason, created_at)
-        SELECT guild_id, user_id, 'reset', ?2, ?3, ?4 FROM rules_members
-        WHERE guild_id = ?1 AND state = 'revoking'
-      `).bind(guildId, actor, `Rules version ${version} published; fresh check required`, now).run()
+        SELECT ?1, value, 'reset', ?2, ?3, ?4 FROM json_each(?5)
+      `).bind(guildId, actor, `Rules version ${version} published; fresh check required`, now,
+        JSON.stringify(results.map(r => r.user_id))).run()
     }
   }
   return { ok: true, config, requeued }
@@ -152,12 +161,11 @@ export function validateRulesConfig(raw: any): ValidationResult {
 
 export async function getRulesGate(db: D1Database, guildId: string): Promise<RulesGate | null> {
   const row = await db.prepare('SELECT * FROM rules_gate WHERE guild_id = ?1').bind(guildId)
-    .first<{ enabled: number; default_required: number; role_id: string | null; channel_id: string | null }>()
+    .first<{ enabled: number; default_required: number; channel_id: string | null }>()
   if (!row) return null
   return {
     enabled: !!row.enabled,
     defaultRequired: !!row.default_required,
-    roleId: row.role_id ?? undefined,
     channelId: row.channel_id ?? undefined,
   }
 }
@@ -172,15 +180,13 @@ export async function saveRulesGate(
     // starts refusing members without someone choosing it.
     enabled: gate.enabled ?? current?.enabled ?? false,
     defaultRequired: gate.defaultRequired ?? current?.defaultRequired ?? false,
-    roleId: gate.roleId !== undefined ? gate.roleId : current?.roleId,
     channelId: gate.channelId !== undefined ? gate.channelId : current?.channelId,
   }
   await db.prepare(`
-    INSERT INTO rules_gate (guild_id, enabled, role_id, channel_id, default_required)
-    VALUES (?1, ?2, ?3, ?4, ?5)
-    ON CONFLICT (guild_id) DO UPDATE SET enabled = ?2, role_id = ?3, channel_id = ?4, default_required = ?5
-  `).bind(guildId, next.enabled ? 1 : 0, next.roleId || null, next.channelId || null,
-    next.defaultRequired ? 1 : 0).run()
+    INSERT INTO rules_gate (guild_id, enabled, channel_id, default_required)
+    VALUES (?1, ?2, ?3, ?4)
+    ON CONFLICT (guild_id) DO UPDATE SET enabled = ?2, channel_id = ?3, default_required = ?4
+  `).bind(guildId, next.enabled ? 1 : 0, next.channelId || null, next.defaultRequired ? 1 : 0).run()
   return next
 }
 
@@ -203,14 +209,12 @@ export async function listMembers(db: D1Database, guildId: string): Promise<Rule
 
 export async function memberCounts(
   db: D1Database, guildId: string,
-): Promise<{ total: number; approved: number; pending: number }> {
+): Promise<{ total: number; approved: number }> {
   const row = await db.prepare(`
-    SELECT COUNT(*) AS total,
-      COALESCE(SUM(state = 'approved'), 0) AS approved,
-      COALESCE(SUM(state IN ('granting', 'revoking')), 0) AS pending
+    SELECT COUNT(*) AS total, COALESCE(SUM(state = 'approved'), 0) AS approved
     FROM rules_members WHERE guild_id = ?1
-  `).bind(guildId).first<{ total: number; approved: number; pending: number }>()
-  return row ?? { total: 0, approved: 0, pending: 0 }
+  `).bind(guildId).first<{ total: number; approved: number }>()
+  return row ?? { total: 0, approved: 0 }
 }
 
 /**
@@ -274,18 +278,17 @@ export async function memberHistory(
  */
 export async function grantApproval(
   db: D1Database, guildId: string, userId: string, generation: number, version: number,
-  needsRole: boolean,
 ): Promise<boolean> {
   // Most members have no row until their first pass, so this inserts as well
   // as updates. The guard rides on the conflict branch: an existing row only
   // moves if it is still on the generation the quiz started with.
   const res = await db.prepare(`
     INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
-    VALUES (?1, ?2, ?5, ?3, 0, 1, ?4, ?6)
+    VALUES (?1, ?2, 'approved', ?3, 0, 1, ?4, ?5)
     ON CONFLICT (guild_id, user_id) DO UPDATE SET
-      state = ?5, completions = completions + 1, version = ?4, accepted_at = ?6, revoked_at = NULL
+      state = 'approved', completions = completions + 1, version = ?4, accepted_at = ?5, revoked_at = NULL
     WHERE rules_members.generation = ?3 AND rules_members.state = 'unapproved'
-  `).bind(guildId, userId, generation, version, needsRole ? 'granting' : 'approved', Date.now()).run()
+  `).bind(guildId, userId, generation, version, Date.now()).run()
   if (!res.meta.changes) return false
   await logEvent(db, guildId, userId, 'verified', userId, 'Completed quiz and agreement')
   return true
@@ -298,40 +301,20 @@ export async function grantApproval(
  */
 export async function revokeApproval(
   db: D1Database, guildId: string, userId: string, actor: string | null, reason: string,
-  disciplinary: boolean, needsRole: boolean,
-): Promise<{ counted: boolean; pending: boolean }> {
+  disciplinary: boolean,
+): Promise<{ counted: boolean }> {
   const member = await getMember(db, guildId, userId)
-  const wasActive = member.state === 'approved' || member.state === 'granting'
-  const counted = disciplinary && wasActive
-  const state: ApprovalState = wasActive && needsRole ? 'revoking' : 'unapproved'
+  const counted = disciplinary && member.state === 'approved'
   await db.prepare(`
     INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at, revoked_at)
-    VALUES (?1, ?2, ?3, 1, ?4, 0, NULL, NULL, ?5)
+    VALUES (?1, ?2, 'unapproved', 1, ?3, 0, NULL, NULL, ?4)
     ON CONFLICT (guild_id, user_id) DO UPDATE SET
-      state = ?3, generation = generation + 1, revocations = revocations + ?4,
-      version = NULL, accepted_at = NULL, revoked_at = ?5
-  `).bind(guildId, userId, state, counted ? 1 : 0, disciplinary ? Date.now() : null).run()
+      state = 'unapproved', generation = generation + 1, revocations = revocations + ?3,
+      version = NULL, accepted_at = NULL, revoked_at = ?4
+  `).bind(guildId, userId, counted ? 1 : 0, disciplinary ? Date.now() : null).run()
   await db.prepare('DELETE FROM rules_sessions WHERE guild_id = ?1 AND user_id = ?2').bind(guildId, userId).run()
   await logEvent(db, guildId, userId, counted ? 'revoked' : 'reset', actor, reason)
-  return { counted, pending: state === 'revoking' }
-}
-
-/** Settle a member once Discord has actually applied the role change. */
-export async function finishRoleChange(
-  db: D1Database, guildId: string, userId: string, from: 'granting' | 'revoking',
-): Promise<void> {
-  await db.prepare('UPDATE rules_members SET state = ?4 WHERE guild_id = ?1 AND user_id = ?2 AND state = ?3')
-    .bind(guildId, userId, from, from === 'granting' ? 'approved' : 'unapproved').run()
-}
-
-/** Members whose Discord role is still to be added or removed. */
-export async function pendingRoleChanges(db: D1Database): Promise<Array<{ guildId: string; userId: string; state: 'granting' | 'revoking' }>> {
-  const { results } = await db.prepare(`
-    SELECT m.guild_id, m.user_id, m.state FROM rules_members m
-    JOIN rules_gate g ON g.guild_id = m.guild_id
-    WHERE m.state IN ('granting', 'revoking') AND g.role_id IS NOT NULL
-  `).all<{ guild_id: string; user_id: string; state: 'granting' | 'revoking' }>()
-  return results.map(r => ({ guildId: r.guild_id, userId: r.user_id, state: r.state }))
+  return { counted }
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────

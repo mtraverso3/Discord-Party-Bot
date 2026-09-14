@@ -16,7 +16,7 @@ import { sweepExpiredAuth } from './store/clientAuth'
 import { sweepExpiredAdminAuth } from './store/adminAuth'
 import { resolvePendingGames } from './store/games'
 import { landingPage } from './landing'
-import { applyPendingRoles, sweepRulesApproval } from './lib/rules-sweep'
+import { sweepRulesApproval } from './lib/rules-sweep'
 import { sweepStaleSessions } from './store/rules'
 
 const inner = new DiscordHono<AppEnv>()
@@ -106,7 +106,6 @@ export default {
     if (_event.cron === '* * * * *') {
       ctx.waitUntil((async () => {
         await sweepRulesApproval(env)
-        await applyPendingRoles(env)
         await sweepStaleSessions(env.DB)
       })().catch(e => console.error('Rules approval sweep failed:', e)))
       return

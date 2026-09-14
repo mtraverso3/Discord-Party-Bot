@@ -58,6 +58,10 @@ Joining, both Join buttons, party creation, `/party adduser`, admin and desktop
 adds, manual queue approval, auto-promotion from the queue, capacity increases,
 ownership transfer, and desktop lobby invites.
 
+Approval is this bot's own record of who passed — there is no Discord role
+involved, so nothing can fall out of step with it and nothing has to be granted
+or taken away in Discord.
+
 Members who lose approval are removed from parties and queues within about a
 minute. A party owner who loses it has their party closed rather than disbanded,
 so the queue survives for a moderator to sort out.
@@ -114,14 +118,6 @@ and a sortable list of everyone tracked.
 
 Any of these invalidates a quiz already in progress: the member is told to start
 a fresh one rather than being graded against rules that have changed.
-
-## The optional Discord role
-
-Approval lives in this bot's database, so no Discord role is needed. If you set
-one anyway, approved members are given it and revoked members lose it — useful
-when something else in your server keys off a role. It is a mirror, not the
-source of truth: queue access never waits on Discord applying it, and the
-every-minute trigger retries anything Discord refused.
 
 ## Limits
 

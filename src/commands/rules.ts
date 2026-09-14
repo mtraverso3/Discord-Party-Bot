@@ -1,7 +1,6 @@
 import type { ComponentContext } from 'discord-hono'
 import type { AppBindings, AppEnv, RulesConfig, RulesSession } from '../types'
 import { extractMemberInfo } from '../lib/party'
-import { addRole, removeRole } from '../lib/discord'
 import {
   clearSession, getMember, getRulesConfig, getRulesGate, getSession,
   grantApproval, revokeApproval, saveSession,
@@ -222,13 +221,6 @@ export async function handleRulesStart(c: ComponentContext<AppEnv>) {
       if (member.state === 'approved') {
         return c.followup({ content: "You're already approved — you can join the queue.", flags: 64 })
       }
-      if (member.state === 'granting' || member.state === 'revoking') {
-        return c.followup({
-          content: 'A role update is still being applied. Try again in a minute, or ask a moderator.',
-          flags: 64,
-        })
-      }
-
       const config = await getRulesConfig(c.env.DB, guildId)
       const session: RulesSession = {
         page: 0, question: 0, step: 1,
@@ -307,40 +299,21 @@ export async function handleRulesStep(c: ComponentContext<AppEnv>) {
   }
 }
 
-/** Grant approval, and mirror it into a Discord role if the guild wants one. */
+/** Record the pass. Approval is ours, so it takes effect at once. */
 async function finish(
   c: ComponentContext<AppEnv>, guildId: string, userId: string,
   session: RulesSession, config: RulesConfig,
 ) {
-  const gate = await getRulesGate(c.env.DB, guildId)
-  const roleId = gate?.roleId
-  const granted = await grantApproval(
-    c.env.DB, guildId, userId, session.generation, config.version, !!roleId,
-  )
+  const granted = await grantApproval(c.env.DB, guildId, userId, session.generation, config.version)
   if (!granted) {
     return c.resUpdate({ content: 'This rules check is no longer valid. Start a fresh one.', embeds: [], components: [] })
   }
   await clearSession(c.env.DB, guildId, userId)
 
-  let note = ''
-  if (roleId) {
-    try {
-      await addRole(c.env.DISCORD_BOT_TOKEN, guildId, userId, roleId)
-      await c.env.DB.prepare(
-        "UPDATE rules_members SET state = 'approved' WHERE guild_id = ?1 AND user_id = ?2 AND state = 'granting'",
-      ).bind(guildId, userId).run()
-    } catch (e) {
-      // Queue access already works; only the visible role is behind, and the
-      // cron retries it.
-      console.warn(`rules role grant pending for ${userId} in ${guildId}:`, e)
-      note = '\nYour rules role is still being applied — that part will catch up shortly.'
-    }
-  }
-
   const member = await getMember(c.env.DB, guildId, userId)
   return c.resUpdate({
     content: `Approved — you can now join the queue.\nCompleted checks: **${member.completions}**`
-      + ` · Lifetime revocations: **${member.revocations}**${note}`,
+      + ` · Lifetime revocations: **${member.revocations}**`,
     embeds: [],
     components: [],
   })
@@ -348,56 +321,33 @@ async function finish(
 
 export interface ApprovalChange {
   counted: boolean    // a lifetime revocation was added
-  pending: boolean    // the Discord role is still to be removed
   message: string
 }
 
 /**
- * Withdraw approval, optionally as discipline, and take the mirror role back
- * if the guild uses one. Shared by the moderator slash commands and the
- * dashboard so the two cannot drift apart on what a revocation means.
+ * Withdraw approval, optionally as discipline. Shared by the moderator slash
+ * commands and the dashboard so the two cannot drift apart on what a
+ * revocation means. It takes effect immediately: approval is a row here, not a
+ * Discord role that might refuse to come off.
  */
 export async function changeApproval(
   env: AppBindings, guildId: string, userId: string,
   opts: { disciplinary: boolean; reason: string; actor: string },
 ): Promise<ApprovalChange> {
-  const gate = await getRulesGate(env.DB, guildId)
-  const roleId = gate?.roleId
-  const { counted, pending } = await revokeApproval(
-    env.DB, guildId, userId, opts.actor, opts.reason, opts.disciplinary, !!roleId,
+  const { counted } = await revokeApproval(
+    env.DB, guildId, userId, opts.actor, opts.reason, opts.disciplinary,
   )
-
-  let stillPending = pending
-  if (pending && roleId) {
-    try {
-      await removeRole(env.DISCORD_BOT_TOKEN, guildId, userId, roleId)
-      await env.DB.prepare(
-        "UPDATE rules_members SET state = 'unapproved' WHERE guild_id = ?1 AND user_id = ?2 AND state = 'revoking'",
-      ).bind(guildId, userId).run()
-      stillPending = false
-    } catch (e) {
-      console.warn(`rules role removal pending for ${userId} in ${guildId}:`, e)
-    }
-  }
-
-  const base = opts.disciplinary
-    ? `Approval removed. Lifetime revocations: ${counted ? 'increased by 1' : 'unchanged'}.`
-    : 'They must take the rules check again. No disciplinary count was added.'
   return {
     counted,
-    pending: stillPending,
-    message: stillPending
-      ? base + ' Their Discord role could not be removed yet and will be retried — queue access is already blocked.'
-      : base,
+    message: opts.disciplinary
+      ? `Approval removed. Lifetime revocations: ${counted ? 'increased by 1' : 'unchanged'}.`
+      : 'They must take the rules check again. No disciplinary count was added.',
   }
 }
 
 /** Text for `/party rules-status`, and for the admin panel's member lookup. */
 export function formatStatus(member: { state: string; completions: number; revocations: number; version: number | null }): string {
-  const label = member.state === 'approved' ? 'Approved'
-    : member.state === 'granting' ? 'Approved — role still being applied'
-      : member.state === 'revoking' ? 'Not approved — role still being removed'
-        : 'Not approved'
+  const label = member.state === 'approved' ? 'Approved' : 'Not approved'
   return `**${label}**\nCompleted checks: **${member.completions}** · Lifetime revocations: **${member.revocations}**`
     + (member.version ? `\nAgreed to rules version ${member.version}.` : '')
 }

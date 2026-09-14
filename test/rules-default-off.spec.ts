@@ -3,7 +3,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as parties from '../src/store/parties'
 import { rulesAccess } from '../src/lib/rules'
 import { sweepRulesApproval } from '../src/lib/rules-sweep'
-import { applyPendingRoles } from '../src/lib/rules-sweep'
 import { handleAdminApi } from '../src/admin/api'
 import { getRulesGate } from '../src/store/rules'
 import { sweepStaleSessions } from '../src/store/rules'
@@ -54,7 +53,6 @@ it('runs the every-minute sweep over an ungated guild without touching it', asyn
 
   // The whole minute's work, as the cron runs it.
   await sweepRulesApproval(env)
-  await applyPendingRoles(env)
   await sweepStaleSessions(env.DB)
 
   const party = (await parties.getParty(env.DB, g, 'DEF002'))!
@@ -82,6 +80,6 @@ it('reports itself as not required until someone turns it on', async () => {
   const url = new URL(`https://p.test/admin/api/rules/status?guild=${g}`)
   const body = await (await handleAdminApi(new Request(url), env, url, `1@${g}.discord.local`)).json<any>()
   expect(body.queueConnected).toBe(false)
-  expect(body.roleId).toBe('')
-  expect(body.counts).toEqual({ total: 0, approved: 0, pending: 0 })
+  expect(body.defaultRequired).toBe(false)
+  expect(body.counts).toEqual({ total: 0, approved: 0 })
 })
