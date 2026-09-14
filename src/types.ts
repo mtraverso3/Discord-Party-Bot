@@ -62,6 +62,10 @@ export interface AppBindings extends Record<string, unknown> {
   // Server-only bridge credentials; never returned to the admin browser.
   RULES_BOT_API_URL?: string
   RULES_BOT_API_TOKEN?: string
+  // Local development only: signs the /admin UI in as this address instead of
+  // verifying a Cloudflare Access JWT, and only for requests to localhost.
+  // Set it in .dev.vars — never as a deployed secret.
+  ADMIN_DEV_EMAIL?: string
   // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
   CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
   CF_ACCESS_AUD?: string    // Application AUD tag from the Access app

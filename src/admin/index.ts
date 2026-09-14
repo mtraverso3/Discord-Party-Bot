@@ -2,8 +2,33 @@ import type { AppBindings } from '../types'
 import { verifyAccessJwt } from './access'
 import { handleAdminApi } from './api'
 
+/**
+ * Local development only. `wrangler dev` has no Cloudflare Access in front of
+ * it, so there is no JWT to verify and the dashboard is unreachable. Setting
+ * ADMIN_DEV_EMAIL in .dev.vars (gitignored, never deployed) signs in as that
+ * address instead.
+ *
+ * Deliberately also requires the request to be addressed to localhost, so the
+ * variable reaching a deployed environment by accident still cannot bypass
+ * Access — a Worker on a real hostname never sees one.
+ */
+function devAdminEmail(req: Request, env: AppBindings): string | null {
+  if (!env.ADMIN_DEV_EMAIL) return null
+  const { hostname } = new URL(req.url)
+  return hostname === 'localhost' || hostname === '127.0.0.1' ? env.ADMIN_DEV_EMAIL : null
+}
+
 export async function handleAdmin(req: Request, env: AppBindings): Promise<Response> {
   const url = new URL(req.url)
+
+  const devEmail = devAdminEmail(req, env)
+  if (devEmail) {
+    console.warn(`admin: local dev sign-in as ${devEmail} — Access verification skipped`)
+    return url.pathname.startsWith('/admin/api/')
+      ? handleAdminApi(req, env, url, devEmail)
+      : serveSpa(req, env, url)
+  }
+
   const team = env.CF_ACCESS_TEAM
   const aud = env.CF_ACCESS_AUD
   if (!team || !aud) {
