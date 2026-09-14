@@ -1,5 +1,5 @@
 import type { AppBindings } from '../types'
-import { filterApproved, getRulesGate } from '../store/rules'
+import { filterApproved, filterRevoked, getRulesGate } from '../store/rules'
 import { filterAdmins } from '../store/adminAuth'
 
 // Whether a member may be admitted to a party. Approval used to mean holding a
@@ -12,8 +12,14 @@ import { filterAdmins } from '../store/adminAuth'
 // they are responsible for maintaining. They are warned every time instead —
 // see exemptFromRules, which the reply paths use to add that warning.
 //
-// The exemption follows the person being admitted, not whoever is acting. An
-// admin adding an unapproved member is still refused; otherwise "admins are
+// The exemption covers not having taken the check. It does not cover having had
+// approval taken away: a revoked admin takes the quiz like anyone else, or the
+// revocation would mean nothing for the people most able to ignore it. A
+// moderator who wants to undo one without making them sit it uses "require
+// retake without penalty", which clears the mark.
+//
+// The exemption also follows the person being admitted, not whoever is acting.
+// An admin adding an unapproved member is still refused; otherwise "admins are
 // exempt" would quietly mean "admins can admit anyone".
 
 export class RulesAccessError extends Error {
@@ -53,15 +59,32 @@ export function rulesAccess(env: AppBindings): RulesAccess {
     const missing = ids.filter(id => !approved.includes(id))
     if (missing.length === 0) return approved
     // Admins count as eligible here too, so the periodic sweep does not remove
-    // the people who were just told they may stay.
-    return [...approved, ...await filterAdmins(env.DB, guildId, missing)]
+    // the people who were just told they may stay — unless they were revoked.
+    const [admins, revoked] = await Promise.all([
+      filterAdmins(env.DB, guildId, missing),
+      filterRevoked(env.DB, guildId, missing),
+    ])
+    return [...approved, ...admins.filter(id => !revoked.includes(id))]
   }
 
   return {
     eligible,
     async require(guildId, userId) {
       const result = await eligible(guildId, [userId])
-      if (result !== null && !result.includes(userId)) throw new RulesAccessError()
+      if (result === null || result.includes(userId)) return
+      // Say why, when the reason is that the exemption was withdrawn rather
+      // than never having applied.
+      const [admins, revoked] = await Promise.all([
+        filterAdmins(env.DB, guildId, [userId]),
+        filterRevoked(env.DB, guildId, [userId]),
+      ])
+      if (admins.length > 0 && revoked.length > 0) {
+        throw new RulesAccessError(
+          'Your approval was revoked, so being an admin no longer gets you in —'
+          + ' take the rules check again in the rules channel.',
+        )
+      }
+      throw new RulesAccessError()
     },
   }
 }
@@ -77,6 +100,7 @@ export async function exemptFromRules(
   const gate = await getRulesGate(env.DB, guildId)
   if (!gate?.enabled) return false
   if ((await filterApproved(env.DB, guildId, [userId])).length > 0) return false
+  if ((await filterRevoked(env.DB, guildId, [userId])).length > 0) return false
   return (await filterAdmins(env.DB, guildId, [userId])).length > 0
 }
 

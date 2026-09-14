@@ -51,6 +51,13 @@ adding an unapproved member is still refused, and an admin who adds another
 admin is told that person has not passed. Otherwise "admins are exempt" would
 quietly become "admins can admit anyone".
 
+**It covers not having taken the check, not having lost it.** Revoke an admin's
+approval and they are refused like anyone else, told that being an admin no
+longer gets them in, and removed from parties by the next sweep — otherwise a
+revocation would mean nothing for the people most able to ignore it. They get
+the exemption back by passing the check, or a moderator can hand it back with
+**Require retake without penalty**, which is the non-disciplinary undo.
+
 Discord server permissions are not consulted for this — only the bot's own admin
 list — because the same rule has to hold in the background sweep and the desktop
 client, where there is no interaction to read permissions from.

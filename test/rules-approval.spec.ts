@@ -7,7 +7,7 @@ import { handleClientApi } from '../src/client-api'
 import { createClientToken } from '../src/store/clientAuth'
 import { handleAdminApi } from '../src/admin/api'
 import { handleJoinButton, handleQueueButton } from '../src/components/buttons'
-import { revokeApproval, saveRulesGate } from '../src/store/rules'
+import { getMember, grantApproval, revokeApproval, saveRulesGate } from '../src/store/rules'
 import { addAdmin } from '../src/store/adminAuth'
 
 // The queue gate. What is gated has not changed; where approval comes from
@@ -47,7 +47,7 @@ async function approve(guildId: string, ...ids: string[]) {
     await env.DB.prepare(`
       INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
       VALUES (?1, ?2, 'approved', 0, 0, 1, 1, ?3)
-      ON CONFLICT (guild_id, user_id) DO UPDATE SET state = 'approved'
+      ON CONFLICT (guild_id, user_id) DO UPDATE SET state = 'approved', revoked_at = NULL
     `).bind(guildId, id, Date.now()).run()
   }
 }
@@ -255,6 +255,57 @@ describe('admin exemption', () => {
     await sweepRulesApproval(env)
 
     expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).toContain(ADMIN)
+  })
+
+  it('makes a revoked admin take the check like anyone else', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    await approve(guildId, ADMIN)
+
+    // Disciplinary revocation: the exemption no longer covers them.
+    await revoke(guildId, ADMIN)
+    await expect(rulesAccess(env).require(guildId, ADMIN)).rejects.toThrow('revoked')
+    await expect(parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)).rejects.toThrow('revoked')
+    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(false)
+  })
+
+  it('removes a revoked admin on the next sweep', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    await parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)
+
+    await revoke(guildId, ADMIN)
+    await sweepRulesApproval(env)
+
+    expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).not.toContain(ADMIN)
+  })
+
+  it('gives the exemption back when a moderator resets without penalty', async () => {
+    const { guildId } = await make()
+    await makeAdmin(guildId)
+    await approve(guildId, ADMIN)
+    await revoke(guildId, ADMIN)
+    await expect(rulesAccess(env).require(guildId, ADMIN)).rejects.toThrow('revoked')
+
+    // "Require retake without penalty" is the undo for a revocation.
+    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'Sorted out', false, false)
+    await rulesAccess(env).require(guildId, ADMIN)
+    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(true)
+  })
+
+  it('restores the exemption once a revoked admin passes the check', async () => {
+    const { guildId } = await make()
+    await makeAdmin(guildId)
+    await approve(guildId, ADMIN)
+    await revoke(guildId, ADMIN)
+
+    // Through the real grant path, which is what clears the mark.
+    const { generation } = await getMember(env.DB, guildId, ADMIN)
+    expect(await grantApproval(env.DB, guildId, ADMIN, generation, 1, false)).toBe(true)
+
+    // A later non-disciplinary lapse leaves them exempt again.
+    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'New season', false, false)
+    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(true)
   })
 
   it('only exempts admins of that server', async () => {

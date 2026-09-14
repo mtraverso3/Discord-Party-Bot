@@ -196,6 +196,22 @@ export async function memberCounts(
   return row ?? { total: 0, approved: 0, pending: 0 }
 }
 
+/**
+ * Those of `userIds` whose approval was taken away as discipline and who have
+ * not passed since. Admins are exempt from the check, but not from this.
+ */
+export async function filterRevoked(
+  db: D1Database, guildId: string, userIds: string[],
+): Promise<string[]> {
+  const ids = [...new Set(userIds)]
+  if (ids.length === 0) return []
+  const { results } = await db.prepare(`
+    SELECT user_id FROM rules_members
+    WHERE guild_id = ?1 AND revoked_at IS NOT NULL AND user_id IN (SELECT value FROM json_each(?2))
+  `).bind(guildId, JSON.stringify(ids)).all<{ user_id: string }>()
+  return results.map(r => r.user_id)
+}
+
 /** The approved subset of `userIds` — what the party gate asks for. */
 export async function filterApproved(
   db: D1Database, guildId: string, userIds: string[],
@@ -250,7 +266,7 @@ export async function grantApproval(
     INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
     VALUES (?1, ?2, ?5, ?3, 0, 1, ?4, ?6)
     ON CONFLICT (guild_id, user_id) DO UPDATE SET
-      state = ?5, completions = completions + 1, version = ?4, accepted_at = ?6
+      state = ?5, completions = completions + 1, version = ?4, accepted_at = ?6, revoked_at = NULL
     WHERE rules_members.generation = ?3 AND rules_members.state = 'unapproved'
   `).bind(guildId, userId, generation, version, needsRole ? 'granting' : 'approved', Date.now()).run()
   if (!res.meta.changes) return false
@@ -272,12 +288,12 @@ export async function revokeApproval(
   const counted = disciplinary && wasActive
   const state: ApprovalState = wasActive && needsRole ? 'revoking' : 'unapproved'
   await db.prepare(`
-    INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
-    VALUES (?1, ?2, ?3, 1, ?4, 0, NULL, NULL)
+    INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at, revoked_at)
+    VALUES (?1, ?2, ?3, 1, ?4, 0, NULL, NULL, ?5)
     ON CONFLICT (guild_id, user_id) DO UPDATE SET
       state = ?3, generation = generation + 1, revocations = revocations + ?4,
-      version = NULL, accepted_at = NULL
-  `).bind(guildId, userId, state, counted ? 1 : 0).run()
+      version = NULL, accepted_at = NULL, revoked_at = ?5
+  `).bind(guildId, userId, state, counted ? 1 : 0, disciplinary ? Date.now() : null).run()
   await db.prepare('DELETE FROM rules_sessions WHERE guild_id = ?1 AND user_id = ?2').bind(guildId, userId).run()
   await logEvent(db, guildId, userId, counted ? 'revoked' : 'reset', actor, reason)
   return { counted, pending: state === 'revoking' }
