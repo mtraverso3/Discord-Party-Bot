@@ -220,7 +220,7 @@ export function Rules() {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Quiz · {draft.questions.length} questions</CardTitle><CardDescription>Keep the first six core checks. Each question needs 1–4 correct answers and up to 4 incorrect ones; members pick one, positions are shuffled, and the explanation is shown either way.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Quiz · {draft.questions.length === 0 ? 'no questions' : `${draft.questions.length} question${draft.questions.length === 1 ? '' : 's'}`}</CardTitle><CardDescription>Up to 15, and none is allowed — members then read the rules and go straight to the agreement. The six marked as core checks are the original set, kept as a hint rather than a rule. Each question needs 1–4 correct answers and up to 4 incorrect ones; members pick one, positions are shuffled, and the explanation is shown either way.</CardDescription></CardHeader>
         <CardContent className="space-y-3">{draft.questions.map((question, i) => {
           const update = (patch: Partial<RulesConfig['questions'][number]>) => setDraft({ ...draft, questions: draft.questions.map((q, j) => i === j ? { ...q, ...patch } : q) })
           return <details key={i} className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">{i + 1}. {question.text || 'New question'} {i < 6 && <span className="ml-1 text-xs text-muted-foreground">Core check</span>}</summary>
@@ -244,9 +244,10 @@ export function Rules() {
                 </div>
               ))}
               <Label>Explanation, shown after any answer<Textarea maxLength={1000} value={question.explanation} onChange={e => update({ explanation: e.target.value })} /></Label>
-              {i >= 6 && draft.questions.length > 10 && <Button variant="destructive-outline" size="sm" onClick={() => setDraft({ ...draft, questions: draft.questions.filter((_, j) => j !== i) })}>Remove question</Button>}
+              <Button variant="destructive-outline" size="sm" onClick={() => setDraft({ ...draft, questions: draft.questions.filter((_, j) => j !== i) })}><Trash2 />Remove question</Button>
             </div></details>
         })}
+          {draft.questions.length === 0 && <p className="text-sm text-muted-foreground">No quiz — members read the rules pages, then agree.</p>}
           {draft.questions.length < 15 && <Button variant="outline" onClick={() => setDraft({ ...draft, questions: [...draft.questions, { text: '', correct: [''], incorrect: [] as string[], explanation: '' }] })}>Add question</Button>}
         </CardContent>
       </Card>
