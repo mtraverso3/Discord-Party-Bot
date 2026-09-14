@@ -1,10 +1,10 @@
 import type { ComponentContext } from 'discord-hono'
 import type { AppBindings, AppEnv, RulesConfig, RulesSession } from '../types'
 import { extractMemberInfo } from '../lib/party'
-import { addRole } from '../lib/discord'
+import { addRole, removeRole } from '../lib/discord'
 import {
   clearSession, getMember, getRulesConfig, getRulesGate, getSession,
-  grantApproval, saveSession,
+  grantApproval, revokeApproval, saveSession,
 } from '../store/rules'
 
 /**
@@ -42,7 +42,7 @@ export function startMessage(config: RulesConfig) {
     : 'and agree'
   return {
     content: `**Rules & Conduct**\nRead all rules, ${steps} to get queue access. The check is private —`
-      + ' only you can see it. Use `/party rules` to check your status.',
+      + ' only you can see it. Use `/party rules-status` to check your status.',
     components: buildStartComponents(),
   }
 }
@@ -270,7 +270,53 @@ async function finish(
   })
 }
 
-/** Text for `/party rules`, and for the admin panel's member lookup. */
+export interface ApprovalChange {
+  counted: boolean    // a lifetime revocation was added
+  pending: boolean    // the Discord role is still to be removed
+  message: string
+}
+
+/**
+ * Withdraw approval, optionally as discipline, and take the mirror role back
+ * if the guild uses one. Shared by the moderator slash commands and the
+ * dashboard so the two cannot drift apart on what a revocation means.
+ */
+export async function changeApproval(
+  env: AppBindings, guildId: string, userId: string,
+  opts: { disciplinary: boolean; reason: string; actor: string },
+): Promise<ApprovalChange> {
+  const gate = await getRulesGate(env.DB, guildId)
+  const roleId = gate?.roleId
+  const { counted, pending } = await revokeApproval(
+    env.DB, guildId, userId, opts.actor, opts.reason, opts.disciplinary, !!roleId,
+  )
+
+  let stillPending = pending
+  if (pending && roleId) {
+    try {
+      await removeRole(env.DISCORD_BOT_TOKEN, guildId, userId, roleId)
+      await env.DB.prepare(
+        "UPDATE rules_members SET state = 'unapproved' WHERE guild_id = ?1 AND user_id = ?2 AND state = 'revoking'",
+      ).bind(guildId, userId).run()
+      stillPending = false
+    } catch (e) {
+      console.warn(`rules role removal pending for ${userId} in ${guildId}:`, e)
+    }
+  }
+
+  const base = opts.disciplinary
+    ? `Approval removed. Lifetime revocations: ${counted ? 'increased by 1' : 'unchanged'}.`
+    : 'They must take the rules check again. No disciplinary count was added.'
+  return {
+    counted,
+    pending: stillPending,
+    message: stillPending
+      ? base + ' Their Discord role could not be removed yet and will be retried — queue access is already blocked.'
+      : base,
+  }
+}
+
+/** Text for `/party rules-status`, and for the admin panel's member lookup. */
 export function formatStatus(member: { state: string; completions: number; revocations: number; version: number | null }): string {
   const label = member.state === 'approved' ? 'Approved'
     : member.state === 'granting' ? 'Approved — role still being applied'

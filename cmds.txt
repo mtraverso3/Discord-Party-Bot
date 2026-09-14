@@ -1,0 +1,132 @@
+[
+ [
+  "help",
+  [],
+  "Show how to use PartyBot"
+ ],
+ [
+  "create",
+  [
+   "rules:true/false (optional)"
+  ],
+  "Create a new party (opens a modal)"
+ ],
+ [
+  "join",
+  [
+   "party:text"
+  ],
+  "Join a party (or its queue if full/closed)"
+ ],
+ [
+  "leave",
+  [],
+  "Leave your current party or queue"
+ ],
+ [
+  "info",
+  [
+   "party:text (optional)"
+  ],
+  "Show party info"
+ ],
+ [
+  "list",
+  [],
+  "List all active parties in this server"
+ ],
+ [
+  "ign",
+  [
+   "game:text"
+  ],
+  "Set your in-game name for a game (saves to profile)"
+ ],
+ [
+  "edit",
+  [
+   "rules:true/false (optional)"
+  ],
+  "Edit name, description, cap, game, and voice channel in one modal (owner only)"
+ ],
+ [
+  "banlist",
+  [],
+  "Set a banlist — members get assigned a ban in order (owner only)"
+ ],
+ [
+  "close",
+  [],
+  "Close your party — new joiners go to queue (owner only)"
+ ],
+ [
+  "open",
+  [],
+  "Re-open your closed party (owner only)"
+ ],
+ [
+  "adduser",
+  [
+   "user:user"
+  ],
+  "Directly add a user to your party (owner only)"
+ ],
+ [
+  "approve",
+  [
+   "user:user"
+  ],
+  "Approve a queued player into the party (owner only)"
+ ],
+ [
+  "deny",
+  [
+   "user:user"
+  ],
+  "Remove a player from the queue (owner only)"
+ ],
+ [
+  "remove",
+  [
+   "user:user"
+  ],
+  "Remove a member from your party (owner only)"
+ ],
+ [
+  "promote",
+  [
+   "user:user"
+  ],
+  "Transfer ownership of your party to another member (owner only)"
+ ],
+ [
+  "disband",
+  [],
+  "Disband your party (owner only)"
+ ],
+ [
+  "bump",
+  [],
+  "Repost the party embed to the bottom of this channel (owner only)"
+ ],
+ [
+  "rules",
+  [],
+  "Show whether you have passed this server's rules check"
+ ],
+ [
+  "link",
+  [],
+  "Get a code to link your League client to this party via the PartyBot desktop app"
+ ],
+ [
+  "clear",
+  [],
+  "Clear all active parties in this server (admin only)"
+ ],
+ [
+  "admin",
+  [],
+  "Get a private link to sign in to the PartyBot admin panel (allow-listed users only)"
+ ]
+]

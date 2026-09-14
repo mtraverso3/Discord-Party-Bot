@@ -266,6 +266,23 @@ export function extractMemberInfo(interaction: any): {
   }
 }
 
+/**
+ * Whether the caller may moderate the rules check. Discord ignores
+ * default_member_permissions on subcommands, so this is enforced here rather
+ * than declared in the command definition.
+ */
+export function canModerateRules(interaction: any): boolean {
+  const perms = interaction.member?.permissions
+  if (!perms) return false
+  try {
+    const bits = BigInt(perms)
+    return (bits & 0x10000000n) === 0x10000000n   // Manage Roles
+      || (bits & 0x8n) === 0x8n                   // Administrator implies it
+  } catch {
+    return false
+  }
+}
+
 export function isGuildAdmin(interaction: any): boolean {
   const perms = interaction.member?.permissions
   if (!perms) return false

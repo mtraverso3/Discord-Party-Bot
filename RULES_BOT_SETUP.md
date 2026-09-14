@@ -85,6 +85,20 @@ Discord server permissions are not consulted for this — only the bot's own adm
 list — because the same rule has to hold in the background sweep and the desktop
 client, where there is no interaction to read permissions from.
 
+## Commands
+
+| Command | Who can use it | What it does |
+| --- | --- | --- |
+| `/party rules-post` | Manage Roles | Posts the Start rules check button in the configured channel. |
+| `/party rules-status` | Everyone | Privately shows your approval status, lifetime revocations, and completed verifications. |
+| `/party rules-history member` | Manage Roles | Shows a member's counters and their latest 10 history entries. |
+| `/party rules-revoke member reason` | Manage Roles | Removes approval and requires a fresh quiz. Increases the lifetime revocation count when an active approval is revoked. |
+| `/party rules-reset member reason` | Manage Roles | Removes approval and requires a fresh quiz without increasing the disciplinary count. |
+
+Discord does not enforce permissions on subcommands, so the Manage Roles
+requirement is checked by the bot when the command runs. Administrator counts
+as Manage Roles. Every reply is private to whoever ran it.
+
 ## Moderation
 
 **Rules & verification** has a member lookup with lifetime counters and history,

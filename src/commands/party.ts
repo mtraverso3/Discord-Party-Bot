@@ -1,10 +1,10 @@
 import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
-import { formatStatus } from './rules'
-import { getMember, getRulesGate } from '../store/rules'
+import { changeApproval, formatStatus, postRulesMessage } from './rules'
+import { getMember, getRulesGate, memberHistory } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
 import {
-  createPartyAndEmbed, extractMemberInfo, extractResolvedUser, isGuildAdmin,
+  canModerateRules, createPartyAndEmbed, extractMemberInfo, extractResolvedUser, isGuildAdmin,
   repostPartyEmbed, tryMarkDisbanded, trySyncEmbed,
 } from '../lib/party'
 import * as parties from '../store/parties'
@@ -70,7 +70,11 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'disband': return await disband(c, guildId, userId)
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
-        case 'rules':   return await rulesStatus(c, guildId, userId)
+        case 'rules-status':  return await rulesStatus(c, guildId, userId)
+        case 'rules-post':    return await rulesPost(c, guildId)
+        case 'rules-history': return await rulesHistory(c, guildId, opts)
+        case 'rules-revoke':  return await rulesChange(c, guildId, opts, true)
+        case 'rules-reset':   return await rulesChange(c, guildId, opts, false)
         case 'link':    return await link(c, guildId, userId)
         case 'admin':   return await adminLink(c, guildId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
@@ -577,7 +581,73 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
   return c.followup({ content: 'Party bumped!', flags: 64 })
 }
 
-// ── /party rules ──────────────────────────────────────────────────────────────
+// ── /party rules-* ────────────────────────────────────────────────────────────
+
+/** Shared guard: Discord will not enforce Manage Roles on a subcommand for us. */
+function requireModerator(c: CommandContext<AppEnv>): boolean {
+  return canModerateRules(c.interaction)
+}
+
+const NO_PERMISSION = 'You need the **Manage Roles** permission to use this.'
+
+async function rulesPost(c: CommandContext<AppEnv>, guildId: string) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const gate = await getRulesGate(c.env.DB, guildId)
+  if (!gate?.enabled) {
+    return c.followup({ content: "This server hasn't switched the rules check on yet.", flags: 64 })
+  }
+  if (!gate.channelId) {
+    return c.followup({
+      content: 'No rules channel is set. Pick one in the dashboard under **Rules & verification**, then try again.',
+      flags: 64,
+    })
+  }
+  try {
+    await postRulesMessage(c.env, guildId, gate.channelId)
+  } catch (e) {
+    console.error('rules-post failed:', e)
+    return c.followup({ content: `Couldn't post in <#${gate.channelId}> — check the bot's permissions there.`, flags: 64 })
+  }
+  return c.followup({ content: `Posted the rules check in <#${gate.channelId}>.`, flags: 64 })
+}
+
+async function rulesHistory(c: CommandContext<AppEnv>, guildId: string, opts: Record<string, any>) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const targetId = opts['member'] as string
+  const [member, history] = await Promise.all([
+    getMember(c.env.DB, guildId, targetId),
+    memberHistory(c.env.DB, guildId, targetId),
+  ])
+  const lines = history.length === 0
+    ? '*No history yet.*'
+    : history.map(e => {
+      const when = `<t:${Math.floor(e.createdAt / 1000)}:d>`
+      return `\`${e.kind}\` ${when} — ${e.reason}${e.actor ? ` *(${e.actor})*` : ''}`
+    }).join('\n')
+
+  return c.followup({
+    content: `**<@${targetId}>**\n${formatStatus(member)}\n\n**Last ${history.length} entries**\n${lines}`,
+    flags: 64,
+  })
+}
+
+async function rulesChange(
+  c: CommandContext<AppEnv>, guildId: string, opts: Record<string, any>, disciplinary: boolean,
+) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const targetId = opts['member'] as string
+  const reason = ((opts['reason'] as string) ?? '').trim().slice(0, 500)
+  if (!reason) return c.followup({ content: 'Give a reason — it is recorded against the member.', flags: 64 })
+
+  const { userId: actorId, displayName } = extractMemberInfo(c.interaction)
+  const result = await changeApproval(c.env, guildId, targetId, {
+    disciplinary, reason, actor: `${displayName} (${actorId})`,
+  })
+  return c.followup({ content: `<@${targetId}> — ${result.message}`, flags: 64 })
+}
 
 async function rulesStatus(c: CommandContext<AppEnv>, guildId: string, userId: string) {
   const gate = await getRulesGate(c.env.DB, guildId)

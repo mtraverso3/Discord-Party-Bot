@@ -148,7 +148,8 @@ export function buildHelpEmbed(page: number) {
         },
         {
           name: 'End',
-          value: '`/party disband` — end the party\n*Parties auto-disband when idle — about 2h if solo, 6h with a few players, up to 12h when full or with a queue.*',
+          value: '`/party rules-status` — check your own rules approval
+`/party disband` — end the party\n*Parties auto-disband when idle — about 2h if solo, 6h with a few players, up to 12h when full or with a queue.*',
         },
       ],
       footer: { text: 'Page 2 / 3 · Owner Controls' },

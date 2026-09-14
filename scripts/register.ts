@@ -158,10 +158,43 @@ const commands = [
         name: 'bump',
         description: 'Repost the party embed to the bottom of this channel (owner only)',
       },
+      // The rules-* moderator commands gate on Manage Roles at runtime:
+      // Discord ignores default_member_permissions on subcommands.
       {
         type: 1,
-        name: 'rules',
-        description: 'Show whether you have passed this server's rules check',
+        name: 'rules-status',
+        description: 'Privately show your approval status, revocations, and completed checks',
+      },
+      {
+        type: 1,
+        name: 'rules-post',
+        description: 'Post the Start rules check button in the configured channel (Manage Roles)',
+      },
+      {
+        type: 1,
+        name: 'rules-history',
+        description: "Show a member's counters and their latest history entries (Manage Roles)",
+        options: [
+          { type: 6, name: 'member', description: 'The member to look up', required: true },
+        ],
+      },
+      {
+        type: 1,
+        name: 'rules-revoke',
+        description: 'Remove approval and require a fresh check, counting a revocation (Manage Roles)',
+        options: [
+          { type: 6, name: 'member', description: 'The member to revoke', required: true },
+          { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
+        ],
+      },
+      {
+        type: 1,
+        name: 'rules-reset',
+        description: 'Require a fresh check without adding a disciplinary count (Manage Roles)',
+        options: [
+          { type: 6, name: 'member', description: 'The member to reset', required: true },
+          { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
+        ],
       },
       {
         type: 1,

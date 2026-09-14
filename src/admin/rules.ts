@@ -1,9 +1,8 @@
 import type { AppBindings } from '../types'
-import { formatStatus, postRulesMessage } from '../commands/rules'
-import { removeRole } from '../lib/discord'
+import { changeApproval as applyApprovalChange, formatStatus, postRulesMessage } from '../commands/rules'
 import {
   getMember, getRulesConfig, getRulesGate, listMembers, memberCounts, memberHistory,
-  publishRulesConfig, revokeApproval, saveRulesGate,
+  publishRulesConfig, saveRulesGate,
 } from '../store/rules'
 
 /**
@@ -162,33 +161,6 @@ async function changeApproval(
   const reason = (body?.reason ?? '').toString().trim().slice(0, 500)
   if (!reason) return json({ error: 'Give a reason — it is recorded against the member.' }, 400)
 
-  const gate = await getRulesGate(env.DB, guildId)
-  const roleId = gate?.roleId
-  const { counted, pending } = await revokeApproval(
-    env.DB, guildId, userId, actor, reason, disciplinary, !!roleId,
-  )
-
-  let stillPending = pending
-  if (pending && roleId) {
-    try {
-      await removeRole(env.DISCORD_BOT_TOKEN, guildId, userId, roleId)
-      await env.DB.prepare(
-        "UPDATE rules_members SET state = 'unapproved' WHERE guild_id = ?1 AND user_id = ?2 AND state = 'revoking'",
-      ).bind(guildId, userId).run()
-      stillPending = false
-    } catch (e) {
-      console.warn(`rules role removal pending for ${userId} in ${guildId}:`, e)
-    }
-  }
-
-  const base = disciplinary
-    ? `Approval removed. Lifetime revocations: ${counted ? 'increased by 1' : 'unchanged'}.`
-    : 'The member must take the rules check again. No disciplinary count was added.'
-  return json({
-    ok: true,
-    pending: stillPending,
-    message: stillPending
-      ? base + ' Their Discord role could not be removed yet and will be retried — queue access is already blocked.'
-      : base,
-  })
+  const result = await applyApprovalChange(env, guildId, userId, { disciplinary, reason, actor })
+  return json({ ok: true, pending: result.pending, message: result.message })
 }
