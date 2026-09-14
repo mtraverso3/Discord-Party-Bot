@@ -44,6 +44,9 @@ const members = new Map<string, StubMember>([
   ['200000000000000001', { user_id: '200000000000000001', state: 'approved', generation: 0, revocations: 0, completions: 1, version: '1', accepted_at: '2026-09-01T18:20:00+00:00' }],
   ['200000000000000002', { user_id: '200000000000000002', state: 'approved', generation: 2, revocations: 1, completions: 2, version: '1', accepted_at: '2026-09-09T20:05:00+00:00' }],
   ['200000000000000003', { user_id: '200000000000000003', state: 'unapproved', generation: 1, revocations: 0, completions: 0, version: null, accepted_at: null }],
+  ['200000000000000004', { user_id: '200000000000000004', state: 'unapproved', generation: 5, revocations: 3, completions: 2, version: '1', accepted_at: null }],
+  ['200000000000000005', { user_id: '200000000000000005', state: 'revoking', generation: 3, revocations: 2, completions: 3, version: '1', accepted_at: '2026-09-11T19:00:00+00:00' }],
+  ['200000000000000006', { user_id: '200000000000000006', state: 'approved', generation: 0, revocations: 0, completions: 1, version: '1', accepted_at: '2026-09-12T17:45:00+00:00' }],
 ])
 
 const history = new Map<string, StubEvent[]>([
@@ -82,6 +85,18 @@ export async function devRulesUpstream(url: URL, init: RequestInit): Promise<Res
         approved: list.filter(m => m.state === 'approved').length,
         pending: list.filter(m => m.state === 'granting' || m.state === 'revoking').length,
       },
+    })
+  }
+
+  if (path === '/members') {
+    return json({
+      members: [...members.values()].map(m => ({
+        user_id: m.user_id,
+        state: m.state,
+        revocations: m.revocations,
+        completions: m.completions,
+        version: m.version,
+      })),
     })
   }
 

@@ -8,11 +8,11 @@ export async function handleRulesAdmin(req: Request, env: AppBindings, guildId: 
   if (req.method !== 'GET' && req.headers.get('origin') && req.headers.get('origin') !== new URL(req.url).origin) {
     return json({ error: 'Cross-origin changes are not allowed.' }, 403)
   }
-  const routes: Record<string, string> = { '/rules/status': '/status', '/rules/publish': '/publish', '/rules/post': '/post' }
+  const routes: Record<string, string> = { '/rules/status': '/status', '/rules/publish': '/publish', '/rules/post': '/post', '/rules/members': '/members' }
   const member = path.match(/^\/rules\/members\/(\d{5,20})(\/(revoke|reset))?$/)
   const upstreamPath = routes[path] ?? (member ? `/members/${member[1]}${member[2] ?? ''}` : null)
   const connect = path === '/rules/connect' && req.method === 'POST'
-  const allowed = path === '/rules/status' ? req.method === 'GET'
+  const allowed = path === '/rules/status' || path === '/rules/members' ? req.method === 'GET'
     : member ? (member[2] ? req.method === 'POST' : req.method === 'GET')
       : (path === '/rules/publish' || path === '/rules/post') && req.method === 'POST'
   if (!connect && (!upstreamPath || !allowed)) return json({ error: 'Not found' }, 404)

@@ -77,3 +77,17 @@ it('rejects a service configured for a different server', async () => {
   upstream.mockImplementation(async () => Response.json({ guildId: 'wrong', roleId: ROLE }))
   expect((await request('connect', 'POST')).status).toBe(503)
 })
+
+it('proxies the tracked-member roster read-only', async () => {
+  upstream = vi.fn(async () => Response.json({ members: [{ user_id: '1', state: 'approved', revocations: 0, completions: 1, version: '1' }] }))
+  globalThis.fetch = upstream as any
+
+  const listed = await request('members')
+  expect(listed.status).toBe(200)
+  expect((await listed.json<any>()).members).toHaveLength(1)
+  expect((upstream.mock.calls[0] as any)[0]).toContain('/members')
+
+  // The roster is a read; writes to it are not a route.
+  expect((await request('members', 'POST')).status).toBe(404)
+  expect((await request('members', 'DELETE')).status).toBe(404)
+})

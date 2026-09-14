@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, RefreshCw, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react'
 import { api } from '../api'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Spinner, Textarea } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Segmented, Spinner, Table, TBody, THead, Textarea } from '../components/ui'
 
 interface RulesConfig {
   version: string
@@ -16,6 +16,18 @@ interface Status {
   online: boolean; roleId: string; channelId: string; queueConnected: boolean
   config: RulesConfig; counts: { total: number; approved: number; pending: number }
 }
+interface RosterMember {
+  user_id: string
+  state: string
+  revocations: number
+  completions: number
+  version: string | null
+}
+type RosterSort = 'approval' | 'infractions'
+
+// Approved first, then the two in-flight states, then everyone unverified.
+const STATE_RANK: Record<string, number> = { approved: 0, granting: 1, revoking: 2, unapproved: 3 }
+
 interface MemberStatus {
   member: { user_id: string; state: string; revocations: number; completions: number; version: string | null }
   history: { id: number; created_at: string; kind: string; reason: string }[]
@@ -31,6 +43,8 @@ export function Rules() {
   const [reapprove, setReapprove] = useState(false)
   const picker = useRef<UserPickerHandle>(null)
   const [member, setMember] = useState<MemberStatus | null>(null)
+  const [roster, setRoster] = useState<RosterMember[] | null>(null)
+  const [sort, setSort] = useState<RosterSort>('approval')
   const [reason, setReason] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -60,6 +74,15 @@ export function Rules() {
       const result = await api<{ message: string }>('/rules/publish', { method: 'POST', body: JSON.stringify({ config: draft, expectedVersion: status.config.version, requireReapproval: reapprove }) })
       setNotice(result.message); toast('Rules published'); setReapprove(false); await refresh()
     })
+  }
+  const loadRoster = async () => {
+    await action(async () => setRoster((await api<{ members: RosterMember[] }>('/rules/members')).members))
+  }
+  /** Load a member straight from the roster, keeping the picker in step so the
+   *  revoke/retake guard still matches what is on screen. */
+  const openFromRoster = async (id: string) => {
+    picker.current?.setValue(id)
+    await action(async () => { setMember(await api<MemberStatus>(`/rules/members/${id}`)); setReason(''); setNotice('') })
   }
   const lookup = async () => {
     const id = picker.current?.getId()
@@ -111,7 +134,33 @@ export function Rules() {
     <Card>
       <CardHeader><CardTitle>Member approval & history</CardTitle><CardDescription>Look up lifetime counts, revoke approval, or require a non-disciplinary retake.</CardDescription></CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-start gap-2"><div className="min-w-60 flex-1"><UserPicker ref={picker} placeholder="Find a member or paste their Discord ID" onPick={() => setMember(null)} /></div><Button variant="outline" busy={busy} onClick={() => void lookup()}>Load member</Button></div>
+        <div className="flex flex-wrap items-start gap-2"><div className="min-w-60 flex-1"><UserPicker ref={picker} placeholder="Find a member or paste their Discord ID" onPick={() => setMember(null)} /></div><Button variant="outline" busy={busy} onClick={() => void lookup()}>Load member</Button><Button variant="outline" busy={busy} onClick={() => void (roster ? setRoster(null) : loadRoster())}><Users />{roster ? 'Hide tracked members' : 'Show tracked members'}</Button></div>
+        {roster && (roster.length === 0
+          ? <p className="text-sm text-muted-foreground">No members are tracked yet.</p>
+          : <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">Sort by</span>
+                <Segmented<RosterSort> value={sort} onChange={setSort} options={[['approval', 'Approval'], ['infractions', 'Infractions']]} />
+                <span className="text-xs text-muted-foreground">{roster.length} tracked</span>
+              </div>
+              <Table>
+                <THead><tr><th className="text-left">Member</th><th className="text-left">State</th><th className="text-right">Infractions</th><th className="text-right">Completions</th><th className="text-right">Rules version</th></tr></THead>
+                <TBody>
+                  {[...roster].sort((a, b) => sort === 'infractions'
+                    ? b.revocations - a.revocations || b.completions - a.completions
+                    : (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || b.revocations - a.revocations,
+                  ).map(m => (
+                    <tr key={m.user_id} className="cursor-pointer hover:bg-accent" onClick={() => void openFromRoster(m.user_id)} title="Load this member">
+                      <td className="font-mono text-xs">{m.user_id}</td>
+                      <td><Badge variant={m.state === 'approved' ? 'success' : m.state === 'unapproved' ? 'secondary' : 'warning'}>{m.state}</Badge></td>
+                      <td className="text-right">{m.revocations > 0 ? <span className="text-destructive">{m.revocations}</span> : '0'}</td>
+                      <td className="text-right">{m.completions}</td>
+                      <td className="text-right text-muted-foreground">{m.version ?? '—'}</td>
+                    </tr>
+                  ))}
+                </TBody>
+              </Table>
+            </div>)}
         {member && <>
           <div className="flex flex-wrap gap-2"><Badge>Member {member.member.user_id}</Badge><Badge>{member.member.state}</Badge><Badge>Revocations: {member.member.revocations}</Badge><Badge>Completed quizzes: {member.member.completions}</Badge></div>
           <Label>Reason<Input maxLength={500} value={reason} onChange={e => setReason(e.target.value)} placeholder="Explain why a fresh rules check is required" /></Label>
@@ -124,11 +173,17 @@ export function Rules() {
 
     <fieldset disabled={busy} className="space-y-5">
       <Card>
-        <CardHeader><CardTitle>Rules pages</CardTitle><CardDescription>Members read these pages before starting the quiz. Changes stay in this editor until published.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Rules pages</CardTitle><CardDescription>Members read these pages before starting the quiz, 1–8 of them. Changes stay in this editor until published.</CardDescription></CardHeader>
         <CardContent className="space-y-3">{draft.pages.map((page, i) => <details key={i} className="rounded-lg border p-3" open={i === 0}>
           <summary className="cursor-pointer text-sm font-medium">Page {i + 1}: {page.title}</summary>
-          <div className="mt-3 space-y-3"><Label>Title<Input maxLength={200} value={page.title} onChange={e => setDraft({ ...draft, pages: draft.pages.map((p, j) => j === i ? { ...p, title: e.target.value } : p) })} /></Label><Label>Rules<Textarea rows={12} maxLength={3800} value={page.text} onChange={e => setDraft({ ...draft, pages: draft.pages.map((p, j) => j === i ? { ...p, text: e.target.value } : p) })} /></Label></div>
-        </details>)}</CardContent>
+          <div className="mt-3 space-y-3"><Label>Title<Input maxLength={200} value={page.title} onChange={e => setDraft({ ...draft, pages: draft.pages.map((p, j) => j === i ? { ...p, title: e.target.value } : p) })} /></Label><Label>Rules<Textarea rows={12} maxLength={3800} value={page.text} onChange={e => setDraft({ ...draft, pages: draft.pages.map((p, j) => j === i ? { ...p, text: e.target.value } : p) })} /></Label>
+            {draft.pages.length > 1 && <Button variant="destructive-outline" size="sm" onClick={() => setDraft({ ...draft, pages: draft.pages.filter((_, j) => j !== i) })}><Trash2 />Remove page</Button>}
+          </div>
+        </details>)}
+          {draft.pages.length < 8
+            ? <Button variant="outline" onClick={() => setDraft({ ...draft, pages: [...draft.pages, { title: '', text: '' }] })}>Add page</Button>
+            : <p className="text-xs text-muted-foreground">Eight pages is the maximum the rules bot accepts.</p>}
+        </CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>Quiz · {draft.questions.length} questions</CardTitle><CardDescription>Keep the first six core checks. Members must answer every question correctly; answer positions are shuffled.</CardDescription></CardHeader>
