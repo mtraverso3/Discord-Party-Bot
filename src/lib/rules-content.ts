@@ -1,8 +1,15 @@
-// TEMPORARY — the real content.py, lifted so the local rules preview shows
-// what members would actually read. Deleted along with rules-dev.ts.
+import type { RulesConfig } from '../types'
 
-export const DEV_RULES_CONFIG = {
-  "version": "1",
+/**
+ * What a guild starts with before anyone publishes from the dashboard — the
+ * text the Python rules bot shipped in content.py, carried over so an existing
+ * server sees the same rules check after the move into this Worker.
+ *
+ * Editing here only affects guilds that have never published. Once a guild
+ * publishes, its own copy in rules_config wins.
+ */
+export const DEFAULT_RULES: RulesConfig = {
+  "version": 1,
   "pages": [
     {
       "title": "Arena In-House Rules & Conduct — General Mindset",
@@ -130,4 +137,4 @@ export const DEV_RULES_CONFIG = {
     }
   ],
   "agreement": "I have read the complete Arena In-House Rules & Conduct and agree to follow them.\n\nI understand that these games prioritize content, creativity, and lobby pacing while still requiring honest competition. I will not intentionally let the content creators' team win.\n\nI will follow the gameplay restrictions, conduct expectations, voting instructions, assigned champion ban, and leave/stay directions. If a rule is unclear, I will ask before joining the queue."
-} as const
+}

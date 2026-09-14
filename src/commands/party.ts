@@ -1,4 +1,6 @@
 import { rulesAccess, rulesErrorMessage } from '../lib/rules'
+import { formatStatus } from './rules'
+import { getMember, getRulesGate } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
 import {
@@ -62,6 +64,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'disband': return await disband(c, guildId, userId)
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
+        case 'rules':   return await rulesStatus(c, guildId, userId)
         case 'link':    return await link(c, guildId, userId)
         case 'admin':   return await adminLink(c, guildId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
@@ -533,6 +536,20 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
   }
 
   return c.followup({ content: 'Party bumped!', flags: 64 })
+}
+
+// ── /party rules ──────────────────────────────────────────────────────────────
+
+async function rulesStatus(c: CommandContext<AppEnv>, guildId: string, userId: string) {
+  const gate = await getRulesGate(c.env.DB, guildId)
+  if (!gate?.enabled) {
+    return c.followup({ content: 'This server does not require a rules check.', flags: 64 })
+  }
+  const member = await getMember(c.env.DB, guildId, userId)
+  const hint = member.state === 'approved'
+    ? ''
+    : '\n\nUse the **Start rules check** button in the rules channel.'
+  return c.followup({ content: formatStatus(member) + hint, flags: 64 })
 }
 
 // ── /party link ───────────────────────────────────────────────────────────────

@@ -2,92 +2,198 @@ import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { handleAdminApi } from '../src/admin/api'
 import { handleAdmin } from '../src/admin'
+import { getRulesConfig, getRulesGate, saveRulesGate } from '../src/store/rules'
 import { rulesAccess } from '../src/lib/rules'
 
-const G = '777770000000000001'
-const ROLE = '777770000000000002'
+// The dashboard's rules routes. These used to proxy to a Python service over a
+// tunnel; they read and write this Worker's own database now, so what is worth
+// asserting shifted from "the bridge is used correctly" to "the state changes
+// correctly". Access and guild scoping are unchanged and still checked here.
+
+let seq = 0
+const guild = () => String(100000000000000000n + BigInt(++seq))
+const MEMBER = '500000000000000001'
+
 const original = globalThis.fetch
-let upstream: ReturnType<typeof vi.fn>
-const bindings = () => ({ ...env, RULES_BOT_API_URL: 'https://rules.example.test', RULES_BOT_API_TOKEN: 'private-bridge-secret' })
+let discord: ReturnType<typeof vi.fn>
+
 beforeEach(() => {
-  upstream = vi.fn(async () => Response.json({ guildId: G, roleId: ROLE, channelId: '777770000000000003', online: true, config: { version: '1' }, counts: {} }))
-  globalThis.fetch = upstream as any
+  discord = vi.fn(async () => Response.json({ id: 'posted', channel_id: 'chan' }))
+  globalThis.fetch = discord as any
 })
 afterEach(() => { globalThis.fetch = original })
 
-async function request(path: string, method = 'GET', body: any = {}, email = `12345@${G}.discord.local`, guild = G, extra: Record<string, string> = {}) {
-  const url = new URL(`https://party.example.test/admin/api/rules/${path}?guild=${guild}`)
-  return handleAdminApi(new Request(url, { method, headers: { 'Content-Type': 'application/json', ...extra }, body: method === 'GET' ? undefined : JSON.stringify(body) }), bindings(), url, email)
+function call(path: string, guildId: string, method = 'GET', body?: unknown, email = `12345@${guildId}.discord.local`) {
+  const url = new URL(`https://party.example.test/admin/api/rules/${path}?guild=${guildId}`)
+  return handleAdminApi(
+    new Request(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
+    }),
+    env, url, email,
+  )
 }
 
-it('allows an existing guild admin without revealing secrets', async () => {
-  const res = await request('status')
+const publish = async (guildId: string, config: any, expectedVersion: number, requireReapproval = false) =>
+  call('publish', guildId, 'POST', { config, expectedVersion, requireReapproval })
+
+const CONFIG = {
+  pages: [{ title: 'Rules', text: 'Be excellent.' }],
+  questions: [{ text: 'Ready?', correct: ['Yes'], incorrect: ['No'], explanation: 'Good.' }],
+  agreement: 'I agree.',
+}
+
+it('serves the built-in rules until a guild publishes its own', async () => {
+  const g = guild()
+  const res = await call('status', g)
   expect(res.status).toBe(200)
-  expect(await res.text()).not.toContain('private-bridge-secret')
-  const [, init] = upstream.mock.calls[0] as any
-  expect(init.headers.Authorization).toBe('Bearer private-bridge-secret')
-  expect(init.headers['X-Arena-Guild']).toBe(G)
+  const body = await res.json<any>()
+  expect(body.online).toBe(true)
+  expect(body.queueConnected).toBe(false)
+  expect(body.config.version).toBe(1)
+  expect(body.config.pages.length).toBeGreaterThan(0)
+  expect(body.counts).toEqual({ total: 0, approved: 0, pending: 0 })
 })
 
-it('rejects cross-guild access before contacting the bot', async () => {
-  const res = await request('status', 'GET', {}, '12345@88888.discord.local')
+it('rejects cross-guild access', async () => {
+  const g = guild()
+  expect((await call('status', g, 'GET', undefined, '12345@88888.discord.local')).status).toBe(403)
+})
+
+it('rejects unauthenticated requests at the admin boundary', async () => {
+  const g = guild()
+  const res = await handleAdmin(
+    new Request(`https://party.example.test/admin/api/rules/status?guild=${g}`),
+    { ...env, CF_ACCESS_TEAM: 'team', CF_ACCESS_AUD: 'aud' },
+  )
   expect(res.status).toBe(403)
-  expect(upstream).not.toHaveBeenCalled()
 })
 
-it('rejects unauthenticated requests at the existing admin boundary', async () => {
-  const res = await handleAdmin(new Request(`https://party.example.test/admin/api/rules/status?guild=${G}`), { ...bindings(), CF_ACCESS_TEAM: 'team', CF_ACCESS_AUD: 'aud' })
-  expect(res.status).toBe(403)
-  expect(upstream).not.toHaveBeenCalled()
+it('switches the gate on, and off again, from the dashboard', async () => {
+  const g = guild()
+  await rulesAccess(env).require(g, MEMBER)  // ungated: anyone passes
+
+  const connected = await (await call('connect', g, 'POST')).json<any>()
+  expect(connected.queueConnected).toBe(true)
+  await expect(rulesAccess(env).require(g, MEMBER)).rejects.toThrow('rules check')
+
+  await saveRulesGate(env.DB, g, { enabled: false })
+  await rulesAccess(env).require(g, MEMBER)
 })
 
-it('connects the queue using the bot role, not an arbitrary browser role', async () => {
-  const res = await request('connect', 'POST', { roleId: 'evil' })
+it('stores an optional mirror role but refuses a bogus one', async () => {
+  const g = guild()
+  expect((await call('connect', g, 'POST', { roleId: 'not-a-role' })).status).toBe(400)
+  await call('connect', g, 'POST', { roleId: '900000000000000001' })
+  expect((await getRulesGate(env.DB, g))?.roleId).toBe('900000000000000001')
+})
+
+it('publishes a new version and refuses a stale editor', async () => {
+  const g = guild()
+  const first = await publish(g, CONFIG, 1)
+  expect(first.status).toBe(200)
+  expect((await first.json<any>()).version).toBe(2)
+  expect((await getRulesConfig(env.DB, g)).agreement).toBe('I agree.')
+
+  // A second editor still holding version 1 must reload rather than overwrite.
+  const stale = await publish(g, { ...CONFIG, agreement: 'Mine.' }, 1)
+  expect(stale.status).toBe(409)
+  expect((await getRulesConfig(env.DB, g)).agreement).toBe('I agree.')
+})
+
+it('validates what it stores', async () => {
+  const g = guild()
+  const bad = (config: any) => publish(g, config, 1)
+  expect((await bad({ ...CONFIG, pages: [] })).status).toBe(400)
+  expect((await bad({ ...CONFIG, questions: Array(16).fill(CONFIG.questions[0]) })).status).toBe(400)
+  expect((await bad({ ...CONFIG, questions: [{ ...CONFIG.questions[0], correct: [] }] })).status).toBe(400)
+  expect((await bad({ ...CONFIG, questions: [{ ...CONFIG.questions[0], correct: ['a'], incorrect: ['A'] }] })).status).toBe(400)
+  expect((await bad({ ...CONFIG, agreement: '' })).status).toBe(400)
+  // A quiz with no questions is allowed — rules and an agreement are enough.
+  expect((await bad({ ...CONFIG, questions: [] })).status).toBe(200)
+})
+
+it('requires everyone to verify again only when asked', async () => {
+  const g = guild()
+  await call('connect', g, 'POST')
+  await env.DB.prepare(`
+    INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
+    VALUES (?1, ?2, 'approved', 0, 0, 1, 1, ?3)
+  `).bind(g, MEMBER, Date.now()).run()
+
+  const quiet = await (await publish(g, CONFIG, 1)).json<any>()
+  expect(quiet.message).toContain('stay valid')
+  await rulesAccess(env).require(g, MEMBER)
+
+  const reset = await (await publish(g, CONFIG, 2, true)).json<any>()
+  expect(reset.message).toContain('1 member(s)')
+  await expect(rulesAccess(env).require(g, MEMBER)).rejects.toThrow('rules check')
+})
+
+it('posts the start message to a channel and remembers it', async () => {
+  const g = guild()
+  expect((await call('post', g, 'POST')).status).toBe(400)  // no channel known yet
+
+  const res = await call('post', g, 'POST', { channelId: '700000000000000001' })
   expect(res.status).toBe(200)
-  expect((await res.json<any>()).queueConnected).toBe(true)
-  const row = await env.DB.prepare('SELECT role_id FROM rules_gate WHERE guild_id=?1').bind(G).first<{ role_id: string }>()
-  expect(row!.role_id).toBe(ROLE)
-  upstream.mockImplementation(async () => Response.json({ roles: [] }))
-  await expect(rulesAccess(bindings()).require(G, '99999')).rejects.toThrow('rules check')
+  expect((await getRulesGate(env.DB, g))?.channelId).toBe('700000000000000001')
+
+  const [url, init] = discord.mock.calls[0] as any
+  expect(url).toContain('/channels/700000000000000001/messages')
+  expect(JSON.parse(init.body).components[0].components[0].custom_id).toContain('rules_start')
 })
 
-it('forwards the authenticated actor and keeps pending actions visible', async () => {
-  upstream.mockImplementation(async () => Response.json({ ok: true, pending: true, message: 'Removal pending' }, { status: 202 }))
-  const res = await request('members/123456789012345678/revoke', 'POST', { reason: 'Conduct', actor: 'spoofed' })
-  expect(res.status).toBe(202)
-  const [, init] = upstream.mock.calls[0] as any
-  expect(init.headers['X-Arena-Actor']).toBe(`12345@${G}.discord.local`)
-  expect(JSON.parse(init.body).reason).toBe('Conduct')
+it('counts a revocation only when it takes away a live approval', async () => {
+  const g = guild()
+  await call('connect', g, 'POST')
+  await env.DB.prepare(`
+    INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
+    VALUES (?1, ?2, 'approved', 0, 0, 1, 1, ?3)
+  `).bind(g, MEMBER, Date.now()).run()
+
+  const revoked = await (await call(`members/${MEMBER}/revoke`, g, 'POST', { reason: 'Left mid-series' })).json<any>()
+  expect(revoked.message).toContain('increased by 1')
+  await expect(rulesAccess(env).require(g, MEMBER)).rejects.toThrow('rules check')
+
+  // Revoking again, with nothing to take away, must not keep counting.
+  const again = await (await call(`members/${MEMBER}/revoke`, g, 'POST', { reason: 'Same again' })).json<any>()
+  expect(again.message).toContain('unchanged')
+
+  // A reset never counts, and the reason is required either way.
+  expect((await call(`members/${MEMBER}/reset`, g, 'POST', { reason: '' })).status).toBe(400)
+  const reset = await (await call(`members/${MEMBER}/reset`, g, 'POST', { reason: 'New season' })).json<any>()
+  expect(reset.message).toContain('No disciplinary count')
+
+  const detail = await (await call(`members/${MEMBER}`, g)).json<any>()
+  expect(detail.member.revocations).toBe(1)
+  expect(detail.history.map((e: any) => e.kind)).toEqual(['reset', 'reset', 'revoked'])
+  expect(detail.history[2].reason).toContain('Left mid-series')
 })
 
-it('rejects unknown proxy paths and cross-origin writes', async () => {
-  expect((await request('secrets')).status).toBe(404)
-  expect((await request('publish', 'POST', {}, undefined, G, { Origin: 'https://evil.test' })).status).toBe(403)
-  expect(upstream).not.toHaveBeenCalled()
+it('lists tracked members, read-only', async () => {
+  const g = guild()
+  await env.DB.prepare(`
+    INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
+    VALUES (?1, ?2, 'approved', 0, 2, 3, 1, ?3)
+  `).bind(g, MEMBER, Date.now()).run()
+
+  const listed = await (await call('members', g)).json<any>()
+  expect(listed.members).toEqual([
+    { user_id: MEMBER, state: 'approved', revocations: 2, completions: 3, version: '1' },
+  ])
+  expect((await call('members', g, 'POST')).status).toBe(404)
 })
 
-it('reports missing setup without exposing environment values', async () => {
-  const url = new URL(`https://party.example.test/admin/api/rules/status?guild=${G}`)
-  const res = await handleAdminApi(new Request(url), env, url, `12345@${G}.discord.local`)
-  expect(res.status).toBe(503)
-  expect(await res.text()).toContain('one-time connection')
-})
+it('rejects unknown routes and cross-origin writes', async () => {
+  const g = guild()
+  expect((await call('nope', g)).status).toBe(404)
 
-it('rejects a service configured for a different server', async () => {
-  upstream.mockImplementation(async () => Response.json({ guildId: 'wrong', roleId: ROLE }))
-  expect((await request('connect', 'POST')).status).toBe(503)
-})
-
-it('proxies the tracked-member roster read-only', async () => {
-  upstream = vi.fn(async () => Response.json({ members: [{ user_id: '1', state: 'approved', revocations: 0, completions: 1, version: '1' }] }))
-  globalThis.fetch = upstream as any
-
-  const listed = await request('members')
-  expect(listed.status).toBe(200)
-  expect((await listed.json<any>()).members).toHaveLength(1)
-  expect((upstream.mock.calls[0] as any)[0]).toContain('/members')
-
-  // The roster is a read; writes to it are not a route.
-  expect((await request('members', 'POST')).status).toBe(404)
-  expect((await request('members', 'DELETE')).status).toBe(404)
+  const url = new URL(`https://party.example.test/admin/api/rules/connect?guild=${g}`)
+  const res = await handleAdminApi(
+    new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', origin: 'https://evil.test' }, body: '{}' }),
+    env, url, `12345@${g}.discord.local`,
+  )
+  expect(res.status).toBe(403)
+  expect((await getRulesGate(env.DB, g))?.enabled).toBeUndefined()
 })

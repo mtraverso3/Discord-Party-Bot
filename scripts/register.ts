@@ -148,6 +148,11 @@ const commands = [
       },
       {
         type: 1,
+        name: 'rules',
+        description: 'Show whether you have passed this server's rules check',
+      },
+      {
+        type: 1,
         name: 'link',
         description: 'Get a code to link your League client to this party via the PartyBot desktop app',
       },

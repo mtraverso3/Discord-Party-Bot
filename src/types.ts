@@ -48,6 +48,65 @@ export interface UserRef {
   ign?: string
 }
 
+// ── Rules check (ported from the standalone Python bot) ─────────────────────
+
+export interface RulesPage { title: string; text: string }
+
+export interface RulesQuestion {
+  text: string
+  correct: string[]      // 1-4; a member passes by picking any one of these
+  incorrect: string[]    // 0-4
+  explanation: string    // shown after any answer, right or wrong
+}
+
+export interface RulesConfig {
+  version: number
+  pages: RulesPage[]
+  questions: RulesQuestion[]
+  agreement: string
+}
+
+export type ApprovalState = 'unapproved' | 'granting' | 'approved' | 'revoking'
+
+export interface RulesMemberRow {
+  guild_id: string
+  user_id: string
+  state: ApprovalState
+  generation: number
+  revocations: number
+  completions: number
+  version: number | null
+  accepted_at: number | null
+}
+
+export interface RulesEvent {
+  id: number
+  userId: string
+  kind: string
+  actor?: string
+  reason: string
+  createdAt: number
+}
+
+export interface RulesGate {
+  enabled: boolean
+  roleId?: string      // optional Discord role mirroring approval
+  channelId?: string   // where the Start button was posted
+}
+
+/** A quiz in progress, kept in D1 because a Worker has no memory between requests. */
+export interface RulesSession {
+  page: number
+  question: number
+  step: number
+  generation: number
+  version: number
+  /** The answers as shown, already shuffled, so grading matches the buttons. */
+  answers: Array<{ text: string; correct: boolean }>
+  feedback: string
+  updatedAt: number
+}
+
 export interface AppBindings extends Record<string, unknown> {
   DB: D1Database
   // Legacy KV — only used by POST /admin/api/import-kv to migrate old data
@@ -56,19 +115,10 @@ export interface AppBindings extends Record<string, unknown> {
   DISCORD_PUBLIC_KEY: string
   DISCORD_BOT_TOKEN: string
   DISCORD_APPLICATION_ID: string
-  // JSON object mapping guild IDs to the verification bot's approval role IDs.
-  // Unlisted guilds retain existing behavior. Invalid configuration fails closed.
-  RULES_APPROVAL_ROLES?: string
-  // Server-only bridge credentials; never returned to the admin browser.
-  RULES_BOT_API_URL?: string
-  RULES_BOT_API_TOKEN?: string
   // Local development only: signs the /admin UI in as this address instead of
   // verifying a Cloudflare Access JWT, and only for requests to localhost.
   // Set it in .dev.vars — never as a deployed secret.
   ADMIN_DEV_EMAIL?: string
-  // Local development only: serve the rules panel from an in-memory stand-in
-  // instead of the Python service. Only honoured for localhost requests.
-  RULES_BOT_DEV_STUB?: string
   // Optional — only required for the /admin/* UI. When unset, /admin returns 503.
   CF_ACCESS_TEAM?: string   // e.g. "mtraverso" (subdomain of cloudflareaccess.com)
   CF_ACCESS_AUD?: string    // Application AUD tag from the Access app

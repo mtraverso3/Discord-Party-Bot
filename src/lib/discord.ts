@@ -101,6 +101,17 @@ export async function editInteractionResponse(
   })
 }
 
+/** Add or remove a role. A 404 on removal means it was already gone. */
+export async function addRole(token: string, guildId: string, userId: string, roleId: string): Promise<void> {
+  const res = await discordFetch(token, `/guilds/${guildId}/members/${userId}/roles/${roleId}`, { method: 'PUT' })
+  if (!res.ok) throw new Error(`addRole failed: ${res.status} ${await res.text()}`)
+}
+
+export async function removeRole(token: string, guildId: string, userId: string, roleId: string): Promise<void> {
+  const res = await discordFetch(token, `/guilds/${guildId}/members/${userId}/roles/${roleId}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 404) throw new Error(`removeRole failed: ${res.status} ${await res.text()}`)
+}
+
 export async function getGuildMember(
   token: string,
   guildId: string,

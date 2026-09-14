@@ -4,7 +4,9 @@ import { api } from '../api'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Spinner, Table, TBody, THead, Textarea } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Mono, Spinner, Table, TBody, THead, Textarea } from '../components/ui'
+import { ChannelSelect } from '../components/ChannelSelect'
+import type { ChannelInfo } from '../types'
 import { cn } from '../lib/cn'
 
 interface RulesConfig {
@@ -65,6 +67,8 @@ export function Rules() {
   const [reapprove, setReapprove] = useState(false)
   const picker = useRef<UserPickerHandle>(null)
   const [member, setMember] = useState<MemberStatus | null>(null)
+  const [channels, setChannels] = useState<ChannelInfo[]>([])
+  const [channel, setChannel] = useState('')
   const [roster, setRoster] = useState<RosterMember[] | null>(null)
   const [sortKey, setSortKey] = useState<RosterKey>('state')
   const [sortDesc, setSortDesc] = useState(false)
@@ -73,10 +77,17 @@ export function Rules() {
 
   const refresh = async () => {
     setError('')
-    try { const result = await api<Status>('/rules/status'); setStatus(result); setDraft(structuredClone(result.config)) }
+    try {
+      const result = await api<Status>('/rules/status')
+      setStatus(result); setDraft(structuredClone(result.config))
+      if (result.channelId) setChannel(c => c || result.channelId)
+    }
     catch (e) { setError((e as Error).message) }
   }
   useEffect(() => { void refresh() }, [])
+  useEffect(() => {
+    api<ChannelInfo[]>('/channels?kind=text').then(setChannels).catch(() => setChannels([]))
+  }, [])
 
   const action = async (fn: () => Promise<void>) => {
     setBusy(true)
@@ -84,8 +95,12 @@ export function Rules() {
     finally { setBusy(false) }
   }
   const post = async () => {
-    if (!await confirm('Post a new Start rules check message in the configured Discord channel?', 'Post rules check')) return
-    await action(async () => { const r = await api<{ message: string }>('/rules/post', { method: 'POST', body: '{}' }); toast(r.message) })
+    if (!await confirm('Post a new Start rules check message in that channel? Any earlier one keeps working.', 'Post Start button')) return
+    await action(async () => {
+      const r = await api<{ message: string }>('/rules/post', { method: 'POST', body: JSON.stringify({ channelId: channel }) })
+      toast(r.message)
+      setStatus(await api<Status>('/rules/status'))
+    })
   }
   const publish = async () => {
     if (!draft || !status) return
@@ -130,23 +145,29 @@ export function Rules() {
 
   return <div className="space-y-5">
     <Card>
-      <CardHeader><CardTitle>Rules verification</CardTitle><CardDescription>Manage the rules bot with your existing admin access.</CardDescription></CardHeader>
+      <CardHeader><CardTitle>Rules verification</CardTitle><CardDescription>Members prove they have read the rules before they can join a party. The check runs in this bot.</CardDescription></CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={status.online ? 'success' : 'warning'}>{status.online ? 'Bot online' : 'Bot connecting'}</Badge>
-          <Badge variant={status.queueConnected ? 'success' : 'warning'}>{status.queueConnected ? 'Queue requires approval' : 'Queue connection needed'}</Badge>
+          <Badge variant={status.queueConnected ? 'success' : 'warning'}>{status.queueConnected ? 'Required to join' : 'Not required yet'}</Badge>
           <Badge>Rules version {status.config.version}</Badge>
         </div>
         <div className="grid grid-cols-3 gap-3">
-          {[[status.counts.approved, 'Approved'], [status.counts.total, 'Tracked members'], [status.counts.pending, 'Pending role updates']].map(([value, label]) => <div className="rounded-lg border bg-muted/30 p-3" key={label}><div className="text-xl font-semibold">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div>)}
+          {[[status.counts.approved, 'Approved'], [status.counts.total, 'Tracked members'], [status.counts.pending, 'Role updates pending']].map(([value, label]) => <div className="rounded-lg border bg-muted/30 p-3" key={label}><div className="text-xl font-semibold">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div>)}
         </div>
-        <p className="text-xs text-muted-foreground">The rules bot uses approval role {status.roleId} and posts in channel {status.channelId}.</p>
-        <div className="flex flex-wrap gap-2">
+        <p className="text-xs text-muted-foreground">
+          {status.roleId
+            ? <>Approved members are also given role <Mono>{status.roleId}</Mono>, for anything else that reads it.</>
+            : 'Approval is held by this bot — no Discord role is involved.'}
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
           {!status.queueConnected && <Button busy={busy} onClick={() => void action(async () => {
-            if (!await confirm('Require the rules bot’s approval role for every party in this server?', 'Connect queue')) return
-            const result = await api<Status>('/rules/connect', { method: 'POST', body: '{}' }); setStatus(result); toast('Queue connected')
-          })}><ShieldCheck />Connect queue to rules bot</Button>}
-          <Button variant="outline" busy={busy} onClick={() => void post()}>Post rules check in Discord</Button>
+            if (!await confirm('Require every party in this server to be joined only by members who have passed the rules check?', 'Require the rules check')) return
+            const result = await api<Status>('/rules/connect', { method: 'POST', body: '{}' }); setStatus(result); toast('Rules check now required')
+          })}><ShieldCheck />Require the rules check</Button>}
+          <Label className="min-w-56 flex-1">Rules channel
+            <ChannelSelect channels={channels} value={channel} onChange={setChannel} placeholder="Pick the channel to post in" />
+          </Label>
+          <Button variant="outline" busy={busy} disabled={!channel} onClick={() => void post()}>Post Start button</Button>
           <Button variant="ghost" busy={busy} onClick={() => void action(async () => {
             const result = await api<Status>('/rules/status'); setStatus(s => s ? { ...s, online: result.online, counts: result.counts, queueConnected: result.queueConnected } : result)
           })}><RefreshCw />Refresh status</Button>
