@@ -248,7 +248,7 @@ export async function filterApproved(
 
 export async function logEvent(
   db: D1Database, guildId: string, userId: string,
-  kind: 'verified' | 'revoked' | 'reset', actor: string | null, reason: string,
+  kind: 'verified' | 'approved' | 'revoked' | 'reset', actor: string | null, reason: string,
 ): Promise<void> {
   await db.prepare(`
     INSERT INTO rules_events (guild_id, user_id, kind, actor, reason, created_at)
@@ -291,6 +291,34 @@ export async function grantApproval(
   `).bind(guildId, userId, generation, version, Date.now()).run()
   if (!res.meta.changes) return false
   await logEvent(db, guildId, userId, 'verified', userId, 'Completed quiz and agreement')
+  return true
+}
+
+/**
+ * Approve without the quiz — a moderator vouching for someone. Returns false
+ * if they were already approved, so the caller can say so instead of writing a
+ * second identical history entry.
+ *
+ * `completions` is deliberately untouched: it counts checks actually taken,
+ * and inflating it here would make the history lie about who sat the quiz.
+ * `revoked_at` is cleared, so this also lifts a revocation.
+ */
+export async function approveManually(
+  db: D1Database, guildId: string, userId: string, actor: string, reason: string, version: number,
+): Promise<boolean> {
+  const member = await getMember(db, guildId, userId)
+  if (member.state === 'approved') return false
+
+  await db.prepare(`
+    INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at, revoked_at)
+    VALUES (?1, ?2, 'approved', 0, 0, 0, ?3, ?4, NULL)
+    ON CONFLICT (guild_id, user_id) DO UPDATE SET
+      state = 'approved', version = ?3, accepted_at = ?4, revoked_at = NULL
+  `).bind(guildId, userId, version, Date.now()).run()
+  // Any quiz they had open is moot now; it would refuse to grant anyway.
+  await db.prepare('DELETE FROM rules_sessions WHERE guild_id = ?1 AND user_id = ?2')
+    .bind(guildId, userId).run()
+  await logEvent(db, guildId, userId, 'approved', actor, reason)
   return true
 }
 

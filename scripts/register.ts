@@ -178,6 +178,15 @@ const commands = [
       },
       {
         type: 1,
+        name: 'rules-approve',
+        description: 'Approve a member without the quiz, vouching for them (Manage Roles)',
+        options: [
+          { type: 6, name: 'member', description: 'The member to approve', required: true },
+          { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
+        ],
+      },
+      {
+        type: 1,
         name: 'rules-history',
         description: "Show a member's counters and their latest history entries (Manage Roles)",
         options: [

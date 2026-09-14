@@ -96,6 +96,7 @@ client, where there is no interaction to read permissions from.
 | `/party rules` | Everyone | Privately shows the rules, one page at a time, with Previous and Next buttons. |
 | `/party rules-post` | Manage Roles | Posts the Start rules check button in the configured channel. |
 | `/party rules-status` | Everyone | Privately shows your approval status, lifetime revocations, and completed verifications. |
+| `/party rules-approve member reason` | Manage Roles | Approves a member without the quiz. Recorded as the moderator's decision; their completed-check count is not increased. |
 | `/party rules-history member` | Manage Roles | Shows a member's counters and their latest 10 history entries. |
 | `/party rules-revoke member reason` | Manage Roles | Removes approval and requires a fresh quiz. Increases the lifetime revocation count when an active approval is revoked. |
 | `/party rules-reset member reason` | Manage Roles | Removes approval and requires a fresh quiz without increasing the disciplinary count. |
@@ -105,6 +106,13 @@ requirement is checked by the bot when the command runs. Administrator counts
 as Manage Roles. Every reply is private to whoever ran it.
 
 ## Moderation
+
+Approval normally comes from taking the check, but **`/party rules-approve`**
+lets a moderator vouch for someone directly — useful for people who have clearly
+read the rules, or to lift a revocation without making them sit the quiz again.
+It is recorded as that moderator's decision and does not increase the member's
+count of checks taken, so the history stays honest about who actually sat it.
+
 
 **Rules & verification** has a member lookup with lifetime counters and history,
 and a sortable list of everyone tracked.

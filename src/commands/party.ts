@@ -1,6 +1,6 @@
 import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
 import { changeApproval, formatStatus, postRulesMessage, renderRulesPage } from './rules'
-import { getMember, getRulesConfig, getRulesGate, hasPublishedRules, memberHistory } from '../store/rules'
+import { approveManually, getMember, getRulesConfig, getRulesGate, hasPublishedRules, memberHistory } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
 import {
@@ -73,6 +73,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'rules':         return await rulesView(c, guildId, userId)
         case 'rules-status':  return await rulesStatus(c, guildId, userId)
         case 'rules-post':    return await rulesPost(c, guildId)
+        case 'rules-approve': return await rulesApprove(c, guildId, opts)
         case 'rules-history': return await rulesHistory(c, guildId, opts)
         case 'rules-revoke':  return await rulesChange(c, guildId, opts, true)
         case 'rules-reset':   return await rulesChange(c, guildId, opts, false)
@@ -630,6 +631,31 @@ async function rulesPost(c: CommandContext<AppEnv>, guildId: string) {
     return c.followup({ content: `Couldn't post in <#${gate.channelId}> — check the bot's permissions there.`, flags: 64 })
   }
   return c.followup({ content: `Posted the rules check in <#${gate.channelId}>.`, flags: 64 })
+}
+
+async function rulesApprove(c: CommandContext<AppEnv>, guildId: string, opts: Record<string, any>) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const gate = await getRulesGate(c.env.DB, guildId)
+  if (!gate?.enabled) {
+    return c.followup({ content: "This server hasn't switched the rules check on yet.", flags: 64 })
+  }
+
+  const targetId = opts['member'] as string
+  const reason = ((opts['reason'] as string) ?? '').trim().slice(0, 500)
+  if (!reason) return c.followup({ content: 'Give a reason — it is recorded against the member.', flags: 64 })
+
+  const { userId: actorId, displayName } = extractMemberInfo(c.interaction)
+  const config = await getRulesConfig(c.env.DB, guildId)
+  const approved = await approveManually(
+    c.env.DB, guildId, targetId, `${displayName} (${actorId})`, reason, config.version,
+  )
+  return c.followup({
+    content: approved
+      ? `<@${targetId}> is approved without taking the check. It is recorded as your decision, and their completed-check count is unchanged.`
+      : `<@${targetId}> is already approved.`,
+    flags: 64,
+  })
 }
 
 async function rulesHistory(c: CommandContext<AppEnv>, guildId: string, opts: Record<string, any>) {

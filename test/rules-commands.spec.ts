@@ -93,6 +93,55 @@ describe('rules moderator commands', () => {
     expect(discord).not.toHaveBeenCalled()
   })
 
+  it('approves a member without the quiz, and says so in their history', async () => {
+    const g = guild()
+    await gated(g)
+
+    const text = await run(g, 'rules-approve', { member: TARGET, reason: 'Vouched for by staff' })
+    expect(text).toContain('approved without taking the check')
+    await rulesAccess(env).require(g, TARGET)   // the queue gate sees it at once
+
+    const member = await getMember(env.DB, g, TARGET)
+    expect(member.state).toBe('approved')
+    // Not a check they took, so the count of checks taken must not move.
+    expect(member.completions).toBe(0)
+
+    const [event] = await memberHistory(env.DB, g, TARGET)
+    expect(event!.kind).toBe('approved')
+    expect(event!.reason).toBe('Vouched for by staff')
+    expect(event!.actor).toContain(MOD)
+  })
+
+  it('lifts a revocation, and does not write a second entry for someone already approved', async () => {
+    const g = guild()
+    await gated(g)
+    await env.DB.prepare(`
+      INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
+      VALUES (?1, ?2, 'approved', 0, 0, 1, 1, ?3)
+    `).bind(g, TARGET, Date.now()).run()
+    await run(g, 'rules-revoke', { member: TARGET, reason: 'Left mid-series' })
+
+    expect(await run(g, 'rules-approve', { member: TARGET, reason: 'Sorted out' })).toContain('approved without')
+    await rulesAccess(env).require(g, TARGET)
+    // The lifetime count stands: approving again does not erase the history.
+    expect((await getMember(env.DB, g, TARGET)).revocations).toBe(1)
+
+    const before = (await memberHistory(env.DB, g, TARGET)).length
+    expect(await run(g, 'rules-approve', { member: TARGET, reason: 'Again' })).toContain('already approved')
+    expect(await memberHistory(env.DB, g, TARGET)).toHaveLength(before)
+  })
+
+  it('needs Manage Roles and a reason, like the other moderator commands', async () => {
+    const g = guild()
+    await gated(g)
+    expect(await run(g, 'rules-approve', { member: TARGET, reason: 'x' }, NO_PERMS)).toContain('Manage Roles')
+    expect(await run(g, 'rules-approve', { member: TARGET, reason: '  ' })).toContain('Give a reason')
+    expect((await getMember(env.DB, g, TARGET)).state).toBe('unapproved')
+
+    const off = guild()
+    expect(await run(off, 'rules-approve', { member: TARGET, reason: 'x' })).toContain("hasn't switched the rules check on")
+  })
+
   it('shows a member’s counters and history', async () => {
     const g = guild()
     await gated(g)
