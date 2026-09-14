@@ -9,7 +9,6 @@ import { DEFAULT_RULES } from '../lib/rules-content'
 // guarded statements here, the same way the party store works.
 
 export const MAX_PAGES = 8
-export const MAX_QUESTIONS = 15
 export const ANSWER_MAX = 4
 /** A question needs a right answer; wrong ones are optional. */
 export const ANSWER_MIN = { correct: 1, incorrect: 0 } as const
@@ -113,9 +112,10 @@ export function validateRulesConfig(raw: any): ValidationResult {
     pages.push({ title, text: body })
   }
 
-  if (!Array.isArray(raw.questions) || raw.questions.length > MAX_QUESTIONS) {
-    return { ok: false, error: `Provide at most ${MAX_QUESTIONS} quiz questions.` }
-  }
+  // No cap on how many questions a server asks: the quiz is walked one
+  // question at a time, so length costs nothing at render. The request size
+  // limit in admin/rules.ts is the only practical ceiling.
+  if (!Array.isArray(raw.questions)) return { ok: false, error: 'Invalid quiz.' }
   const questions: RulesQuestion[] = []
   for (const question of raw.questions) {
     const prompt = text(question?.text, 'Question', 600)

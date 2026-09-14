@@ -102,16 +102,31 @@ it('publishes a new version and refuses a stale editor', async () => {
   expect((await getRulesConfig(env.DB, g)).agreement).toBe('I agree.')
 })
 
-it('validates what it stores', async () => {
+it('refuses what it should not store', async () => {
+  // One guild for all of these: each is rejected, so the version never moves.
   const g = guild()
   const bad = (config: any) => publish(g, config, 1)
   expect((await bad({ ...CONFIG, pages: [] })).status).toBe(400)
-  expect((await bad({ ...CONFIG, questions: Array(16).fill(CONFIG.questions[0]) })).status).toBe(400)
+  expect((await bad({ ...CONFIG, pages: Array(9).fill(CONFIG.pages[0]) })).status).toBe(400)
   expect((await bad({ ...CONFIG, questions: [{ ...CONFIG.questions[0], correct: [] }] })).status).toBe(400)
+  expect((await bad({ ...CONFIG, questions: [{ ...CONFIG.questions[0], incorrect: Array(5).fill('x') }] })).status).toBe(400)
   expect((await bad({ ...CONFIG, questions: [{ ...CONFIG.questions[0], correct: ['a'], incorrect: ['A'] }] })).status).toBe(400)
   expect((await bad({ ...CONFIG, agreement: '' })).status).toBe(400)
-  // A quiz with no questions is allowed — rules and an agreement are enough.
-  expect((await bad({ ...CONFIG, questions: [] })).status).toBe(200)
+  expect((await getRulesConfig(env.DB, g)).version).toBe(1)
+})
+
+it('accepts a quiz of any length, including none at all', async () => {
+  // A fresh guild each time: a successful publish moves the version on.
+  const empty = guild()
+  expect((await publish(empty, { ...CONFIG, questions: [] }, 1)).status).toBe(200)
+  expect((await getRulesConfig(env.DB, empty)).questions).toEqual([])
+
+  const long = guild()
+  const many = Array.from({ length: 40 }, (_, i) => ({
+    ...CONFIG.questions[0], text: `Question ${i + 1}?`,
+  }))
+  expect((await publish(long, { ...CONFIG, questions: many }, 1)).status).toBe(200)
+  expect((await getRulesConfig(env.DB, long)).questions).toHaveLength(40)
 })
 
 it('requires everyone to verify again only when asked', async () => {
