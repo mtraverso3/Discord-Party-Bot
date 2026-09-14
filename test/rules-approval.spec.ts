@@ -8,6 +8,8 @@ import { createClientToken } from '../src/store/clientAuth'
 import { handleAdminApi } from '../src/admin/api'
 import { handleJoinButton, handleQueueButton } from '../src/components/buttons'
 import { getMember, grantApproval, revokeApproval, saveRulesGate } from '../src/store/rules'
+import { buildPartyEmbed } from '../src/lib/embeds'
+import { syncEmbed } from '../src/lib/party'
 import { addAdmin } from '../src/store/adminAuth'
 
 // The queue gate. What is gated has not changed; where approval comes from
@@ -404,5 +406,43 @@ describe('per-party opt-in', () => {
     const renamed = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, name: 'Renamed' }, policy)
     expect(renamed.data!.name).toBe('Renamed')
     expect(renamed.data!.rulesRequired).toBe(true)
+  })
+})
+
+describe('what the embed claims', () => {
+  it('drops the lock when the server switches the check off, keeping the setting', async () => {
+    const { id, guildId } = await make()   // a gated party in a gated guild
+    const gated = (await parties.getParty(env.DB, guildId, id))!
+    expect(buildPartyEmbed(gated, true).footer.text).toContain('Rules check required')
+
+    await saveRulesGate(env.DB, guildId, { enabled: false })
+
+    // syncEmbed asks whether the check is live before drawing the footer.
+    const drawn: any[] = []
+    globalThis.fetch = vi.fn(async (_: any, init: any) => {
+      drawn.push(JSON.parse(init.body))
+      return Response.json({})
+    }) as any
+    await syncEmbed(env, { ...gated, embedMessageId: 'm1', embedChannelId: 'c1' })
+
+    expect(drawn[0].embeds[0].footer.text).not.toContain('Rules check required')
+    // The party's own setting is untouched, so switching back on restores it.
+    expect((await parties.getParty(env.DB, guildId, id))!.rulesRequired).toBe(true)
+  })
+})
+
+describe('concurrent moderation', () => {
+  it('counts one revocation when two moderators revoke at the same moment', async () => {
+    const { guildId } = await make()
+    await approve(guildId, GOOD)
+
+    await Promise.all([
+      revokeApproval(env.DB, guildId, GOOD, 'mod A', 'Same incident', true),
+      revokeApproval(env.DB, guildId, GOOD, 'mod B', 'Same incident', true),
+    ])
+
+    // Both statements ran; only the one that matched a live approval counted.
+    expect((await getMember(env.DB, guildId, GOOD)).revocations).toBe(1)
+    expect((await getMember(env.DB, guildId, GOOD)).state).toBe('unapproved')
   })
 })

@@ -31,7 +31,7 @@ export async function sweepRulesApproval(env: AppBindings): Promise<void> {
           }
           changed = true
         }
-        if (changed) await trySyncEmbed(env.DISCORD_BOT_TOKEN, await parties.getParty(env.DB, guildId, party.id) ?? undefined)
+        if (changed) await trySyncEmbed(env, await parties.getParty(env.DB, guildId, party.id) ?? undefined)
       } catch (error) {
         console.warn(`Rules sweep deferred for ${guildId}/${party.id}:`, error)
       }

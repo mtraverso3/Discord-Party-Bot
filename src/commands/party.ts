@@ -220,7 +220,7 @@ async function join(
   if (result.status === 'already_member') return c.followup({ content: "You're already in that party.", flags: 64 })
   if (result.status === 'already_queued') return c.followup({ content: "You're already queued for that party.", flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   const msg = result.status === 'joined'
     ? `You joined **${result.data!.name}**!`
@@ -245,7 +245,7 @@ async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string)
     return c.followup({ content: "You're not in that party.", flags: 64 })
   }
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   const msg = result.status === 'left'
     ? `You left **${result.data!.name}**.`
@@ -313,7 +313,7 @@ async function ign(c: CommandContext<AppEnv>, guildId: string, userId: string, o
     const party = await parties.getParty(c.env.DB, guildId, membership.partyId)
     if (party && party.game === game) {
       const result = await parties.setMemberIgn(c.env.DB, guildId, membership.partyId, userId, ignValue)
-      if (result.status === 'updated') await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+      if (result.status === 'updated') await trySyncEmbed(c.env, result.data)
     }
   }
 
@@ -395,7 +395,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
     if (result.status === 'unauthorized') return reply('Only the party owner can edit the party.')
     if (result.status === 'invalid')      return reply(result.message ?? 'Invalid input.')
 
-    await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+    await trySyncEmbed(env, result.data)
 
     const promotedNote = result.promoted.length > 0
       ? ` ${result.promoted.length} player(s) auto-promoted from queue.`
@@ -419,7 +419,7 @@ async function closeParty(c: CommandContext<AppEnv>, guildId: string, userId: st
   if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can close the party.', flags: 64 })
   if (result.status === 'already_closed') return c.followup({ content: 'The party is already closed.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
   return c.followup({ content: 'Party closed. New joiners will be added to the queue.', flags: 64 })
 }
 
@@ -435,7 +435,7 @@ async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: str
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can open the party.', flags: 64 })
   if (result.status === 'already_open') return c.followup({ content: 'The party is already open.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   const promotedNote = result.promoted.length > 0
     ? ` ${result.promoted.length} player(s) auto-promoted from queue.`
@@ -476,7 +476,7 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (result.status === 'in_other_party') return c.followup({ content: `<@${targetId}> is already in another party.`, flags: 64 })
   if (result.status === 'full')           return c.followup({ content: 'The party is full. Raise the cap or remove someone first.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   const warning = await exemptFromRules(c.env, guildId, targetId, result.data!.rulesRequired)
     ? `
@@ -501,7 +501,7 @@ async function approve(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (result.status === 'not_queued')   return c.followup({ content: 'That user is not in the queue.', flags: 64 })
   if (result.status === 'full')         return c.followup({ content: "The party is full.", flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   return c.followup({ content: `<@${targetId}> approved into the party.`, flags: 64 })
 }
@@ -519,7 +519,7 @@ async function deny(c: CommandContext<AppEnv>, guildId: string, requesterId: str
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can deny members.', flags: 64 })
   if (result.status === 'not_queued')   return c.followup({ content: 'That user is not in the queue.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   return c.followup({ content: `<@${targetId}> removed from the queue.`, flags: 64 })
 }
@@ -538,7 +538,7 @@ async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, r
   if (result.status === 'is_owner')     return c.followup({ content: "You can't remove yourself. Use `/party disband` to end the party.", flags: 64 })
   if (result.status === 'not_in')       return c.followup({ content: 'That user is not in the party.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
   return c.followup({ content: `<@${targetId}> removed from the party.${result.promoted ? ` <@${result.promoted}> promoted from queue.` : ''}`, flags: 64 })
 }
 
@@ -556,7 +556,7 @@ async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (result.status === 'already_owner') return c.followup({ content: "You're already the owner.", flags: 64 })
   if (result.status === 'not_in')        return c.followup({ content: 'That user is not in the party.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   return c.followup({ content: `Ownership transferred to <@${targetId}>.`, flags: 64 })
 }
@@ -811,7 +811,7 @@ export async function handleBanlistModal(c: ModalContext<AppEnv>) {
       return c.followup({ content: 'Only the party owner can set the banlist.', flags: 64 })
     }
 
-    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+    await trySyncEmbed(c.env, result.data)
     const count = result.data?.banlist?.source.length ?? 0
     const msg = count === 0 ? 'Banlist cleared.' : `Banlist updated — ${count} entr${count === 1 ? 'y' : 'ies'}.`
     return c.followup({ content: msg, flags: 64 })

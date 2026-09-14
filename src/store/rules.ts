@@ -331,15 +331,32 @@ export async function revokeApproval(
   db: D1Database, guildId: string, userId: string, actor: string | null, reason: string,
   disciplinary: boolean,
 ): Promise<{ counted: boolean }> {
-  const member = await getMember(db, guildId, userId)
-  const counted = disciplinary && member.state === 'approved'
-  await db.prepare(`
-    INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at, revoked_at)
-    VALUES (?1, ?2, 'unapproved', 1, ?3, 0, NULL, NULL, ?4)
-    ON CONFLICT (guild_id, user_id) DO UPDATE SET
-      state = 'unapproved', generation = generation + 1, revocations = revocations + ?3,
-      version = NULL, accepted_at = NULL, revoked_at = ?4
-  `).bind(guildId, userId, counted ? 1 : 0, disciplinary ? Date.now() : null).run()
+  const now = Date.now()
+
+  // Counting is done by a statement that only matches a live approval, rather
+  // than by reading the state and then writing: two moderators revoking the
+  // same member at once would both have read 'approved' and both counted it.
+  // Only one UPDATE can match, so only one counts.
+  let counted = false
+  if (disciplinary) {
+    const res = await db.prepare(`
+      UPDATE rules_members
+      SET state = 'unapproved', generation = generation + 1, revocations = revocations + 1,
+          version = NULL, accepted_at = NULL, revoked_at = ?3
+      WHERE guild_id = ?1 AND user_id = ?2 AND state = 'approved'
+    `).bind(guildId, userId, now).run()
+    counted = !!res.meta.changes
+  }
+
+  if (!counted) {
+    await db.prepare(`
+      INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at, revoked_at)
+      VALUES (?1, ?2, 'unapproved', 1, 0, 0, NULL, NULL, ?3)
+      ON CONFLICT (guild_id, user_id) DO UPDATE SET
+        state = 'unapproved', generation = generation + 1,
+        version = NULL, accepted_at = NULL, revoked_at = ?3
+    `).bind(guildId, userId, disciplinary ? now : null).run()
+  }
   await db.prepare('DELETE FROM rules_sessions WHERE guild_id = ?1 AND user_id = ?2').bind(guildId, userId).run()
   await logEvent(db, guildId, userId, counted ? 'revoked' : 'reset', actor, reason)
   return { counted }

@@ -43,7 +43,7 @@ async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boole
     if (result.status === 'already_member') return c.followup({ content: "You're already in this party.", flags: 64 })
     if (result.status === 'already_queued') return c.followup({ content: "You're already in the queue for this party.", flags: 64 })
 
-    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+    await trySyncEmbed(c.env, result.data)
 
     const data = result.data!
     const warning = await exemptFromRules(c.env, guildId, userId, data.rulesRequired) ? RULES_EXEMPT_WARNING : ''
@@ -92,7 +92,7 @@ export async function handleAwayButton(c: ComponentContext<AppEnv>) {
         return c.followup({ content: 'Only party members can set a BRB marker — join first.', flags: 64 })
       }
 
-      await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+      await trySyncEmbed(c.env, result.data)
 
       const msg = result.away
         ? "You're marked as away 💤 — click **💤 BRB** again when you're back."
@@ -124,7 +124,7 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
         return c.followup({ content: "You're not in this party.", flags: 64 })
       }
 
-      await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+      await trySyncEmbed(c.env, result.data)
 
       const msg = result.status === 'left'
         ? `You left **${result.data!.name}**.`

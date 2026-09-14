@@ -378,7 +378,7 @@ async function patchOne(env: AppBindings, guildId: string, partyId: string, body
   if (result.status === 'invalid') return json({ error: result.message }, 400)
   if (result.status === 'unauthorized') return json({ error: 'update failed' }, 500)
 
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -436,7 +436,7 @@ async function spawnParty(env: AppBindings, guildId: string, body: any): Promise
   if (banlist) {
     const banned = await parties.setBanlist(env.DB, guildId, result.party.id, result.party.ownerId, banlist)
     if (banned.status === 'updated' && banned.data) {
-      await trySyncEmbed(env.DISCORD_BOT_TOKEN, banned.data)
+      await trySyncEmbed(env, banned.data)
       return json(banned.data)
     }
   }
@@ -541,7 +541,7 @@ async function patchUserProfile(env: AppBindings, guildId: string, userId: strin
     const party = await parties.getParty(env.DB, guildId, partyId)
     if (party && party.game === game) {
       const result = await parties.setMemberIgn(env.DB, guildId, partyId, userId, ign || undefined)
-      if (result.status === 'updated') await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+      if (result.status === 'updated') await trySyncEmbed(env, result.data)
     }
   }
 
@@ -578,7 +578,7 @@ async function moveQueuedRoute(env: AppBindings, guildId: string, partyId: strin
   const result = await parties.moveQueued(env.DB, guildId, partyId, party.ownerId, userId, direction)
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'not_queued') return json({ error: 'Not in queue' }, 404)
-  if (result.status === 'moved') await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  if (result.status === 'moved') await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -602,7 +602,7 @@ async function closeOne(env: AppBindings, guildId: string, partyId: string): Pro
   if (!party) return json({ error: 'Party not found' }, 404)
   const result = await parties.closeParty(env.DB, guildId, partyId, party.ownerId)
   if (result.status === 'already_closed') return json({ error: 'already closed' }, 400)
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -611,7 +611,7 @@ async function openOne(env: AppBindings, guildId: string, partyId: string): Prom
   if (!party) return json({ error: 'Party not found' }, 404)
   const result = await parties.openParty(env.DB, guildId, partyId, party.ownerId, rulesAccess(env))
   if (result.status === 'already_open') return json({ error: 'already open' }, 400)
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -619,7 +619,7 @@ async function setBanlistRoute(env: AppBindings, guildId: string, partyId: strin
   const party = await parties.getParty(env.DB, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
   const result = await parties.setBanlist(env.DB, guildId, partyId, party.ownerId, (body.banlist ?? '').toString())
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -651,7 +651,7 @@ async function addMember(env: AppBindings, guildId: string, partyId: string, bod
   if (result.status === 'in_other_party') return json({ error: 'User is already in another party' }, 400)
   if (result.status === 'full')           return json({ error: 'Party is full' }, 400)
 
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -662,7 +662,7 @@ async function removeMemberRoute(env: AppBindings, guildId: string, partyId: str
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'is_owner') return json({ error: "Can't remove the owner — promote someone else first" }, 400)
   if (result.status === 'not_in')   return json({ error: 'Not in party' }, 404)
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -673,7 +673,7 @@ async function approveQueuedRoute(env: AppBindings, guildId: string, partyId: st
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'not_queued') return json({ error: 'Not in queue' }, 404)
   if (result.status === 'full')       return json({ error: 'Party is full' }, 400)
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -683,7 +683,7 @@ async function denyQueuedRoute(env: AppBindings, guildId: string, partyId: strin
   const result = await parties.denyQueued(env.DB, guildId, partyId, party.ownerId, userId)
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'not_queued') return json({ error: 'Not in queue' }, 404)
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }
 
@@ -694,6 +694,6 @@ async function promoteMemberRoute(env: AppBindings, guildId: string, partyId: st
   if (result.status === 'not_found') return json({ error: 'Party not found' }, 404)
   if (result.status === 'already_owner') return json({ error: 'Already owner' }, 400)
   if (result.status === 'not_in')        return json({ error: 'Not in party' }, 404)
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json(result.data)
 }

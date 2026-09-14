@@ -237,7 +237,7 @@ async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
   if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can change the game.' }, 403)
   if (result.status === 'invalid') return json({ ok: false, error: result.message ?? 'Invalid input.' }, 400)
 
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
 
   return json({ ok: true, game: result.data!.game })
 }
@@ -359,7 +359,7 @@ async function addPartyMember(req: Request, env: AppBindings): Promise<Response>
   if (result.status === 'full') return json({ ok: false, error: 'Party is full.' }, 400)
   if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can add members.' }, 403)
 
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json({ ok: true })
 }
 
@@ -403,7 +403,7 @@ async function approvePartyQueued(req: Request, env: AppBindings): Promise<Respo
   if (result.status === 'not_queued')   return json({ ok: false, error: 'That player is no longer in the queue.' }, 400)
   if (result.status === 'full')         return json({ ok: false, error: 'Party is full.' }, 400)
 
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json({ ok: true })
 }
 
@@ -418,7 +418,7 @@ async function denyPartyQueued(req: Request, env: AppBindings): Promise<Response
   if (result.status === 'unauthorized') return json({ ok: false, error: 'Only the party owner can deny members.' }, 403)
   if (result.status === 'not_queued')   return json({ ok: false, error: 'That player is no longer in the queue.' }, 400)
 
-  await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(env, result.data)
   return json({ ok: true })
 }
 

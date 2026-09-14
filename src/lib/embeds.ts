@@ -12,7 +12,13 @@ function embedColor(party: PartyData): number {
   return 0x57f287
 }
 
-export function buildPartyEmbed(party: PartyData) {
+/**
+ * `rulesEnforced` is whether the check is actually being applied to this party
+ * right now — the party asked for it *and* the server still runs one. It is
+ * separate from party.rulesRequired, which is the party's stored setting and
+ * survives the server switching the feature off.
+ */
+export function buildPartyEmbed(party: PartyData, rulesEnforced = party.rulesRequired) {
   const isFull = party.members.length >= party.maxSize
   const statusLabel = party.isClosed ? '🔒 CLOSED' : isFull ? '🟡 FULL' : '🟢 OPEN'
 
@@ -57,7 +63,7 @@ export function buildPartyEmbed(party: PartyData) {
     fields,
     footer: {
       text: `${party.game} · ${statusLabel}`
-        + (party.rulesRequired ? ' · 🔒 Rules check required' : '')
+        + (rulesEnforced ? ' · 🔒 Rules check required' : '')
         + ` · ${partyIdFooter(party)}`,
     },
     timestamp: new Date(party.createdAt).toISOString(),
