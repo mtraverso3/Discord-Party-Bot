@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleParty } from '../src/commands/party'
+import { handleRulesPage } from '../src/commands/rules'
+import { publishRulesConfig } from '../src/store/rules'
 import { getMember, memberHistory, saveRulesGate } from '../src/store/rules'
 import { rulesAccess } from '../src/lib/rules'
 
@@ -141,5 +143,98 @@ describe('rules moderator commands', () => {
     const text = await run(g, 'rules-status', {}, NO_PERMS)
     expect(text).toContain('Not approved')
     expect(text).toContain('Start rules check')
+  })
+
+  describe('/party rules — the read-only viewer', () => {
+    const RULES = {
+      pages: [
+        { title: 'First page', text: 'Read this first.' },
+        { title: 'Second page', text: 'Then this.' },
+        { title: 'Third page', text: 'Finally this.' },
+      ],
+      questions: [],
+      agreement: 'I agree.',
+    }
+
+    /** Click a pager button, returning what the message was replaced with. */
+    async function page(guildId: string, customId: string) {
+      const sent: any[] = []
+      const c: any = {
+        env,
+        interaction: {
+          guild_id: guildId,
+          data: { custom_id: customId },
+          member: { user: { id: MOD, username: 'mod' }, permissions: NO_PERMS },
+        },
+        resUpdate: (payload: any) => { sent.push(payload); return payload },
+      }
+      await handleRulesPage(c)
+      return sent.at(-1)
+    }
+
+    const buttons = (payload: any) => payload.components[0].components
+      .map((b: any) => ({ label: b.label, id: b.custom_id, disabled: !!b.disabled }))
+
+    it('opens on the first page with Previous disabled', async () => {
+      const g = guild()
+      await gated(g)
+      await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+
+      const sent: any[] = []
+      const c: any = {
+        env,
+        interaction: {
+          guild_id: g,
+          member: { user: { id: MOD, username: 'mod' }, permissions: NO_PERMS },
+          data: { options: [{ name: 'rules', options: [] }] },
+        },
+        followup: (p: any) => { sent.push(p); return p },
+      }
+      c.ephemeral = () => c
+      c.res = (p: any) => { sent.push(p); return p }
+      c.resDefer = async (fn: any) => fn(c)
+      await handleParty(c)
+
+      const payload = sent.at(-1)
+      expect(payload.embeds[0].title).toBe('First page')
+      expect(payload.embeds[0].footer.text).toContain('Page 1/3')
+      expect(payload.flags).toBe(64)   // only they can see it
+      expect(buttons(payload)).toEqual([
+        { label: '◀ Previous', id: 'rules_page;-1', disabled: true },
+        { label: 'Next ▶', id: 'rules_page;1', disabled: false },
+      ])
+    })
+
+    it('pages forward and back, and stops at both ends', async () => {
+      const g = guild()
+      await gated(g)
+      await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+
+      const second = await page(g, '1')
+      expect(second.embeds[0].title).toBe('Second page')
+      expect(buttons(second).every((b: any) => !b.disabled)).toBe(true)
+
+      const third = await page(g, '2')
+      expect(third.embeds[0].title).toBe('Third page')
+      expect(buttons(third)[1].disabled).toBe(true)   // no Next past the end
+
+      const back = await page(g, '1')
+      expect(back.embeds[0].title).toBe('Second page')
+    })
+
+    it('clamps a page number that is out of range', async () => {
+      const g = guild()
+      await gated(g)
+      await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+
+      expect((await page(g, '99')).embeds[0].title).toBe('Third page')
+      expect((await page(g, '-5')).embeds[0].title).toBe('First page')
+      expect((await page(g, 'nonsense')).embeds[0].title).toBe('First page')
+    })
+
+    it('does not show the built-in sample rules as if they were the server’s', async () => {
+      const untouched = guild()
+      expect(await run(untouched, 'rules', {}, NO_PERMS)).toContain("hasn't set up a rules check")
+    })
   })
 })

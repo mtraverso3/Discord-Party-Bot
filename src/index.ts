@@ -4,7 +4,7 @@ import {
   handleBanlistModal, handleCreateModalRaw, handleEditModalRaw, handleParty,
 } from './commands/party'
 import { handleAwayButton, handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
-import { START_BUTTON, STEP_BUTTON, handleRulesStart, handleRulesStep } from './commands/rules'
+import { PAGE_BUTTON, START_BUTTON, STEP_BUTTON, handleRulesPage, handleRulesStart, handleRulesStep } from './commands/rules'
 import { CREATE_MODAL_PREFIX, EDIT_MODAL_PREFIX } from './lib/modal'
 import { handleAdmin } from './admin'
 import { handleClientApi } from './client-api'
@@ -29,6 +29,7 @@ const inner = new DiscordHono<AppEnv>()
   // The rules check runs in this bot now, not a separate Python one.
   .component(START_BUTTON, handleRulesStart)
   .component(STEP_BUTTON, handleRulesStep)
+  .component(PAGE_BUTTON, handleRulesPage)
   .modal('party_banlist', handleBanlistModal)
   // party_create and party_edit are intentionally NOT registered here —
   // discord-hono's ModalContext crashes on Components V2 Label components,

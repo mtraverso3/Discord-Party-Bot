@@ -1,6 +1,6 @@
 import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
-import { changeApproval, formatStatus, postRulesMessage } from './rules'
-import { getMember, getRulesGate, memberHistory } from '../store/rules'
+import { changeApproval, formatStatus, postRulesMessage, renderRulesPage } from './rules'
+import { getMember, getRulesConfig, getRulesGate, hasPublishedRules, memberHistory } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
 import {
@@ -70,6 +70,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'disband': return await disband(c, guildId, userId)
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
+        case 'rules':         return await rulesView(c, guildId, userId)
         case 'rules-status':  return await rulesStatus(c, guildId, userId)
         case 'rules-post':    return await rulesPost(c, guildId)
         case 'rules-history': return await rulesHistory(c, guildId, opts)
@@ -582,6 +583,25 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
 }
 
 // ── /party rules-* ────────────────────────────────────────────────────────────
+
+/** The rules themselves, readable by anyone whether or not they have passed. */
+async function rulesView(c: CommandContext<AppEnv>, guildId: string, userId: string) {
+  const [gate, published] = await Promise.all([
+    getRulesGate(c.env.DB, guildId),
+    hasPublishedRules(c.env.DB, guildId),
+  ])
+  // Without either, the guild would be shown the built-in sample rules as if
+  // they were its own.
+  if (!gate?.enabled && !published) {
+    return c.followup({ content: "This server hasn't set up a rules check.", flags: 64 })
+  }
+
+  const [config, member] = await Promise.all([
+    getRulesConfig(c.env.DB, guildId),
+    getMember(c.env.DB, guildId, userId),
+  ])
+  return c.followup(renderRulesPage(config, 0, member.state === 'approved'))
+}
 
 /** Shared guard: Discord will not enforce Manage Roles on a subcommand for us. */
 function requireModerator(c: CommandContext<AppEnv>): boolean {

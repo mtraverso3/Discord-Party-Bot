@@ -158,13 +158,19 @@ const commands = [
         name: 'bump',
         description: 'Repost the party embed to the bottom of this channel (owner only)',
       },
-      // The rules-* moderator commands gate on Manage Roles at runtime:
-      // Discord ignores default_member_permissions on subcommands.
+      // Anyone may read the rules and check their own status.
+      {
+        type: 1,
+        name: 'rules',
+        description: "Read this server's rules, privately, a page at a time",
+      },
       {
         type: 1,
         name: 'rules-status',
         description: 'Privately show your approval status, revocations, and completed checks',
       },
+      // The rest gate on Manage Roles at runtime: Discord ignores
+      // default_member_permissions on subcommands.
       {
         type: 1,
         name: 'rules-post',

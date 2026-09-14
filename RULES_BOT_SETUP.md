@@ -89,6 +89,7 @@ client, where there is no interaction to read permissions from.
 
 | Command | Who can use it | What it does |
 | --- | --- | --- |
+| `/party rules` | Everyone | Privately shows the rules, one page at a time, with Previous and Next buttons. |
 | `/party rules-post` | Manage Roles | Posts the Start rules check button in the configured channel. |
 | `/party rules-status` | Everyone | Privately shows your approval status, lifetime revocations, and completed verifications. |
 | `/party rules-history member` | Manage Roles | Shows a member's counters and their latest 10 history entries. |

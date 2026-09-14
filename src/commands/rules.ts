@@ -21,6 +21,7 @@ import {
 
 export const START_BUTTON = 'rules_start'
 export const STEP_BUTTON = 'rules_step'
+export const PAGE_BUTTON = 'rules_page'
 
 /** custom_id payload: `<step>;<action>`, where action is next | agree | a<n>. */
 function stepId(step: number, action: string): string {
@@ -45,6 +46,60 @@ export function startMessage(config: RulesConfig) {
       + ' only you can see it. Use `/party rules-status` to check your status.',
     components: buildStartComponents(),
   }
+}
+
+// ── Read-only viewer ─────────────────────────────────────────────────────────
+
+/**
+ * The rules, for anyone who wants to read them without taking the check. No
+ * session: the page number rides in the custom_id, so paging costs one
+ * database read and nothing is left behind if they wander off.
+ */
+export function renderRulesPage(config: RulesConfig, page: number, approved: boolean) {
+  const total = config.pages.length
+  const index = Math.min(Math.max(page, 0), Math.max(total - 1, 0))
+  const current = config.pages[index]
+  if (!current) {
+    return { content: 'This server has not written any rules yet.', embeds: [], components: [], flags: 64 }
+  }
+  return {
+    embeds: [{
+      title: current.title,
+      description: current.text.slice(0, 4000),
+      color: 0x5865f2,
+      footer: {
+        text: `Page ${index + 1}/${total} · Version ${config.version}`
+          + (approved ? ' · You have passed the check' : ''),
+      },
+    }],
+    components: [{
+      type: 1,
+      components: [
+        {
+          type: 2, style: 2, label: '◀ Previous',
+          custom_id: `${PAGE_BUTTON};${index - 1}`, disabled: index <= 0,
+        },
+        {
+          type: 2, style: 2, label: 'Next ▶',
+          custom_id: `${PAGE_BUTTON};${index + 1}`, disabled: index >= total - 1,
+        },
+      ],
+    }],
+    flags: 64,
+  }
+}
+
+/** Paging the read-only viewer. Editing in place keeps it to one message. */
+export async function handleRulesPage(c: ComponentContext<AppEnv>) {
+  const guildId = c.interaction.guild_id!
+  const { userId } = extractMemberInfo(c.interaction)
+  const page = parseInt((c.interaction.data as any).custom_id as string, 10)
+  const [config, member] = await Promise.all([
+    getRulesConfig(c.env.DB, guildId),
+    getMember(c.env.DB, guildId, userId),
+  ])
+  const { flags, ...payload } = renderRulesPage(config, Number.isFinite(page) ? page : 0, member.state === 'approved')
+  return c.resUpdate(payload)
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────

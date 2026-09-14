@@ -29,6 +29,12 @@ export async function getRulesConfig(db: D1Database, guildId: string): Promise<R
   }
 }
 
+/** Whether the guild has published rules of its own, rather than the defaults. */
+export async function hasPublishedRules(db: D1Database, guildId: string): Promise<boolean> {
+  const row = await db.prepare('SELECT 1 FROM rules_config WHERE guild_id = ?1').bind(guildId).first()
+  return !!row
+}
+
 export type PublishResult =
   | { ok: true; config: RulesConfig; requeued: number }
   | { ok: false; error: string; conflict?: boolean }
