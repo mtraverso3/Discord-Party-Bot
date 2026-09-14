@@ -179,6 +179,36 @@ it('counts a revocation only when it takes away a live approval', async () => {
   expect(detail.history[2].reason).toContain('Left mid-series')
 })
 
+it('approves a member from the panel, without the quiz', async () => {
+  const g = guild()
+  await call('connect', g, 'POST')
+
+  const approved = await (await call(`members/${MEMBER}/approve`, g, 'POST', { reason: 'Vouched for' })).json<any>()
+  expect(approved.message).toContain('Approved without the check')
+  await rulesAccess(env).require(g, MEMBER)
+
+  const detail = await (await call(`members/${MEMBER}`, g)).json<any>()
+  expect(detail.member.state).toBe('approved')
+  expect(detail.member.completions).toBe(0)   // not a check they took
+  expect(detail.history[0].kind).toBe('approved')
+  expect(detail.history[0].reason).toBe('Vouched for')
+
+  // Again is a no-op rather than a second entry.
+  const again = await (await call(`members/${MEMBER}/approve`, g, 'POST', { reason: 'Again' })).json<any>()
+  expect(again.message).toContain('already approved')
+  expect((await (await call(`members/${MEMBER}`, g)).json<any>()).history).toHaveLength(1)
+})
+
+it('refuses to approve without a reason, or with the check switched off', async () => {
+  const g = guild()
+  await call('connect', g, 'POST')
+  expect((await call(`members/${MEMBER}/approve`, g, 'POST', { reason: '  ' })).status).toBe(400)
+
+  const off = guild()
+  expect((await call(`members/${MEMBER}/approve`, off, 'POST', { reason: 'x' })).status).toBe(400)
+  await rulesAccess(env).require(off, MEMBER)   // still ungated, nothing written
+})
+
 it('lists tracked members, read-only', async () => {
   const g = guild()
   await env.DB.prepare(`

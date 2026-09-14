@@ -1,8 +1,8 @@
 import type { AppBindings } from '../types'
 import { changeApproval as applyApprovalChange, formatStatus, postRulesMessage } from '../commands/rules'
 import {
-  getMember, getRulesConfig, getRulesGate, listMembers, memberCounts, memberHistory,
-  publishRulesConfig, saveRulesGate,
+  approveManually, getMember, getRulesConfig, getRulesGate, listMembers, memberCounts,
+  memberHistory, publishRulesConfig, saveRulesGate,
 } from '../store/rules'
 
 /**
@@ -44,10 +44,11 @@ export async function handleRulesAdmin(
   if (path === '/rules/publish' && method === 'POST') return await publish(env, guildId, body, actor)
   if (path === '/rules/post' && method === 'POST') return await post(env, guildId, body)
 
-  const member = path.match(/^\/rules\/members\/(\d{5,20})(?:\/(revoke|reset))?$/)
+  const member = path.match(/^\/rules\/members\/(\d{5,20})(?:\/(approve|revoke|reset))?$/)
   if (member) {
     const userId = member[1]!
     if (!member[2] && method === 'GET') return await memberDetail(env, guildId, userId)
+    if (member[2] === 'approve' && method === 'POST') return await approve(env, guildId, userId, body, actor)
     if (member[2] && method === 'POST') {
       return await changeApproval(env, guildId, userId, member[2] === 'revoke', body, actor)
     }
@@ -148,6 +149,27 @@ async function memberDetail(env: AppBindings, guildId: string, userId: string): 
       reason: e.reason,
       created_at: new Date(e.createdAt).toISOString(),
     })),
+  })
+}
+
+/** Vouch for a member without the quiz — the panel's Approve button. */
+async function approve(
+  env: AppBindings, guildId: string, userId: string, body: any, actor: string,
+): Promise<Response> {
+  const reason = (body?.reason ?? '').toString().trim().slice(0, 500)
+  if (!reason) return json({ error: 'Give a reason — it is recorded against the member.' }, 400)
+
+  const gate = await getRulesGate(env.DB, guildId)
+  if (!gate?.enabled) return json({ error: 'Switch the rules check on for this server first.' }, 400)
+
+  const config = await getRulesConfig(env.DB, guildId)
+  const approved = await approveManually(env.DB, guildId, userId, actor, reason, config.version)
+  return json({
+    ok: true,
+    pending: false,
+    message: approved
+      ? 'Approved without the check. Recorded as your decision; their completed-check count is unchanged.'
+      : 'They were already approved — nothing changed.',
   })
 }
 

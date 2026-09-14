@@ -128,11 +128,18 @@ export function Rules() {
     setMember(null)
     await action(async () => { setMember(await api<MemberStatus>(`/rules/members/${id}`)); setReason(''); setNotice('') })
   }
-  const revoke = async (mode: 'revoke' | 'reset') => {
+  const PROMPTS: Record<'approve' | 'revoke' | 'reset', [string, string]> = {
+    approve: ['Approve this member without the quiz? It is recorded as your decision, and does not count as a check they have taken.', 'Approve'],
+    revoke: ['Revoke approval for this member? This counts an active approval revocation and requires a fresh quiz.', 'Revoke approval'],
+    reset: ['Require this member to retake the quiz without increasing their disciplinary count?', 'Require retake'],
+  }
+
+  const decide = async (mode: 'approve' | 'revoke' | 'reset') => {
     if (!member || !reason.trim()) return
     const id = member.member.user_id
     if (picker.current?.getId() !== id) { toast('Load the selected member before taking action.', 'err'); return }
-    if (!await confirm(mode === 'revoke' ? `Revoke approval for member ${id}? This counts an active approval revocation and requires a fresh quiz.` : `Require member ${id} to retake the quiz without increasing their disciplinary count?`, mode === 'revoke' ? 'Revoke approval' : 'Require retake')) return
+    const [question, title] = PROMPTS[mode]
+    if (!await confirm(question, title)) return
     await action(async () => {
       const result = await api<{ message: string }>(`/rules/members/${id}/${mode}`, { method: 'POST', body: JSON.stringify({ reason }) })
       setNotice(result.message); toast(result.message)
@@ -242,8 +249,12 @@ export function Rules() {
             </div>)}
         {member && <>
           <div className="flex flex-wrap gap-2"><Badge>Member {member.member.user_id}</Badge><Badge>{member.member.state}</Badge><Badge>Revocations: {member.member.revocations}</Badge><Badge>Completed quizzes: {member.member.completions}</Badge></div>
-          <Label>Reason<Input maxLength={500} value={reason} onChange={e => setReason(e.target.value)} placeholder="Explain why a fresh rules check is required" /></Label>
-          <div className="flex flex-wrap gap-2"><Button variant="destructive-outline" busy={busy} disabled={!reason.trim()} onClick={() => void revoke('revoke')}>Revoke approval</Button><Button variant="outline" busy={busy} disabled={!reason.trim()} onClick={() => void revoke('reset')}>Require retake without penalty</Button></div>
+          <Label>Reason<Input maxLength={500} value={reason} onChange={e => setReason(e.target.value)} placeholder="Recorded against them, and shown in their history" /></Label>
+          <div className="flex flex-wrap gap-2">
+            <Button busy={busy} disabled={!reason.trim() || member.member.state === 'approved'} onClick={() => void decide('approve')}>Approve without the quiz</Button>
+            <Button variant="destructive-outline" busy={busy} disabled={!reason.trim()} onClick={() => void decide('revoke')}>Revoke approval</Button>
+            <Button variant="outline" busy={busy} disabled={!reason.trim()} onClick={() => void decide('reset')}>Require retake without penalty</Button>
+          </div>
           <div className="space-y-2">{member.history.length === 0 ? <p className="text-sm text-muted-foreground">No verification history yet.</p> : member.history.map(event => <div className="rounded-lg border p-3 text-sm" key={event.id}><div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{event.kind}</span><time className="text-xs text-muted-foreground">{new Date(event.created_at).toLocaleString()}</time></div><p className="mt-1 break-words text-muted-foreground">{event.reason}</p></div>)}</div>
         </>}
         {notice && <p role="status" className="rounded-lg border bg-muted p-3 text-sm">{notice}</p>}

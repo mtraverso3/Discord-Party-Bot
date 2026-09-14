@@ -107,8 +107,9 @@ as Manage Roles. Every reply is private to whoever ran it.
 
 ## Moderation
 
-Approval normally comes from taking the check, but **`/party rules-approve`**
-lets a moderator vouch for someone directly — useful for people who have clearly
+Approval normally comes from taking the check, but **`/party rules-approve`** —
+or **Approve without the quiz** on the member lookup in the dashboard — lets a
+moderator vouch for someone directly — useful for people who have clearly
 read the rules, or to lift a revocation without making them sit the quiz again.
 It is recorded as that moderator's decision and does not increase the member's
 count of checks taken, so the history stays honest about who actually sat it.
