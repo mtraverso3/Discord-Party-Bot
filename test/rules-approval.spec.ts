@@ -1,13 +1,14 @@
 import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as parties from '../src/store/parties'
-import { rulesAccess } from '../src/lib/rules'
+import { exemptFromRules, rulesAccess } from '../src/lib/rules'
 import { sweepRulesApproval } from '../src/lib/rules-sweep'
 import { handleClientApi } from '../src/client-api'
 import { createClientToken } from '../src/store/clientAuth'
 import { handleAdminApi } from '../src/admin/api'
 import { handleJoinButton, handleQueueButton } from '../src/components/buttons'
 import { revokeApproval, saveRulesGate } from '../src/store/rules'
+import { addAdmin } from '../src/store/adminAuth'
 
 // The queue gate. What is gated has not changed; where approval comes from
 // has. It used to be a Discord role read back over the API for every member on
@@ -222,5 +223,58 @@ describe('entry routes', () => {
     const revoked = await (await request('/client/session?verifyRules=1')).json<any>()
     expect(revoked.canInvite).toBe(false)
     expect(revoked.party).toBeNull()
+  })
+})
+
+describe('admin exemption', () => {
+  const ADMIN = '700000000000000001'
+  const makeAdmin = (guildId: string, userId = ADMIN) =>
+    addAdmin(env.DB, { guildId, userId, displayName: 'Mod', addedBy: null })
+
+  it('lets an admin who has not passed the check join anyway', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+
+    await rulesAccess(env).require(guildId, ADMIN)
+    expect((await parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)).status).toBe('joined')
+  })
+
+  it('does not let an admin admit someone else who has not passed', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    // The exemption follows the person being admitted, not whoever is acting —
+    // otherwise it would quietly mean admins can admit anyone.
+    await expect(parties.forceAdd(env.DB, guildId, id, OWNER, user(BAD), policy)).rejects.toThrow('rules check')
+  })
+
+  it('leaves an exempt admin in place when the sweep runs', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    await parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)
+
+    await sweepRulesApproval(env)
+
+    expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).toContain(ADMIN)
+  })
+
+  it('only exempts admins of that server', async () => {
+    const a = await make()
+    const b = await make()
+    await makeAdmin(a.guildId)
+    await rulesAccess(env).require(a.guildId, ADMIN)
+    await expect(rulesAccess(env).require(b.guildId, ADMIN)).rejects.toThrow('rules check')
+  })
+
+  it('flags an exempt admin for warning, but not an approved one', async () => {
+    const { guildId } = await make()
+    await makeAdmin(guildId)
+    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(true)
+
+    // An admin who has passed is not "let in because they are an admin".
+    await approve(guildId, ADMIN)
+    expect(await exemptFromRules(env, guildId, ADMIN)).toBe(false)
+
+    // Nor is anyone in a guild that does not gate.
+    expect(await exemptFromRules(env, String(BigInt(G) + 9500n), ADMIN)).toBe(false)
   })
 })

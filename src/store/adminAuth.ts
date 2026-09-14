@@ -28,6 +28,17 @@ export async function isAdmin(db: D1Database, guildId: string, userId: string): 
   return !!row
 }
 
+/** The subset of `userIds` on the allow-list, in one query. */
+export async function filterAdmins(db: D1Database, guildId: string, userIds: string[]): Promise<string[]> {
+  const ids = [...new Set(userIds)]
+  if (ids.length === 0) return []
+  const { results } = await db.prepare(`
+    SELECT user_id FROM admin_users
+    WHERE guild_id = ?1 AND user_id IN (SELECT value FROM json_each(?2))
+  `).bind(guildId, JSON.stringify(ids)).all<{ user_id: string }>()
+  return results.map(r => r.user_id)
+}
+
 /** The stored display name for one allow-listed admin, if any. */
 export async function getAdminDisplayName(db: D1Database, guildId: string, userId: string): Promise<string | null> {
   const row = await db.prepare('SELECT display_name FROM admin_users WHERE guild_id = ?1 AND user_id = ?2')

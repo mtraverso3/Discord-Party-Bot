@@ -33,11 +33,27 @@ heading whatever comes next.
 
 Joining, both Join buttons, party creation, `/party adduser`, admin and desktop
 adds, manual queue approval, auto-promotion from the queue, capacity increases,
-ownership transfer, and desktop lobby invites. There is no staff bypass.
+ownership transfer, and desktop lobby invites.
 
 Members who lose approval are removed from parties and queues within about a
 minute. A party owner who loses it has their party closed rather than disbanded,
 so the queue survives for a moderator to sort out.
+
+## Admins are exempt
+
+Anyone on the server's admin list (the **Admins** tab) can join without passing
+the check, so the people responsible for the rules cannot be locked out of their
+own queue by them. They are warned every time instead, in the same private reply
+that confirms the join, and the periodic sweep leaves them alone.
+
+The exemption follows the person being admitted, not whoever is acting: an admin
+adding an unapproved member is still refused, and an admin who adds another
+admin is told that person has not passed. Otherwise "admins are exempt" would
+quietly become "admins can admit anyone".
+
+Discord server permissions are not consulted for this — only the bot's own admin
+list — because the same rule has to hold in the background sweep and the desktop
+client, where there is no interaction to read permissions from.
 
 ## Moderation
 

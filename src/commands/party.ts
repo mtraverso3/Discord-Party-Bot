@@ -1,4 +1,4 @@
-import { rulesAccess, rulesErrorMessage } from '../lib/rules'
+import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
 import { formatStatus } from './rules'
 import { getMember, getRulesGate } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
@@ -153,7 +153,8 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     })
     if (!result.ok) return reply(result.error)
 
-    return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)`)
+    const warning = await exemptFromRules(env, guildId, userId) ? RULES_EXEMPT_WARNING : ''
+    return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)` + warning)
   } catch (e) {
     console.error('handleCreateModalRaw error:', e)
     return reply(rulesErrorMessage(e) ?? 'Something went wrong.')
@@ -198,8 +199,9 @@ async function join(
   const msg = result.status === 'joined'
     ? `You joined **${result.data!.name}**!`
     : `**${result.data!.name}** is ${result.data!.isClosed ? 'closed' : 'full'} — you're in the queue at position ${result.data!.queue.length}.`
+  const warning = await exemptFromRules(c.env, guildId, userId) ? RULES_EXEMPT_WARNING : ''
 
-  return c.followup({ content: msg, flags: 64 })
+  return c.followup({ content: msg + warning, flags: 64 })
 }
 
 // ── /party leave ──────────────────────────────────────────────────────────────
@@ -439,7 +441,13 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
 
   await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
-  return c.followup({ content: `<@${targetId}> added to the party.`, flags: 64 })
+  const warning = await exemptFromRules(c.env, guildId, targetId)
+    ? `
+
+⚠️ <@${targetId}> hasn't passed the rules check — added because they're an admin.`
+    : ''
+
+  return c.followup({ content: `<@${targetId}> added to the party.` + warning, flags: 64 })
 }
 
 // ── /party approve ────────────────────────────────────────────────────────────

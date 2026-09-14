@@ -1,4 +1,4 @@
-import { rulesAccess, rulesErrorMessage } from '../lib/rules'
+import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
 import type { ComponentContext } from 'discord-hono'
 import type { AppEnv } from '../types'
 import { extractMemberInfo, trySyncEmbed } from '../lib/party'
@@ -46,19 +46,20 @@ async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boole
     await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
 
     const data = result.data!
+    const warning = await exemptFromRules(c.env, guildId, userId) ? RULES_EXEMPT_WARNING : ''
     if (result.status === 'joined') {
       return c.followup({
-        content: fromQueueButton
+        content: (fromQueueButton
           ? `A spot was open — you joined **${data.name}** directly!`
-          : `You joined **${data.name}**!`,
+          : `You joined **${data.name}**!`) + warning,
         flags: 64,
       })
     }
     const pos = data.queue.findIndex(q => q.userId === userId) + 1
     return c.followup({
-      content: fromQueueButton
+      content: (fromQueueButton
         ? `You're in the queue for **${data.name}** at position ${pos}.`
-        : `**${data.name}** is ${data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${pos}.`,
+        : `**${data.name}** is ${data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${pos}.`) + warning,
       flags: 64,
     })
   } catch (e) {
