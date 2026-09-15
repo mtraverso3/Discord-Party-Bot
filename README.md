@@ -1,5 +1,7 @@
 # Discord Party Bot
 
+Optionally gate parties behind a rules check — rules pages, a quiz and an agreement that members complete in Discord, managed from **Rules & verification** in the admin panel. It runs in this same Worker, with no second bot to host. See [RULES_BOT_SETUP.md](RULES_BOT_SETUP.md).
+
 A Discord bot for managing inhouse gaming lobbies. Create parties with a player cap, game label, and optional voice channel. Members join via slash command or button. When full or closed, new joiners enter a queue. The embed updates live in the channel on every state change.
 
 Runs entirely on **Cloudflare Workers** — no persistent server. All state lives in a **Cloudflare D1** (SQLite) database: parties, members and queues, banlists, per-user IGN profiles, guild settings, templates, the admin audit log, and desktop-client auth. Invariants like "one party per user per guild" are database constraints, and a cron trigger sweeps idle parties.

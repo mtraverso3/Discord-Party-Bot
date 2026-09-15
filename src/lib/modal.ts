@@ -16,6 +16,32 @@ import { gameAllowed } from '../store/settings'
 export const CREATE_MODAL_PREFIX = 'party_create'
 export const EDIT_MODAL_PREFIX = 'party_edit'
 
+/**
+ * Discord caps a modal at five components and both modals already use all
+ * five, so the rules toggle is a command option instead and rides here in the
+ * custom_id. 'rules' turns it on, 'norules' off, absent leaves it alone.
+ */
+function rulesSuffix(rulesRequired?: boolean): string {
+  return rulesRequired == null ? '' : `;${rulesRequired ? 'rules' : 'norules'}`
+}
+
+function parseRulesSuffix(part: string | undefined): boolean | undefined {
+  if (part === 'rules') return true
+  if (part === 'norules') return false
+  return undefined
+}
+
+/** Whether a create modal was opened with the rules check requested. */
+export function createModalRules(customId: string): boolean | undefined {
+  return parseRulesSuffix(customId.split(';')[1])
+}
+
+/** Party ID and the requested rules change (undefined = leave unchanged). */
+export function parseEditModalCustomId(customId: string): { partyId: string; rulesRequired?: boolean } {
+  const [, partyId = '', rules] = customId.split(';')
+  return { partyId, rulesRequired: parseRulesSuffix(rules) }
+}
+
 export interface EditFields {
   name: string
   description: string
@@ -30,9 +56,9 @@ function gameOptions(settings: GuildSettings, current: string) {
   return games.map(g => ({ label: g.name, value: g.value, default: g.value === current }))
 }
 
-export function buildEditModalJSON(party: PartyData, settings: GuildSettings): any {
+export function buildEditModalJSON(party: PartyData, settings: GuildSettings, rulesRequired?: boolean): any {
   return {
-    custom_id: `${EDIT_MODAL_PREFIX};${party.id}`,
+    custom_id: `${EDIT_MODAL_PREFIX};${party.id}${rulesSuffix(rulesRequired)}`,
     title: 'Edit party',
     components: [
       label('Name', {
@@ -87,11 +113,11 @@ export interface CreateFields {
   voiceChannelId: string
 }
 
-export function buildCreateModalJSON(displayName: string, settings: GuildSettings): any {
+export function buildCreateModalJSON(displayName: string, settings: GuildSettings, rulesRequired?: boolean): any {
   const allowed = GAMES.filter(g => gameAllowed(settings, g.value))
   const defaultGame = allowed.some(g => g.value === 'Other') ? 'Other' : allowed[0]?.value
   return {
-    custom_id: CREATE_MODAL_PREFIX,
+    custom_id: `${CREATE_MODAL_PREFIX}${rulesSuffix(rulesRequired)}`,
     title: 'Create party',
     components: [
       label('Name', {

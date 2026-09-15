@@ -1,0 +1,448 @@
+import { env } from 'cloudflare:test'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as parties from '../src/store/parties'
+import { exemptFromRules, rulesAccess } from '../src/lib/rules'
+import { sweepRulesApproval } from '../src/lib/rules-sweep'
+import { handleClientApi } from '../src/client-api'
+import { createClientToken } from '../src/store/clientAuth'
+import { handleAdminApi } from '../src/admin/api'
+import { handleJoinButton, handleQueueButton } from '../src/components/buttons'
+import { getMember, grantApproval, revokeApproval, saveRulesGate } from '../src/store/rules'
+import { buildPartyEmbed } from '../src/lib/embeds'
+import { syncEmbed } from '../src/lib/party'
+import { addAdmin } from '../src/store/adminAuth'
+
+// The queue gate. What is gated has not changed; where approval comes from
+// has. It used to be a Discord role read back over the API for every member on
+// every check, which meant Discord being slow or unreachable was a failure mode
+// the queue had to survive. Approval is a row in this database now, so those
+// paths are gone rather than fixed — hence the assertion that a gate check
+// makes no Discord calls at all.
+
+const G = '100000000000000000'
+const OWNER = '300000000000000000'
+const BAD = '400000000000000000'
+const GOOD = '500000000000000000'
+const ACTIVE = '600000000000000000'
+const user = (id: string) => ({ userId: id, username: id, displayName: id })
+
+let seq = 0
+let discord: ReturnType<typeof vi.fn>
+const originalFetch = globalThis.fetch
+
+beforeEach(() => {
+  discord = vi.fn(async (input: any) => {
+    const url = new URL(typeof input === 'string' ? input : input.url)
+    // Adds resolve the target's name through Discord; approval no longer does.
+    if (url.pathname.includes('/members/')) {
+      const id = url.pathname.split('/').pop()!
+      return Response.json({ user: { id, username: id }, nick: id, roles: [] })
+    }
+    return Response.json({ id: 'message', channel_id: 'channel' })
+  })
+  globalThis.fetch = discord as any
+})
+afterEach(() => { globalThis.fetch = originalFetch })
+
+async function approve(guildId: string, ...ids: string[]) {
+  for (const id of ids) {
+    await env.DB.prepare(`
+      INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
+      VALUES (?1, ?2, 'approved', 0, 0, 1, 1, ?3)
+      ON CONFLICT (guild_id, user_id) DO UPDATE SET state = 'approved', revoked_at = NULL
+    `).bind(guildId, id, Date.now()).run()
+  }
+}
+
+const revoke = (guildId: string, id: string) =>
+  revokeApproval(env.DB, guildId, id, 'moderator', 'Test revocation', true, false)
+
+/** A gated guild with a party owned by an approved OWNER. */
+async function make(maxSize = 2) {
+  const id = `R${seq++}`
+  const guildId = String(BigInt(G) + BigInt(seq))
+  await saveRulesGate(env.DB, guildId, { enabled: true })
+  await approve(guildId, OWNER, GOOD, ACTIVE)
+  const policy = rulesAccess(env)
+  await parties.createParty(env.DB, {
+    id, guildId, name: 'Arena', description: '', game: 'Other',
+    owner: user(OWNER), maxSize, rulesRequired: true,
+  }, policy)
+  return { id, guildId, policy }
+}
+
+describe('rules approval policy', () => {
+  it('allows the approved, denies everyone else, and never caches', async () => {
+    const { guildId } = await make()
+    const policy = rulesAccess(env)
+    await policy.require(guildId, GOOD)
+    await revoke(guildId, GOOD)
+    await expect(policy.require(guildId, GOOD)).rejects.toThrow('rules check')
+  })
+
+  it('checks approval without calling Discord at all', async () => {
+    const { guildId } = await make()
+    await rulesAccess(env).eligible(guildId, [OWNER, GOOD, BAD, ACTIVE])
+    expect(discord).not.toHaveBeenCalled()
+  })
+
+  it('leaves a guild with the gate off alone', async () => {
+    const off = String(BigInt(G) + 9000n)
+    await rulesAccess(env).require(off, BAD)
+    await saveRulesGate(env.DB, off, { enabled: false })
+    await rulesAccess(env).require(off, BAD)
+  })
+
+  it('gates each guild on its own approvals', async () => {
+    const a = await make()
+    const b = await make()
+    await revoke(b.guildId, GOOD)
+    await rulesAccess(env).require(a.guildId, GOOD)
+    await expect(rulesAccess(env).require(b.guildId, GOOD)).rejects.toThrow('rules check')
+  })
+})
+
+describe('queue operations', () => {
+  it('gates party creators, direct joins, and owner force-adds', async () => {
+    const { id, guildId, policy } = await make(4)
+    await expect(parties.createParty(env.DB, {
+      id: 'BAD', guildId, name: 'x', description: '', game: 'Other',
+      owner: user(BAD), maxSize: 4, rulesRequired: true,
+    }, policy)).rejects.toThrow('rules check')
+    await expect(parties.joinParty(env.DB, guildId, id, user(BAD), policy)).rejects.toThrow('rules check')
+    await expect(parties.forceAdd(env.DB, guildId, id, OWNER, user(BAD), policy)).rejects.toThrow('rules check')
+    expect((await parties.getParty(env.DB, guildId, id))!.members).toHaveLength(1)
+    expect((await parties.joinParty(env.DB, guildId, id, user(GOOD), policy)).status).toBe('joined')
+  })
+
+  it('gates manual queue approval and ownership transfer', async () => {
+    const { id, guildId, policy } = await make(4)
+    await parties.joinParty(env.DB, guildId, id, user(BAD))  // pre-gate member
+    await expect(parties.promoteOwner(env.DB, guildId, id, OWNER, BAD, policy)).rejects.toThrow('rules check')
+    await parties.closeParty(env.DB, guildId, id, OWNER)
+    await parties.joinParty(env.DB, guildId, id, user(GOOD), policy)
+    await revoke(guildId, GOOD)
+    await expect(parties.approveQueued(env.DB, guildId, id, OWNER, GOOD, policy)).rejects.toThrow('rules check')
+  })
+
+  it('skips unapproved queue entries on leave and preserves FIFO champion bans', async () => {
+    const { id, guildId, policy } = await make()
+    await parties.joinParty(env.DB, guildId, id, user(ACTIVE), policy)
+    await parties.joinParty(env.DB, guildId, id, user(BAD))
+    await parties.joinParty(env.DB, guildId, id, user(GOOD))
+    await parties.setBanlist(env.DB, guildId, id, OWNER, 'Garen\nLux\nAhri')
+    const result = await parties.leaveParty(env.DB, guildId, id, ACTIVE, 'left', policy)
+    expect(result.promoted).toBe(GOOD)
+    expect(result.data!.members.map(m => m.userId)).toEqual([OWNER, GOOD])
+    expect(result.data!.banlist!.assignments[GOOD]).toBe('Ahri')
+    expect(result.data!.banlist!.assignments[BAD]).toBeUndefined()
+  })
+
+  it('gates promotions on reopen and capacity expansion', async () => {
+    const { id, guildId, policy } = await make()
+    await parties.closeParty(env.DB, guildId, id, OWNER)
+    await parties.joinParty(env.DB, guildId, id, user(BAD))
+    await parties.joinParty(env.DB, guildId, id, user(GOOD))
+    const result = await parties.openParty(env.DB, guildId, id, OWNER, policy)
+    expect(result.promoted).toEqual([GOOD])
+    const expanded = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, maxSize: 4 }, policy)
+    expect(expanded.promoted).toEqual([])
+    expect(expanded.data!.queue.map(m => m.userId)).toContain(BAD)
+  })
+
+  it('sweeps members and queue entries whose approval went away', async () => {
+    const { id, guildId } = await make()
+    await parties.joinParty(env.DB, guildId, id, user(ACTIVE))
+    await parties.joinParty(env.DB, guildId, id, user(BAD))
+    await parties.joinParty(env.DB, guildId, id, user(GOOD))
+
+    await revoke(guildId, ACTIVE)
+    await sweepRulesApproval(env)
+
+    const result = (await parties.getParty(env.DB, guildId, id))!
+    expect(result.members.map(m => m.userId)).toEqual([OWNER, GOOD])
+    expect(result.queue).toHaveLength(0)
+  })
+
+  it('closes a revoked owner party without deleting other players', async () => {
+    const { id, guildId } = await make()
+    await parties.joinParty(env.DB, guildId, id, user(GOOD))
+    await revoke(guildId, OWNER)
+    await sweepRulesApproval(env)
+    const party = (await parties.getParty(env.DB, guildId, id))!
+    expect(party.isClosed).toBe(true)
+    expect(party.members.map(m => m.userId)).toContain(GOOD)
+  })
+})
+
+describe('entry routes', () => {
+  it.each([handleJoinButton, handleQueueButton])('denies an unapproved button interaction', async handler => {
+    const { id, guildId } = await make()
+    const followup = vi.fn()
+    const c: any = {
+      env,
+      interaction: { guild_id: guildId, data: { custom_id: id }, member: { user: { id: BAD, username: 'Bad' } } },
+      followup,
+    }
+    c.ephemeral = () => c
+    c.resDefer = async (fn: any) => fn(c)
+    await handler(c)
+    expect(followup).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('rules check'), flags: 64,
+    }))
+    expect((await parties.getParty(env.DB, guildId, id))!.members).toHaveLength(1)
+  })
+
+  it('admin add cannot bypass the gate', async () => {
+    const { id, guildId } = await make()
+    const url = new URL(`https://bot.test/admin/api/parties/${id}/members?guild=${guildId}`)
+    const res = await handleAdminApi(
+      new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: BAD }) }),
+      env, url, 'boss@example.com',
+    )
+    expect(res.status).toBe(403)
+    expect(await res.text()).toContain('rules check')
+  })
+
+  it('desktop add is gated and the invite roster drops the unapproved', async () => {
+    const { id, guildId } = await make(4)
+    const token = await createClientToken(env.DB, { guildId, discordUserId: OWNER, displayName: 'Owner' })
+    const request = (path: string, body?: unknown) => {
+      const url = new URL('https://bot.test' + path)
+      return handleClientApi(new Request(url, {
+        method: body ? 'POST' : 'GET',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      }), env, url)
+    }
+
+    expect((await request('/client/party/add', { userId: BAD })).status).toBe(403)
+    await parties.joinParty(env.DB, guildId, id, user(BAD))
+    await parties.joinParty(env.DB, guildId, id, user(GOOD))
+
+    const data = await (await request('/client/session?verifyRules=1')).json<any>()
+    expect(data.party.members.map((m: any) => m.userId)).toEqual([OWNER, GOOD])
+
+    await revoke(guildId, OWNER)
+    const revoked = await (await request('/client/session?verifyRules=1')).json<any>()
+    expect(revoked.canInvite).toBe(false)
+    expect(revoked.party).toBeNull()
+  })
+})
+
+describe('admin exemption', () => {
+  const ADMIN = '700000000000000001'
+  const makeAdmin = (guildId: string, userId = ADMIN) =>
+    addAdmin(env.DB, { guildId, userId, displayName: 'Mod', addedBy: null })
+
+  it('lets an admin who has not passed the check join anyway', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+
+    await rulesAccess(env).require(guildId, ADMIN)
+    expect((await parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)).status).toBe('joined')
+  })
+
+  it('does not let an admin admit someone else who has not passed', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    // The exemption follows the person being admitted, not whoever is acting —
+    // otherwise it would quietly mean admins can admit anyone.
+    await expect(parties.forceAdd(env.DB, guildId, id, OWNER, user(BAD), policy)).rejects.toThrow('rules check')
+  })
+
+  it('leaves an exempt admin in place when the sweep runs', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    await parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)
+
+    await sweepRulesApproval(env)
+
+    expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).toContain(ADMIN)
+  })
+
+  it('makes a revoked admin take the check like anyone else', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    await approve(guildId, ADMIN)
+
+    // Disciplinary revocation: the exemption no longer covers them.
+    await revoke(guildId, ADMIN)
+    await expect(rulesAccess(env).require(guildId, ADMIN)).rejects.toThrow('revoked')
+    await expect(parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)).rejects.toThrow('revoked')
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(false)
+  })
+
+  it('removes a revoked admin on the next sweep', async () => {
+    const { id, guildId, policy } = await make(4)
+    await makeAdmin(guildId)
+    await parties.joinParty(env.DB, guildId, id, user(ADMIN), policy)
+
+    await revoke(guildId, ADMIN)
+    await sweepRulesApproval(env)
+
+    expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).not.toContain(ADMIN)
+  })
+
+  it('gives the exemption back when a moderator resets without penalty', async () => {
+    const { guildId } = await make()
+    await makeAdmin(guildId)
+    await approve(guildId, ADMIN)
+    await revoke(guildId, ADMIN)
+    await expect(rulesAccess(env).require(guildId, ADMIN)).rejects.toThrow('revoked')
+
+    // "Require retake without penalty" is the undo for a revocation.
+    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'Sorted out', false, false)
+    await rulesAccess(env).require(guildId, ADMIN)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
+  })
+
+  it('restores the exemption once a revoked admin passes the check', async () => {
+    const { guildId } = await make()
+    await makeAdmin(guildId)
+    await approve(guildId, ADMIN)
+    await revoke(guildId, ADMIN)
+
+    // Through the real grant path, which is what clears the mark.
+    const { generation } = await getMember(env.DB, guildId, ADMIN)
+    expect(await grantApproval(env.DB, guildId, ADMIN, generation, 1, false)).toBe(true)
+
+    // A later non-disciplinary lapse leaves them exempt again.
+    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'New season', false, false)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
+  })
+
+  it('does not warn an admin who joined a party that never asked for the check', async () => {
+    // The guild has a check and the admin has not passed it, but this party is
+    // open — so there is nothing to excuse and nothing to warn about.
+    const guildId = String(BigInt(G) + BigInt(9700 + seq++))
+    await saveRulesGate(env.DB, guildId, { enabled: true })
+    await makeAdmin(guildId)
+    await parties.createParty(env.DB, {
+      id: `N${seq++}`, guildId, name: 'Open', description: '', game: 'Other',
+      owner: user(ADMIN), maxSize: 4,
+    }, rulesAccess(env))
+
+    expect(await exemptFromRules(env, guildId, ADMIN, false)).toBe(false)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
+  })
+
+  it('only exempts admins of that server', async () => {
+    const a = await make()
+    const b = await make()
+    await makeAdmin(a.guildId)
+    await rulesAccess(env).require(a.guildId, ADMIN)
+    await expect(rulesAccess(env).require(b.guildId, ADMIN)).rejects.toThrow('rules check')
+  })
+
+  it('flags an exempt admin for warning, but not an approved one', async () => {
+    const { guildId } = await make()
+    await makeAdmin(guildId)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
+
+    // An admin who has passed is not "let in because they are an admin".
+    await approve(guildId, ADMIN)
+    expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(false)
+
+    // Nor is anyone in a guild that does not gate.
+    expect(await exemptFromRules(env, String(BigInt(G) + 9500n), ADMIN, true)).toBe(false)
+  })
+})
+
+describe('per-party opt-in', () => {
+  /** Same gated server, but a party that never asked for the check. */
+  async function openParty() {
+    const guildId = String(BigInt(G) + BigInt(8000 + seq++))
+    await saveRulesGate(env.DB, guildId, { enabled: true })
+    await approve(guildId, OWNER)
+    const id = `O${seq++}`
+    await parties.createParty(env.DB, {
+      id, guildId, name: 'Pick-up', description: '', game: 'Other', owner: user(OWNER), maxSize: 4,
+    }, rulesAccess(env))
+    return { id, guildId }
+  }
+
+  it('lets anyone into a party that did not ask for the check', async () => {
+    const { id, guildId } = await openParty()
+    const policy = rulesAccess(env)
+    expect((await parties.joinParty(env.DB, guildId, id, user(BAD), policy)).status).toBe('joined')
+    expect((await parties.forceAdd(env.DB, guildId, id, OWNER, user('900000000000000123'), policy)).status).toBe('added')
+  })
+
+  it('creates an unchecked party even for an owner who has not passed', async () => {
+    const guildId = String(BigInt(G) + BigInt(8500 + seq++))
+    await saveRulesGate(env.DB, guildId, { enabled: true })
+    const created = await parties.createParty(env.DB, {
+      id: `U${seq++}`, guildId, name: 'Open', description: '', game: 'Other', owner: user(BAD), maxSize: 4,
+    }, rulesAccess(env))
+    expect(created.ok).toBe(true)
+    expect(created.ok && created.party.rulesRequired).toBe(false)
+  })
+
+  it('starts checking when the owner turns it on, and stops when turned off', async () => {
+    const { id, guildId } = await openParty()
+    const policy = rulesAccess(env)
+
+    const on = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, rulesRequired: true }, policy)
+    expect(on.data!.rulesRequired).toBe(true)
+    await expect(parties.joinParty(env.DB, guildId, id, user(BAD), policy)).rejects.toThrow('rules check')
+
+    const off = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, rulesRequired: false }, policy)
+    expect(off.data!.rulesRequired).toBe(false)
+    expect((await parties.joinParty(env.DB, guildId, id, user(BAD), policy)).status).toBe('joined')
+  })
+
+  it('leaves an unchecked party alone during the sweep', async () => {
+    const { id, guildId } = await openParty()
+    await parties.joinParty(env.DB, guildId, id, user(BAD), rulesAccess(env))
+    await sweepRulesApproval(env)
+    expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).toContain(BAD)
+  })
+
+  it('an edit that says nothing about rules leaves the setting alone', async () => {
+    const { id, guildId } = await openParty()
+    const policy = rulesAccess(env)
+    await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, rulesRequired: true }, policy)
+    const renamed = await parties.updateParty(env.DB, guildId, id, { requesterId: OWNER, name: 'Renamed' }, policy)
+    expect(renamed.data!.name).toBe('Renamed')
+    expect(renamed.data!.rulesRequired).toBe(true)
+  })
+})
+
+describe('what the embed claims', () => {
+  it('drops the lock when the server switches the check off, keeping the setting', async () => {
+    const { id, guildId } = await make()   // a gated party in a gated guild
+    const gated = (await parties.getParty(env.DB, guildId, id))!
+    expect(buildPartyEmbed(gated, true).footer.text).toContain('Rules check required')
+
+    await saveRulesGate(env.DB, guildId, { enabled: false })
+
+    // syncEmbed asks whether the check is live before drawing the footer.
+    const drawn: any[] = []
+    globalThis.fetch = vi.fn(async (_: any, init: any) => {
+      drawn.push(JSON.parse(init.body))
+      return Response.json({})
+    }) as any
+    await syncEmbed(env, { ...gated, embedMessageId: 'm1', embedChannelId: 'c1' })
+
+    expect(drawn[0].embeds[0].footer.text).not.toContain('Rules check required')
+    // The party's own setting is untouched, so switching back on restores it.
+    expect((await parties.getParty(env.DB, guildId, id))!.rulesRequired).toBe(true)
+  })
+})
+
+describe('concurrent moderation', () => {
+  it('counts one revocation when two moderators revoke at the same moment', async () => {
+    const { guildId } = await make()
+    await approve(guildId, GOOD)
+
+    await Promise.all([
+      revokeApproval(env.DB, guildId, GOOD, 'mod A', 'Same incident', true),
+      revokeApproval(env.DB, guildId, GOOD, 'mod B', 'Same incident', true),
+    ])
+
+    // Both statements ran; only the one that matched a live approval counted.
+    expect((await getMember(env.DB, guildId, GOOD)).revocations).toBe(1)
+    expect((await getMember(env.DB, guildId, GOOD)).state).toBe('unapproved')
+  })
+})

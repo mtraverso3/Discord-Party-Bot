@@ -6,7 +6,7 @@ import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
 import { ChannelSelect } from '../components/ChannelSelect'
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, ErrorNote, Input, Label, Mono, Select, Spinner, Textarea } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Checkbox, EmptyState, ErrorNote, Input, Label, Mono, Select, Spinner, Textarea } from '../components/ui'
 import { cn } from '../lib/cn'
 import { useGuildData } from '../lib/guildData'
 import { useLoad } from '../lib/useLoad'
@@ -100,6 +100,7 @@ function TemplateCard({ t, settings, voiceChannels, textChannels, onSaved, onDel
         <Badge variant="outline">{t.game}</Badge>
         <Badge variant="secondary">cap {t.maxSize}</Badge>
         {t.banlist && <Badge variant="warning">banlist</Badge>}
+        {t.rulesRequired && <Badge variant="secondary">rules check</Badge>}
         <span className="grow" />
         <Mono className="hidden sm:inline">{t.id}</Mono>
         <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
@@ -165,6 +166,7 @@ function TemplateForm({ t, settings, voiceChannels, onSaved, onCancel }: {
   const [voice, setVoice] = useState(t?.voiceChannelId || '')
   const [desc, setDesc] = useState(t?.description || '')
   const [bans, setBans] = useState(t?.banlist || '')
+  const [rules, setRules] = useState(t?.rulesRequired ?? false)
   const [busy, setBusy] = useState(false)
 
   const submit = async () => {
@@ -176,6 +178,7 @@ function TemplateForm({ t, settings, voiceChannels, onSaved, onCancel }: {
       voiceChannelId: voice || undefined,
       description: desc,
       banlist: bans,
+      rulesRequired: rules,
     }
     try {
       const saved = t
@@ -208,6 +211,16 @@ function TemplateForm({ t, settings, voiceChannels, onSaved, onCancel }: {
           </Label>
           <Label className="sm:col-span-2">Description<Textarea value={desc} placeholder="Description (optional)" onChange={e => setDesc(e.target.value)} /></Label>
           <Label className="sm:col-span-2">Banlist<Textarea className="min-h-28 font-mono text-xs" value={bans} placeholder="One champion per line (optional)" onChange={e => setBans(e.target.value)} /></Label>
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent sm:col-span-2">
+            <Checkbox className="mt-0.5" checked={rules} onChange={e => setRules(e.target.checked)} />
+            <span>
+              Require the rules check
+              <span className="block text-xs text-muted-foreground">
+                Parties made from this template only admit members who have passed. Needs the check switched on for the
+                server, under Rules &amp; verification.
+              </span>
+            </span>
+          </label>
           <div className="flex gap-2 sm:col-span-2">
             <Button type="submit" busy={busy}>
               {busy ? (t ? 'Saving…' : 'Creating…') : (t ? 'Save template' : 'Create template')}

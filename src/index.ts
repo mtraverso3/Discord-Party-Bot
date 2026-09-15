@@ -4,6 +4,7 @@ import {
   handleBanlistModal, handleCreateModalRaw, handleEditModalRaw, handleParty,
 } from './commands/party'
 import { handleAwayButton, handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
+import { PAGE_BUTTON, START_BUTTON, STEP_BUTTON, handleRulesPage, handleRulesStart, handleRulesStep } from './commands/rules'
 import { CREATE_MODAL_PREFIX, EDIT_MODAL_PREFIX } from './lib/modal'
 import { handleAdmin } from './admin'
 import { handleClientApi } from './client-api'
@@ -15,6 +16,8 @@ import { sweepExpiredAuth } from './store/clientAuth'
 import { sweepExpiredAdminAuth } from './store/adminAuth'
 import { resolvePendingGames } from './store/games'
 import { landingPage } from './landing'
+import { sweepRulesApproval } from './lib/rules-sweep'
+import { sweepStaleSessions } from './store/rules'
 
 const inner = new DiscordHono<AppEnv>()
   .command('party', handleParty)
@@ -23,6 +26,10 @@ const inner = new DiscordHono<AppEnv>()
   .component('party_leave', handleLeaveButton)
   .component('party_away', handleAwayButton)
   .component('help_page', handleHelpPage)
+  // The rules check runs in this bot now, not a separate Python one.
+  .component(START_BUTTON, handleRulesStart)
+  .component(STEP_BUTTON, handleRulesStep)
+  .component(PAGE_BUTTON, handleRulesPage)
   .modal('party_banlist', handleBanlistModal)
   // party_create and party_edit are intentionally NOT registered here —
   // discord-hono's ModalContext crashes on Components V2 Label components,
@@ -72,7 +79,7 @@ export default {
     // runs in waitUntil and edits the @original message via the webhook.
     const modalId = interaction.type === 5 ? interaction.data?.custom_id : null
     if (typeof modalId === 'string') {
-      if (modalId === CREATE_MODAL_PREFIX) {
+      if (modalId === CREATE_MODAL_PREFIX || modalId.startsWith(`${CREATE_MODAL_PREFIX};`)) {
         ctx.waitUntil(handleCreateModalRaw(interaction, env))
         return Response.json({ type: 5, data: { flags: 64 } })
       }
@@ -96,6 +103,13 @@ export default {
   // tier's threshold are disbanded and their embeds greyed out; expired link
   // codes and client tokens are purged alongside.
   async scheduled(_event: ScheduledController, env: AppBindings, ctx: ExecutionContext): Promise<void> {
+    if (_event.cron === '* * * * *') {
+      ctx.waitUntil((async () => {
+        await sweepRulesApproval(env)
+        await sweepStaleSessions(env.DB)
+      })().catch(e => console.error('Rules approval sweep failed:', e)))
+      return
+    }
     ctx.waitUntil((async () => {
       const disbanded = await sweepInactiveParties(env.DB)
       for (const { party, thresholdMs } of disbanded) {

@@ -1,7 +1,10 @@
+import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
+import { changeApproval, formatStatus, postRulesMessage, renderRulesPage } from './rules'
+import { approveManually, getMember, getRulesConfig, getRulesGate, hasPublishedRules, memberHistory } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
 import {
-  createPartyAndEmbed, extractMemberInfo, extractResolvedUser, isGuildAdmin,
+  canModerateRules, createPartyAndEmbed, extractMemberInfo, extractResolvedUser, isGuildAdmin,
   repostPartyEmbed, tryMarkDisbanded, trySyncEmbed,
 } from '../lib/party'
 import * as parties from '../store/parties'
@@ -12,7 +15,7 @@ import { generateAdminToken, isAdmin, writeAdminLinkToken } from '../store/admin
 import { normalizeBaseUrl } from '../auth/session'
 import { editInteractionResponse } from '../lib/discord'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
-import { EDIT_MODAL_PREFIX, buildCreateModalJSON, buildEditModalJSON, parseCreateModalSubmit, parseEditModalSubmit } from '../lib/modal'
+import { buildCreateModalJSON, buildEditModalJSON, createModalRules, parseCreateModalSubmit, parseEditModalCustomId, parseEditModalSubmit } from '../lib/modal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,6 +25,12 @@ function sub(c: CommandContext<AppEnv>): { name: string; opts: Record<string, an
   const opts: Record<string, any> = {}
   for (const o of subCmd?.options ?? []) opts[o.name] = o.value
   return { name: subCmd?.name ?? '', opts }
+}
+
+/** The optional `rules:` True/False on /party create and /party edit. */
+function peekRulesOption(c: CommandContext<AppEnv>): boolean | undefined {
+  const value = sub(c).opts['rules']
+  return typeof value === 'boolean' ? value : undefined
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -61,13 +70,20 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'disband': return await disband(c, guildId, userId)
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
+        case 'rules':         return await rulesView(c, guildId, userId)
+        case 'rules-status':  return await rulesStatus(c, guildId, userId)
+        case 'rules-post':    return await rulesPost(c, guildId)
+        case 'rules-approve': return await rulesApprove(c, guildId, opts)
+        case 'rules-history': return await rulesHistory(c, guildId, opts)
+        case 'rules-revoke':  return await rulesChange(c, guildId, opts, true)
+        case 'rules-reset':   return await rulesChange(c, guildId, opts, false)
         case 'link':    return await link(c, guildId, userId)
         case 'admin':   return await adminLink(c, guildId, userId)
         default:        return await c.followup({ content: 'Unknown subcommand.', flags: 64 })
       }
     } catch (e) {
       console.error('handleParty error:', e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+      return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
     }
   })
 }
@@ -101,7 +117,18 @@ async function openCreateModal(c: CommandContext<AppEnv>) {
     return c.ephemeral().res({ content: `There are already ${settings.maxParties} active parties. Wait for one to disband.`, flags: 64 })
   }
 
-  return c.resModal(buildCreateModalJSON(displayName, settings))
+  const wantsRules = peekRulesOption(c)
+  if (wantsRules) {
+    const gate = await getRulesGate(c.env.DB, guildId)
+    if (!gate?.enabled) {
+      return c.ephemeral().res({
+        content: "This server hasn't set up a rules check — an admin turns it on in the dashboard.",
+        flags: 64,
+      })
+    }
+  }
+
+  return c.resModal(buildCreateModalJSON(displayName, settings, wantsRules))
 }
 
 // Invoked from src/index.ts after we verify the Discord signature ourselves —
@@ -115,6 +142,7 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
     const channelId = interaction.channel_id as string
     const { userId, username, displayName } = extractMemberInfo(interaction)
 
+    const requested = createModalRules(interaction.data?.custom_id ?? '')
     const fields = parseCreateModalSubmit(interaction)
 
     const maxSize = Number(fields.capacity)
@@ -146,13 +174,16 @@ export async function handleCreateModalRaw(interaction: any, env: AppBindings): 
       game,
       maxSize,
       voiceChannelId: fields.voiceChannelId,
+      rulesRequired: requested ?? (await getRulesGate(env.DB, guildId))?.defaultRequired ?? false,
     })
     if (!result.ok) return reply(result.error)
 
-    return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)`)
+    const warning = await exemptFromRules(env, guildId, userId, result.party.rulesRequired) ? RULES_EXEMPT_WARNING : ''
+    const gated = result.party.rulesRequired ? ' Members must pass the rules check to join.' : ''
+    return reply(`Party **${result.party.name}** created! (ID: \`${result.party.id}\`)${gated}` + warning)
   } catch (e) {
     console.error('handleCreateModalRaw error:', e)
-    return reply('Something went wrong.')
+    return reply(rulesErrorMessage(e) ?? 'Something went wrong.')
   }
 }
 
@@ -182,20 +213,21 @@ async function join(
   if (!target) return c.followup({ content: 'Party not found. Use `/party list` to see active parties.', flags: 64 })
 
   const ign = await getUserIgn(c.env.DB, userId, target.game)
-  const result = await parties.joinParty(c.env.DB, guildId, targetId, { userId, username, displayName, ign })
+  const result = await parties.joinParty(c.env.DB, guildId, targetId, { userId, username, displayName, ign }, rulesAccess(c.env))
 
   if (result.status === 'not_found')      return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'in_other_party') return c.followup({ content: "You're already in another party. Leave it first.", flags: 64 })
   if (result.status === 'already_member') return c.followup({ content: "You're already in that party.", flags: 64 })
   if (result.status === 'already_queued') return c.followup({ content: "You're already queued for that party.", flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   const msg = result.status === 'joined'
     ? `You joined **${result.data!.name}**!`
     : `**${result.data!.name}** is ${result.data!.isClosed ? 'closed' : 'full'} — you're in the queue at position ${result.data!.queue.length}.`
+  const warning = await exemptFromRules(c.env, guildId, userId, result.data!.rulesRequired) ? RULES_EXEMPT_WARNING : ''
 
-  return c.followup({ content: msg, flags: 64 })
+  return c.followup({ content: msg + warning, flags: 64 })
 }
 
 // ── /party leave ──────────────────────────────────────────────────────────────
@@ -204,7 +236,7 @@ async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string)
   const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId)
+  const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId, 'left', rulesAccess(c.env))
 
   if (result.status === 'is_owner') {
     return c.followup({ content: "You're the party owner — use `/party disband` to end it.", flags: 64 })
@@ -213,7 +245,7 @@ async function leave(c: CommandContext<AppEnv>, guildId: string, userId: string)
     return c.followup({ content: "You're not in that party.", flags: 64 })
   }
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   const msg = result.status === 'left'
     ? `You left **${result.data!.name}**.`
@@ -281,7 +313,7 @@ async function ign(c: CommandContext<AppEnv>, guildId: string, userId: string, o
     const party = await parties.getParty(c.env.DB, guildId, membership.partyId)
     if (party && party.game === game) {
       const result = await parties.setMemberIgn(c.env.DB, guildId, membership.partyId, userId, ignValue)
-      if (result.status === 'updated') await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+      if (result.status === 'updated') await trySyncEmbed(c.env, result.data)
     }
   }
 
@@ -308,7 +340,18 @@ async function openEditModal(c: CommandContext<AppEnv>) {
     return c.ephemeral().res({ content: 'Only the party owner can edit the party.', flags: 64 })
   }
 
-  return c.resModal(buildEditModalJSON(party, settings))
+  const rulesChange = peekRulesOption(c)
+  if (rulesChange) {
+    const gate = await getRulesGate(c.env.DB, guildId)
+    if (!gate?.enabled) {
+      return c.ephemeral().res({
+        content: "This server hasn't set up a rules check — an admin turns it on in the dashboard.",
+        flags: 64,
+      })
+    }
+  }
+
+  return c.resModal(buildEditModalJSON(party, settings, rulesChange))
 }
 
 // Invoked from src/index.ts after we verify the Discord signature ourselves —
@@ -318,8 +361,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
     editInteractionResponse(env.DISCORD_APPLICATION_ID, interaction.token, { content })
 
   try {
-    const customId = interaction.data.custom_id as string
-    const partyId = customId.slice(`${EDIT_MODAL_PREFIX};`.length)
+    const { partyId, rulesRequired } = parseEditModalCustomId(interaction.data.custom_id as string)
     const guildId = interaction.guild_id as string
     const { userId } = extractMemberInfo(interaction)
 
@@ -345,14 +387,15 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
       maxSize: Number(fields.capacity),
       game: fields.game,
       voiceChannelId: fields.voiceChannelId || undefined,
+      rulesRequired,
       ignMap,
-    })
+    }, rulesAccess(env))
 
     if (result.status === 'not_found')    return reply('Party not found.')
     if (result.status === 'unauthorized') return reply('Only the party owner can edit the party.')
     if (result.status === 'invalid')      return reply(result.message ?? 'Invalid input.')
 
-    await trySyncEmbed(env.DISCORD_BOT_TOKEN, result.data)
+    await trySyncEmbed(env, result.data)
 
     const promotedNote = result.promoted.length > 0
       ? ` ${result.promoted.length} player(s) auto-promoted from queue.`
@@ -360,7 +403,7 @@ export async function handleEditModalRaw(interaction: any, env: AppBindings): Pr
     return reply(`Party updated.${promotedNote}`)
   } catch (e) {
     console.error('handleEditModalRaw error:', e)
-    return reply('Something went wrong.')
+    return reply(rulesErrorMessage(e) ?? 'Something went wrong.')
   }
 }
 
@@ -376,7 +419,7 @@ async function closeParty(c: CommandContext<AppEnv>, guildId: string, userId: st
   if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can close the party.', flags: 64 })
   if (result.status === 'already_closed') return c.followup({ content: 'The party is already closed.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
   return c.followup({ content: 'Party closed. New joiners will be added to the queue.', flags: 64 })
 }
 
@@ -386,13 +429,13 @@ async function openParty(c: CommandContext<AppEnv>, guildId: string, userId: str
   const partyId = await parties.getUserPartyId(c.env.DB, guildId, userId)
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
-  const result = await parties.openParty(c.env.DB, guildId, partyId, userId)
+  const result = await parties.openParty(c.env.DB, guildId, partyId, userId, rulesAccess(c.env))
 
   if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can open the party.', flags: 64 })
   if (result.status === 'already_open') return c.followup({ content: 'The party is already open.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   const promotedNote = result.promoted.length > 0
     ? ` ${result.promoted.length} player(s) auto-promoted from queue.`
@@ -425,7 +468,7 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   const ign = await getUserIgn(c.env.DB, targetId, party.game)
   const result = await parties.forceAdd(c.env.DB, guildId, partyId, requesterId, {
     userId: targetId, username: resolved.username, displayName: resolved.displayName, ign,
-  })
+  }, rulesAccess(c.env))
 
   if (result.status === 'not_found')      return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized')   return c.followup({ content: 'Only the party owner can add members directly.', flags: 64 })
@@ -433,9 +476,15 @@ async function addUser(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (result.status === 'in_other_party') return c.followup({ content: `<@${targetId}> is already in another party.`, flags: 64 })
   if (result.status === 'full')           return c.followup({ content: 'The party is full. Raise the cap or remove someone first.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
-  return c.followup({ content: `<@${targetId}> added to the party.`, flags: 64 })
+  const warning = await exemptFromRules(c.env, guildId, targetId, result.data!.rulesRequired)
+    ? `
+
+⚠️ <@${targetId}> hasn't passed the rules check — added because they're an admin.`
+    : ''
+
+  return c.followup({ content: `<@${targetId}> added to the party.` + warning, flags: 64 })
 }
 
 // ── /party approve ────────────────────────────────────────────────────────────
@@ -445,14 +494,14 @@ async function approve(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const result = await parties.approveQueued(c.env.DB, guildId, partyId, requesterId, targetId)
+  const result = await parties.approveQueued(c.env.DB, guildId, partyId, requesterId, targetId, rulesAccess(c.env))
 
   if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can approve members.', flags: 64 })
   if (result.status === 'not_queued')   return c.followup({ content: 'That user is not in the queue.', flags: 64 })
   if (result.status === 'full')         return c.followup({ content: "The party is full.", flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   return c.followup({ content: `<@${targetId}> approved into the party.`, flags: 64 })
 }
@@ -470,7 +519,7 @@ async function deny(c: CommandContext<AppEnv>, guildId: string, requesterId: str
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can deny members.', flags: 64 })
   if (result.status === 'not_queued')   return c.followup({ content: 'That user is not in the queue.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   return c.followup({ content: `<@${targetId}> removed from the queue.`, flags: 64 })
 }
@@ -482,14 +531,14 @@ async function removeUserFromParty(c: CommandContext<AppEnv>, guildId: string, r
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const result = await parties.removeMember(c.env.DB, guildId, partyId, requesterId, targetId)
+  const result = await parties.removeMember(c.env.DB, guildId, partyId, requesterId, targetId, rulesAccess(c.env))
 
   if (result.status === 'not_found')    return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized') return c.followup({ content: 'Only the party owner can remove members.', flags: 64 })
   if (result.status === 'is_owner')     return c.followup({ content: "You can't remove yourself. Use `/party disband` to end the party.", flags: 64 })
   if (result.status === 'not_in')       return c.followup({ content: 'That user is not in the party.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
   return c.followup({ content: `<@${targetId}> removed from the party.${result.promoted ? ` <@${result.promoted}> promoted from queue.` : ''}`, flags: 64 })
 }
 
@@ -500,14 +549,14 @@ async function promote(c: CommandContext<AppEnv>, guildId: string, requesterId: 
   if (!partyId) return c.followup({ content: "You're not in a party.", flags: 64 })
 
   const targetId = opts['user'] as string
-  const result = await parties.promoteOwner(c.env.DB, guildId, partyId, requesterId, targetId)
+  const result = await parties.promoteOwner(c.env.DB, guildId, partyId, requesterId, targetId, rulesAccess(c.env))
 
   if (result.status === 'not_found')     return c.followup({ content: 'Party not found.', flags: 64 })
   if (result.status === 'unauthorized')  return c.followup({ content: 'Only the party owner can transfer ownership.', flags: 64 })
   if (result.status === 'already_owner') return c.followup({ content: "You're already the owner.", flags: 64 })
   if (result.status === 'not_in')        return c.followup({ content: 'That user is not in the party.', flags: 64 })
 
-  await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+  await trySyncEmbed(c.env, result.data)
 
   return c.followup({ content: `Ownership transferred to <@${targetId}>.`, flags: 64 })
 }
@@ -532,6 +581,135 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
   }
 
   return c.followup({ content: 'Party bumped!', flags: 64 })
+}
+
+// ── /party rules-* ────────────────────────────────────────────────────────────
+
+/** The rules themselves, readable by anyone whether or not they have passed. */
+async function rulesView(c: CommandContext<AppEnv>, guildId: string, userId: string) {
+  const [gate, published] = await Promise.all([
+    getRulesGate(c.env.DB, guildId),
+    hasPublishedRules(c.env.DB, guildId),
+  ])
+  // Without either, the guild would be shown the built-in sample rules as if
+  // they were its own.
+  if (!gate?.enabled && !published) {
+    return c.followup({ content: "This server hasn't set up a rules check.", flags: 64 })
+  }
+
+  const [config, member] = await Promise.all([
+    getRulesConfig(c.env.DB, guildId),
+    getMember(c.env.DB, guildId, userId),
+  ])
+  return c.followup(renderRulesPage(config, 0, member.state === 'approved'))
+}
+
+/** Shared guard: Discord will not enforce Manage Roles on a subcommand for us. */
+function requireModerator(c: CommandContext<AppEnv>): boolean {
+  return canModerateRules(c.interaction)
+}
+
+const NO_PERMISSION = 'You need the **Manage Roles** permission to use this.'
+
+async function rulesPost(c: CommandContext<AppEnv>, guildId: string) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const gate = await getRulesGate(c.env.DB, guildId)
+  if (!gate?.enabled) {
+    return c.followup({ content: "This server hasn't switched the rules check on yet.", flags: 64 })
+  }
+  if (!gate.channelId) {
+    return c.followup({
+      content: 'No rules channel is set. Pick one in the dashboard under **Rules & verification**, then try again.',
+      flags: 64,
+    })
+  }
+  try {
+    await postRulesMessage(c.env, guildId, gate.channelId)
+  } catch (e) {
+    console.error('rules-post failed:', e)
+    return c.followup({ content: `Couldn't post in <#${gate.channelId}> — check the bot's permissions there.`, flags: 64 })
+  }
+  return c.followup({ content: `Posted the rules check in <#${gate.channelId}>.`, flags: 64 })
+}
+
+async function rulesApprove(c: CommandContext<AppEnv>, guildId: string, opts: Record<string, any>) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const gate = await getRulesGate(c.env.DB, guildId)
+  if (!gate?.enabled) {
+    return c.followup({ content: "This server hasn't switched the rules check on yet.", flags: 64 })
+  }
+
+  const targetId = opts['member'] as string
+  const reason = ((opts['reason'] as string) ?? '').trim().slice(0, 500)
+  if (!reason) return c.followup({ content: 'Give a reason — it is recorded against the member.', flags: 64 })
+
+  const { userId: actorId, displayName } = extractMemberInfo(c.interaction)
+  const config = await getRulesConfig(c.env.DB, guildId)
+  const approved = await approveManually(
+    c.env.DB, guildId, targetId, `${displayName} (${actorId})`, reason, config.version,
+  )
+  return c.followup({
+    content: approved
+      ? `<@${targetId}> is approved without taking the check. It is recorded as your decision, and their completed-check count is unchanged.`
+      : `<@${targetId}> is already approved.`,
+    flags: 64,
+  })
+}
+
+async function rulesHistory(c: CommandContext<AppEnv>, guildId: string, opts: Record<string, any>) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const targetId = opts['member'] as string
+  const [member, history] = await Promise.all([
+    getMember(c.env.DB, guildId, targetId),
+    memberHistory(c.env.DB, guildId, targetId),
+  ])
+  // A reason can be 500 characters and there can be ten of them, which is well
+  // past Discord's 2000-character message limit — so each line is trimmed, and
+  // the whole reply is clipped as a backstop.
+  const lines = history.length === 0
+    ? '*No history yet.*'
+    : history.map(e => {
+      const when = `<t:${Math.floor(e.createdAt / 1000)}:d>`
+      const reason = e.reason.length > 120 ? e.reason.slice(0, 119) + '…' : e.reason
+      return `\`${e.kind}\` ${when} — ${reason}${e.actor ? ` *(${e.actor})*` : ''}`
+    }).join('\n')
+
+  const content = `**<@${targetId}>**\n${formatStatus(member)}\n\n**Last ${history.length} entries**\n${lines}`
+  return c.followup({
+    content: content.length > 1990 ? content.slice(0, 1989) + '…' : content,
+    flags: 64,
+  })
+}
+
+async function rulesChange(
+  c: CommandContext<AppEnv>, guildId: string, opts: Record<string, any>, disciplinary: boolean,
+) {
+  if (!requireModerator(c)) return c.followup({ content: NO_PERMISSION, flags: 64 })
+
+  const targetId = opts['member'] as string
+  const reason = ((opts['reason'] as string) ?? '').trim().slice(0, 500)
+  if (!reason) return c.followup({ content: 'Give a reason — it is recorded against the member.', flags: 64 })
+
+  const { userId: actorId, displayName } = extractMemberInfo(c.interaction)
+  const result = await changeApproval(c.env, guildId, targetId, {
+    disciplinary, reason, actor: `${displayName} (${actorId})`,
+  })
+  return c.followup({ content: `<@${targetId}> — ${result.message}`, flags: 64 })
+}
+
+async function rulesStatus(c: CommandContext<AppEnv>, guildId: string, userId: string) {
+  const gate = await getRulesGate(c.env.DB, guildId)
+  if (!gate?.enabled) {
+    return c.followup({ content: 'This server does not require a rules check.', flags: 64 })
+  }
+  const member = await getMember(c.env.DB, guildId, userId)
+  const hint = member.state === 'approved'
+    ? ''
+    : '\n\nUse the **Start rules check** button in the rules channel.'
+  return c.followup({ content: formatStatus(member) + hint, flags: 64 })
 }
 
 // ── /party link ───────────────────────────────────────────────────────────────
@@ -633,7 +811,7 @@ export async function handleBanlistModal(c: ModalContext<AppEnv>) {
       return c.followup({ content: 'Only the party owner can set the banlist.', flags: 64 })
     }
 
-    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+    await trySyncEmbed(c.env, result.data)
     const count = result.data?.banlist?.source.length ?? 0
     const msg = count === 0 ? 'Banlist cleared.' : `Banlist updated — ${count} entr${count === 1 ? 'y' : 'ies'}.`
     return c.followup({ content: msg, flags: 64 })

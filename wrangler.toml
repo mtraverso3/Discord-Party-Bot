@@ -34,7 +34,11 @@ id = "32fff28077814cbcac824ebd05c0ce66"
 # expired link codes/client tokens, admin login tokens/OIDC codes, and trims
 # audit logs.
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/15 * * * *", "* * * * *"]
+
+# The every-minute trigger drops members who lose rules approval, settles any
+# Discord role mirroring it, and clears abandoned quizzes. The rules check is
+# configured per guild from the admin UI and needs no secrets.
 
 # The PartyState Durable Object is retired — state moved to D1.
 [[migrations]]

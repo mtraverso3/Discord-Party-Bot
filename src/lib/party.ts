@@ -1,5 +1,7 @@
+import { rulesAccess } from './rules'
 import type { AppBindings, PartyData } from '../types'
 import { claimEmbedRepost, createParty, disbandParty, getParty, setEmbedMessage } from '../store/parties'
+import { getRulesGate } from '../store/rules'
 import { randomId } from './id'
 import { deleteMessage, editMessage, getChannelMessages, postMessage } from './discord'
 import { buildDisbandedEmbed, buildPartyComponents, buildPartyEmbed, isPartyEmbedMessage } from './embeds'
@@ -9,29 +11,38 @@ import { buildDisbandedEmbed, buildPartyComponents, buildPartyEmbed, isPartyEmbe
 
 // ── Embed sync ───────────────────────────────────────────────────────────────
 
-export async function syncEmbed(token: string, party: PartyData): Promise<void> {
+/**
+ * Whether this party's rules check is live. Only asked when the party wants
+ * one, so an ordinary party costs no extra query.
+ */
+async function rulesEnforced(env: AppBindings, party: PartyData): Promise<boolean> {
+  if (!party.rulesRequired) return false
+  return !!(await getRulesGate(env.DB, party.guildId))?.enabled
+}
+
+export async function syncEmbed(env: AppBindings, party: PartyData): Promise<void> {
   if (!party.embedMessageId || !party.embedChannelId) return
-  await editMessage(token, party.embedChannelId, party.embedMessageId, {
-    embeds: [buildPartyEmbed(party)],
+  await editMessage(env.DISCORD_BOT_TOKEN, party.embedChannelId, party.embedMessageId, {
+    embeds: [buildPartyEmbed(party, await rulesEnforced(env, party))],
     components: buildPartyComponents(party),
   })
 }
 
-export async function trySyncEmbed(token: string, party: PartyData | undefined): Promise<void> {
+export async function trySyncEmbed(env: AppBindings, party: PartyData | undefined): Promise<void> {
   if (!party) return
-  try { await syncEmbed(token, party) } catch (e) {
+  try { await syncEmbed(env, party) } catch (e) {
     // Usually the message was deleted manually; log so persistent failures show up.
     console.warn(`syncEmbed failed for party ${party.id} in guild ${party.guildId}:`, e)
   }
 }
 
 export async function postPartyEmbed(
-  token: string,
+  env: AppBindings,
   channelId: string,
   party: PartyData,
 ): Promise<{ id: string; channel_id: string }> {
-  return postMessage(token, channelId, {
-    embeds: [buildPartyEmbed(party)],
+  return postMessage(env.DISCORD_BOT_TOKEN, channelId, {
+    embeds: [buildPartyEmbed(party, await rulesEnforced(env, party))],
     components: buildPartyComponents(party),
   })
 }
@@ -89,6 +100,7 @@ export interface CreatePartyOpts {
   game: string
   maxSize: number
   voiceChannelId?: string
+  rulesRequired?: boolean
 }
 
 export async function createPartyAndEmbed(
@@ -114,7 +126,8 @@ export async function createPartyAndEmbed(
       },
       maxSize: opts.maxSize,
       voiceChannelId: opts.voiceChannelId,
-    })
+      rulesRequired: opts.rulesRequired,
+    }, rulesAccess(env))
     if (created.ok || created.error !== 'id_taken') break
   }
   if (!created || !created.ok) {
@@ -129,7 +142,7 @@ export async function createPartyAndEmbed(
   // party back down — otherwise it lingers until the inactivity sweep.
   let msg: { id: string }
   try {
-    msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, opts.channelId, party)
+    msg = await postPartyEmbed(env, opts.channelId, party)
   } catch (e) {
     console.error('postPartyEmbed failed:', e)
     await disbandParty(env.DB, opts.guildId, party.id).catch(() => {})
@@ -179,7 +192,7 @@ export async function repostPartyEmbed(
 
   let msg: { id: string }
   try {
-    msg = await postPartyEmbed(env.DISCORD_BOT_TOKEN, channelId, fresh)
+    msg = await postPartyEmbed(env, channelId, fresh)
   } catch (e) {
     // Nothing was posted and the old message is still there — hand the
     // pointer back so the party doesn't end up with no embed at all.
@@ -260,6 +273,23 @@ export function extractMemberInfo(interaction: any): {
     userId: user.id as string,
     username: user.username as string,
     displayName: (interaction.member?.nick ?? user.global_name ?? user.username) as string,
+  }
+}
+
+/**
+ * Whether the caller may moderate the rules check. Discord ignores
+ * default_member_permissions on subcommands, so this is enforced here rather
+ * than declared in the command definition.
+ */
+export function canModerateRules(interaction: any): boolean {
+  const perms = interaction.member?.permissions
+  if (!perms) return false
+  try {
+    const bits = BigInt(perms)
+    return (bits & 0x10000000n) === 0x10000000n   // Manage Roles
+      || (bits & 0x8n) === 0x8n                   // Administrator implies it
+  } catch {
+    return false
   }
 }
 

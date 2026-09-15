@@ -14,6 +14,7 @@ interface TemplateRow {
   max_size: number
   voice_channel_id: string | null
   banlist: string | null
+  rules_required: number
   created_at: number
   updated_at: number
 }
@@ -28,6 +29,7 @@ function toTemplate(r: TemplateRow): PartyTemplate {
     maxSize: r.max_size,
     voiceChannelId: r.voice_channel_id ?? undefined,
     banlist: r.banlist ?? undefined,
+    rulesRequired: !!r.rules_required,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -54,6 +56,7 @@ export function sanitizeTemplateInput(raw: any): {
   maxSize: number
   voiceChannelId?: string
   banlist?: string
+  rulesRequired: boolean
 } {
   const game = (raw?.game ?? 'Other').toString()
   const maxSize = Number(raw?.maxSize)
@@ -66,6 +69,7 @@ export function sanitizeTemplateInput(raw: any): {
     maxSize: Number.isInteger(maxSize) && maxSize >= 2 && maxSize <= 50 ? maxSize : 10,
     voiceChannelId: (raw?.voiceChannelId ?? '').toString() || undefined,
     banlist: banlist || undefined,
+    rulesRequired: !!raw?.rulesRequired,
   }
 }
 
@@ -82,10 +86,12 @@ export async function createTemplate(
   const now = Date.now()
   const id = randomId()
   await db.prepare(`
-    INSERT INTO templates (guild_id, id, label, name, description, game, max_size, voice_channel_id, banlist, created_at, updated_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
+    INSERT INTO templates (guild_id, id, label, name, description, game, max_size, voice_channel_id,
+                           banlist, rules_required, created_at, updated_at)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?11, ?10, ?10)
   `).bind(guildId, id, input.label, input.name, input.description, input.game,
-    input.maxSize, input.voiceChannelId ?? null, input.banlist ?? null, now).run()
+    input.maxSize, input.voiceChannelId ?? null, input.banlist ?? null, now,
+    input.rulesRequired ? 1 : 0).run()
 
   const template = await getTemplate(db, guildId, id)
   return template ? { ok: true, template } : { ok: false, error: 'Template vanished after create' }
@@ -102,10 +108,11 @@ export async function updateTemplate(
 
   await db.prepare(`
     UPDATE templates SET label = ?3, name = ?4, description = ?5, game = ?6, max_size = ?7,
-      voice_channel_id = ?8, banlist = ?9, updated_at = ?10
+      voice_channel_id = ?8, banlist = ?9, rules_required = ?11, updated_at = ?10
     WHERE guild_id = ?1 AND id = ?2
   `).bind(guildId, id, input.label, input.name, input.description, input.game,
-    input.maxSize, input.voiceChannelId ?? null, input.banlist ?? null, Date.now()).run()
+    input.maxSize, input.voiceChannelId ?? null, input.banlist ?? null, Date.now(),
+    input.rulesRequired ? 1 : 0).run()
 
   const template = await getTemplate(db, guildId, id)
   return template ? { ok: true, template } : { ok: false, error: 'Template not found' }

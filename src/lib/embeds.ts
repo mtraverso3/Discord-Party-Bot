@@ -12,7 +12,13 @@ function embedColor(party: PartyData): number {
   return 0x57f287
 }
 
-export function buildPartyEmbed(party: PartyData) {
+/**
+ * `rulesEnforced` is whether the check is actually being applied to this party
+ * right now — the party asked for it *and* the server still runs one. It is
+ * separate from party.rulesRequired, which is the party's stored setting and
+ * survives the server switching the feature off.
+ */
+export function buildPartyEmbed(party: PartyData, rulesEnforced = party.rulesRequired) {
   const isFull = party.members.length >= party.maxSize
   const statusLabel = party.isClosed ? '🔒 CLOSED' : isFull ? '🟡 FULL' : '🟢 OPEN'
 
@@ -56,7 +62,9 @@ export function buildPartyEmbed(party: PartyData) {
     color: embedColor(party),
     fields,
     footer: {
-      text: `${party.game} · ${statusLabel} · ${partyIdFooter(party)}`,
+      text: `${party.game} · ${statusLabel}`
+        + (rulesEnforced ? ' · 🔒 Rules check required' : '')
+        + ` · ${partyIdFooter(party)}`,
     },
     timestamp: new Date(party.createdAt).toISOString(),
   }
@@ -146,7 +154,7 @@ export function buildHelpEmbed(page: number) {
         },
         {
           name: 'End',
-          value: '`/party disband` — end the party\n*Parties auto-disband when idle — about 2h if solo, 6h with a few players, up to 12h when full or with a queue.*',
+          value: '`/party rules-status` — check your own rules approval\n`/party disband` — end the party\n*Parties auto-disband when idle — about 2h if solo, 6h with a few players, up to 12h when full or with a queue.*',
         },
       ],
       footer: { text: 'Page 2 / 3 · Owner Controls' },

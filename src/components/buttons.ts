@@ -1,3 +1,4 @@
+import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
 import type { ComponentContext } from 'discord-hono'
 import type { AppEnv } from '../types'
 import { extractMemberInfo, trySyncEmbed } from '../lib/party'
@@ -35,34 +36,35 @@ async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boole
     if (!party) return c.followup({ content: 'This party no longer exists.', flags: 64 })
 
     const ign = await getUserIgn(c.env.DB, userId, party.game)
-    const result = await parties.joinParty(c.env.DB, guildId, partyId, { userId, username, displayName, ign })
+    const result = await parties.joinParty(c.env.DB, guildId, partyId, { userId, username, displayName, ign }, rulesAccess(c.env))
 
     if (result.status === 'not_found')      return c.followup({ content: 'This party no longer exists.', flags: 64 })
     if (result.status === 'in_other_party') return c.followup({ content: "You're already in another party. Leave it first.", flags: 64 })
     if (result.status === 'already_member') return c.followup({ content: "You're already in this party.", flags: 64 })
     if (result.status === 'already_queued') return c.followup({ content: "You're already in the queue for this party.", flags: 64 })
 
-    await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+    await trySyncEmbed(c.env, result.data)
 
     const data = result.data!
+    const warning = await exemptFromRules(c.env, guildId, userId, data.rulesRequired) ? RULES_EXEMPT_WARNING : ''
     if (result.status === 'joined') {
       return c.followup({
-        content: fromQueueButton
+        content: (fromQueueButton
           ? `A spot was open — you joined **${data.name}** directly!`
-          : `You joined **${data.name}**!`,
+          : `You joined **${data.name}**!`) + warning,
         flags: 64,
       })
     }
     const pos = data.queue.findIndex(q => q.userId === userId) + 1
     return c.followup({
-      content: fromQueueButton
+      content: (fromQueueButton
         ? `You're in the queue for **${data.name}** at position ${pos}.`
-        : `**${data.name}** is ${data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${pos}.`,
+        : `**${data.name}** is ${data.isClosed ? 'closed' : 'full'} — you're in the queue at position ${pos}.`) + warning,
       flags: 64,
     })
   } catch (e) {
     console.error(`party button error (party ${partyId}):`, e)
-    return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+    return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
   }
 }
 
@@ -90,7 +92,7 @@ export async function handleAwayButton(c: ComponentContext<AppEnv>) {
         return c.followup({ content: 'Only party members can set a BRB marker — join first.', flags: 64 })
       }
 
-      await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+      await trySyncEmbed(c.env, result.data)
 
       const msg = result.away
         ? "You're marked as away 💤 — click **💤 BRB** again when you're back."
@@ -98,7 +100,7 @@ export async function handleAwayButton(c: ComponentContext<AppEnv>) {
       return c.followup({ content: msg, flags: 64 })
     } catch (e) {
       console.error(`party button error (party ${partyId}):`, e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+      return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
     }
   })
 }
@@ -112,7 +114,7 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
     const { userId } = extractMemberInfo(c.interaction)
 
     try {
-      const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId)
+      const result = await parties.leaveParty(c.env.DB, guildId, partyId, userId, 'left', rulesAccess(c.env))
 
       if (result.status === 'not_found') return c.followup({ content: 'This party no longer exists.', flags: 64 })
       if (result.status === 'is_owner') {
@@ -122,7 +124,7 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
         return c.followup({ content: "You're not in this party.", flags: 64 })
       }
 
-      await trySyncEmbed(c.env.DISCORD_BOT_TOKEN, result.data)
+      await trySyncEmbed(c.env, result.data)
 
       const msg = result.status === 'left'
         ? `You left **${result.data!.name}**.`
@@ -130,7 +132,7 @@ export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
       return c.followup({ content: msg, flags: 64 })
     } catch (e) {
       console.error(`party button error (party ${partyId}):`, e)
-      return c.followup({ content: 'Something went wrong. Please try again.', flags: 64 })
+      return c.followup({ content: rulesErrorMessage(e) ?? 'Something went wrong. Please try again.', flags: 64 })
     }
   })
 }

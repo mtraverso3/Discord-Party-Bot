@@ -3,3 +3,4 @@ node_modules
 .wrangler
 dist
 build
+.dev.vars

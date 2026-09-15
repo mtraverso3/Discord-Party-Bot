@@ -25,6 +25,7 @@ export interface BanList {
 }
 
 export interface Party {
+  rulesRequired: boolean
   id: string
   guildId: string
   name: string
@@ -46,6 +47,7 @@ export interface Party {
 
 export interface PartyTemplate {
   id: string
+  rulesRequired: boolean
   label: string
   name: string
   description: string
