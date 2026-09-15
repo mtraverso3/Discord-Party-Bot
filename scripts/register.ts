@@ -177,6 +177,11 @@ const commands = [
           },
           {
             type: 1,
+            name: 'quiz',
+            description: 'Take the rules check now, privately — no need to find the Start button',
+          },
+          {
+            type: 1,
             name: 'status',
             description: 'Privately show your approval status, revocations, and completed checks',
           },

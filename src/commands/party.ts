@@ -1,5 +1,5 @@
 import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
-import { changeApproval, formatStatus, postRulesMessage, renderRulesPage } from './rules'
+import { beginQuiz, changeApproval, formatStatus, postRulesMessage, renderRulesPage } from './rules'
 import { approveManually, getMember, getRulesConfig, getRulesGate, hasPublishedRules, memberHistory } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
@@ -82,6 +82,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
         case 'rules-read':    return await rulesView(c, guildId, userId)
+        case 'rules-quiz':    return await rulesQuiz(c, guildId, userId)
         case 'rules-status':  return await rulesStatus(c, guildId, userId)
         case 'rules-post':    return await rulesPost(c, guildId)
         case 'rules-approve': return await rulesApprove(c, guildId, opts)
@@ -613,6 +614,14 @@ async function rulesView(c: CommandContext<AppEnv>, guildId: string, userId: str
     getMember(c.env.DB, guildId, userId),
   ])
   return c.followup(renderRulesPage(config, 0, member.state === 'approved'))
+}
+
+/**
+ * `/party rules quiz` — take the check on demand, rather than having to find
+ * the Start button someone posted in a channel months ago.
+ */
+async function rulesQuiz(c: CommandContext<AppEnv>, guildId: string, userId: string) {
+  return c.followup(await beginQuiz(c.env, guildId, userId))
 }
 
 /** Shared guard: Discord will not enforce Manage Roles on a subcommand for us. */
