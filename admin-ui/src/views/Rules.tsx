@@ -14,6 +14,7 @@ interface RulesConfig {
   pages: { title: string; text: string }[]
   questions: { text: string; correct: string[]; incorrect: string[]; explanation: string }[]
   agreement: string
+  passingScore: number
 }
 interface Status {
   online: boolean; channelId: string; queueConnected: boolean; defaultRequired: boolean
@@ -150,6 +151,9 @@ export function Rules() {
   if (error) return <div className="space-y-3"><ErrorNote>{error}</ErrorNote><Button variant="outline" onClick={() => void refresh()}>Retry connection</Button></div>
   if (!status || !draft) return <Spinner />
 
+  // What the percentage works out to, so the bar is stated in questions.
+  const passMark = Math.ceil((draft.passingScore / 100) * draft.questions.length)
+
   return <div className="space-y-5">
     <Card>
       <CardHeader><CardTitle>Rules verification</CardTitle><CardDescription>Members prove they have read the rules before they can join a party. The check runs in this bot.</CardDescription></CardHeader>
@@ -276,10 +280,26 @@ export function Rules() {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Quiz · {draft.questions.length === 0 ? 'no questions' : `${draft.questions.length} question${draft.questions.length === 1 ? '' : 's'}`}</CardTitle><CardDescription>As many as you like, and none is allowed — members then read the rules and go straight to the agreement. The six marked as core checks are the original set, kept as a hint rather than a rule. Each question needs 1–4 correct answers and up to 4 incorrect ones; members pick one, positions are shuffled, and the explanation is shown either way.</CardDescription></CardHeader>
-        <CardContent className="space-y-3">{draft.questions.map((question, i) => {
+        <CardHeader><CardTitle>Quiz · {draft.questions.length === 0 ? 'no questions' : `${draft.questions.length} question${draft.questions.length === 1 ? '' : 's'}`}</CardTitle><CardDescription>As many as you like, and none is allowed — members then read the rules and go straight to the agreement. Each question needs 1–4 correct answers and up to 4 incorrect ones; members pick one, positions are shuffled, and the explanation is shown either way.</CardDescription></CardHeader>
+        <CardContent className="space-y-3">
+          <Label className="max-w-md">Passing score
+            <div className="flex items-center gap-2">
+              <Input
+                type="number" min={0} max={100} value={draft.passingScore}
+                onChange={e => setDraft({ ...draft, passingScore: Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0))) })}
+              />
+              <span className="text-sm text-muted-foreground">%</span>
+            </div>
+            <span className="text-xs font-normal text-muted-foreground">
+              {draft.questions.length === 0
+                ? 'No questions, so everyone who reads the rules and agrees passes.'
+                : `${passMark} of ${draft.questions.length} question${draft.questions.length === 1 ? '' : 's'} right. `
+                  + 'Each is asked once; below the bar they are told their score and can start again.'}
+            </span>
+          </Label>
+          {draft.questions.map((question, i) => {
           const update = (patch: Partial<RulesConfig['questions'][number]>) => setDraft({ ...draft, questions: draft.questions.map((q, j) => i === j ? { ...q, ...patch } : q) })
-          return <details key={i} className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">{i + 1}. {question.text || 'New question'} {i < 6 && <span className="ml-1 text-xs text-muted-foreground">Core check</span>}</summary>
+          return <details key={i} className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">{i + 1}. {question.text || 'New question'}</summary>
             <div className="mt-3 space-y-3"><Label>Question<Input maxLength={600} value={question.text} onChange={e => update({ text: e.target.value })} /></Label>
               {(['correct', 'incorrect'] as const).map(group => (
                 <div key={group} className="space-y-2">

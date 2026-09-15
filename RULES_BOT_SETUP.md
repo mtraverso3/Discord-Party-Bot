@@ -45,10 +45,15 @@ message only they can see, which is then edited in place through the rules
 pages, the quiz, and the agreement — never a wall of new messages.
 
 Answers are buttons labelled A onward. Positions are reshuffled every time a
-question is drawn, so a leaked answer key of letters is worthless. A wrong
-answer is explained and can be retried, with no penalty and no attempt limit —
-the quiz is a teaching gate, not an exam. A correct answer is explained too,
-heading whatever comes next.
+question is drawn, so a leaked answer key of letters is worthless. Every answer
+is explained, right or wrong, so the quiz still teaches on the way past.
+
+Each question is asked once, and the run is graded at the end against the
+**passing score** set in the Quiz card — a percentage, 100 by default. Below
+it, the member is told their score and can start again immediately: there is no
+attempt limit, nothing is recorded against them, and a failed run does not
+touch their revocation count. Set it to 0 to let anyone through who reads the
+rules and agrees.
 
 `/party rules status` shows a member their own status at any time.
 

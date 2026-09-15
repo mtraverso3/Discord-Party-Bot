@@ -171,7 +171,7 @@ export function renderStep(config: RulesConfig, session: RulesSession) {
 
   return {
     embeds: [{
-      title: total === 0 ? 'Final agreement' : `${total}/${total} correct — final agreement`,
+      title: total === 0 ? 'Final agreement' : `${session.correct}/${total} correct — final agreement`,
       // Carries the last question's explanation, which nothing else would show.
       description: ((session.feedback ? session.feedback + '\n\n' : '') + config.agreement)
         .slice(0, EMBED_DESCRIPTION_MAX),
@@ -232,7 +232,7 @@ export async function beginQuiz(env: AppBindings, guildId: string, userId: strin
     page: 0, question: 0, step: 1,
     generation: member.generation, version: config.version,
     answers: config.pages.length === 0 ? shuffleAnswers(config, 0) : [],
-    feedback: '', updatedAt: Date.now(),
+    correct: 0, feedback: '', updatedAt: Date.now(),
   }
   await saveSession(env.DB, guildId, userId, session)
   return { ...renderStep(config, session), flags: 64 }
@@ -290,16 +290,15 @@ export async function handleRulesStep(c: ComponentContext<AppEnv>) {
       const picked = session.answers[Number(action.slice(1))]
       if (!picked) return c.resUpdate(renderStep(config, session))
       const question = config.questions[session.question]!
-      // The explanation is shown either way: heading the retry when wrong,
-      // heading whatever comes next when right.
-      if (picked.correct) {
-        next.feedback = `**Correct.** ${question.explanation}`
-        next.question++
-        next.answers = shuffleAnswers(config, next.question)
-      } else {
-        next.feedback = `**Please try again.** ${question.explanation}`
-        next.answers = shuffleAnswers(config, session.question)
-      }
+      // Each question is asked once and the run is graded at the end against
+      // the server's passing score. The explanation is shown either way, so a
+      // wrong answer still teaches before the quiz moves on.
+      next.feedback = picked.correct
+        ? `**Correct.** ${question.explanation}`
+        : `**Incorrect.** ${question.explanation}`
+      if (picked.correct) next.correct++
+      next.question++
+      next.answers = shuffleAnswers(config, next.question)
     } else if (action === 'agree') {
       if (next.page < config.pages.length || next.question < config.questions.length) {
         return c.resUpdate(renderStep(config, session))
@@ -315,11 +314,33 @@ export async function handleRulesStep(c: ComponentContext<AppEnv>) {
   }
 }
 
-/** Record the pass. Approval is ours, so it takes effect at once. */
+/**
+ * The percentage of the quiz answered correctly. A quiz with no questions is
+ * a pass by definition — the member read the rules and agreed, which is all
+ * there was to do.
+ */
+export function scoreOf(session: { correct: number }, config: RulesConfig): number {
+  if (config.questions.length === 0) return 100
+  return Math.round((session.correct / config.questions.length) * 100)
+}
+
+/** Grade the run, and record the pass. Approval is ours, so it is immediate. */
 async function finish(
   c: ComponentContext<AppEnv>, guildId: string, userId: string,
   session: RulesSession, config: RulesConfig,
 ) {
+  const score = scoreOf(session, config)
+  if (score < config.passingScore) {
+    await clearSession(c.env.DB, guildId, userId)
+    return c.resUpdate({
+      content: `You scored **${score}%**, and this server asks for **${config.passingScore}%**.`
+        + `\nYou answered ${session.correct} of ${config.questions.length} correctly.`
+        + ' Nothing is held against you — start the check again whenever you like.',
+      embeds: [],
+      components: [],
+    })
+  }
+
   const granted = await grantApproval(c.env.DB, guildId, userId, session.generation, config.version)
   if (!granted) {
     return c.resUpdate({ content: 'This rules check is no longer valid. Start a fresh one.', embeds: [], components: [] })
@@ -327,8 +348,10 @@ async function finish(
   await clearSession(c.env.DB, guildId, userId)
 
   const member = await getMember(c.env.DB, guildId, userId)
+  const scoreLine = config.questions.length > 0 ? `\nScored **${score}%**.` : ''
   return c.resUpdate({
-    content: `Approved — you can now join the queue.\nCompleted checks: **${member.completions}**`
+    content: `Approved — you can now join the queue.${scoreLine}`
+      + `\nCompleted checks: **${member.completions}**`
       + ` · Lifetime revocations: **${member.revocations}**`,
     embeds: [],
     components: [],
