@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleParty } from '../src/commands/party'
 import { handleRulesPage } from '../src/commands/rules'
 import { publishRulesConfig } from '../src/store/rules'
-import { getMember, memberHistory, saveRulesGate } from '../src/store/rules'
+import { approveManually, getMember, memberHistory, saveRulesGate } from '../src/store/rules'
 import { rulesAccess } from '../src/lib/rules'
 
 // The rules-* moderator commands. Discord does not enforce
@@ -54,6 +54,26 @@ async function run(guildId: string, name: string, opts: Record<string, any> = {}
   c.resDefer = async (fn: any) => fn(c)
   await handleParty(c)
   return (sent.at(-1)?.content ?? '') as string
+}
+
+/** As `run`, but returns the whole payload — the quiz replies with embeds. */
+async function runRaw(guildId: string, name: string, permissions = NO_PERMS) {
+  const sent: any[] = []
+  const c: any = {
+    env,
+    interaction: {
+      guild_id: guildId,
+      channel_id: '700000000000000009',
+      member: { user: { id: MOD, username: 'mod' }, permissions },
+      data: { options: [{ type: 2, name: 'rules', options: [{ type: 1, name: name.slice(6), options: [] }] }] },
+    },
+    followup: (payload: any) => { sent.push(payload); return payload },
+  }
+  c.ephemeral = () => c
+  c.res = (payload: any) => { sent.push(payload); return payload }
+  c.resDefer = async (fn: any) => fn(c)
+  await handleParty(c)
+  return sent.at(-1)
 }
 
 const gated = async (guildId: string, channelId?: string) =>
@@ -309,4 +329,50 @@ describe('rules moderator commands', () => {
       expect(await run(untouched, 'rules-read', {}, NO_PERMS)).toContain("hasn't set up a rules check")
     })
   })
+  describe('/party rules quiz — starting the check on demand', () => {
+    const RULES = {
+      pages: [{ title: 'Conduct', text: 'Be decent.' }],
+      questions: [],
+      agreement: 'I agree.',
+    }
+
+    it('opens the check at the first rules page', async () => {
+      const g = guild()
+      await gated(g)
+      await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+
+      const payload = await runRaw(g, 'rules-quiz')
+      expect(payload.embeds[0].title).toBe('Conduct')
+      expect(payload.flags).toBe(64)
+      // A session exists now, so the button has something to advance.
+      expect(payload.components[0].components[0].label).toContain('Continue')
+    })
+
+    it('needs no party, and no posted Start button', async () => {
+      const g = guild()
+      await gated(g)
+      await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+
+      const payload = await runRaw(g, 'rules-quiz')
+      expect(payload.embeds).toBeTruthy()
+      // Nothing had to be posted to Discord to make this reachable.
+      expect(discord).not.toHaveBeenCalled()
+    })
+
+    it('refuses when the server has the check switched off', async () => {
+      const off = guild()
+      await publishRulesConfig(env.DB, off, RULES, 1, false, 'admin')
+      expect((await runRaw(off, 'rules-quiz')).content).toContain('not switched on')
+    })
+
+    it('tells an approved member there is nothing to take', async () => {
+      const g = guild()
+      await gated(g)
+      await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+      await approveManually(env.DB, g, MOD, 'admin', 'Vouched for', 1)
+
+      expect((await runRaw(g, 'rules-quiz')).content).toContain('already approved')
+    })
+  })
+
 })

@@ -210,6 +210,34 @@ function shuffleAnswers(config: RulesConfig, index: number): RulesSession['answe
 
 // ── Start ────────────────────────────────────────────────────────────────────
 
+/**
+ * Open someone's rules check at step one and return that first step, always
+ * ephemeral. Shared by the Start button and `/party rules quiz` so the two
+ * enter on identical terms — starting again simply replaces the session,
+ * which is what makes a half-finished check recoverable.
+ */
+export async function beginQuiz(env: AppBindings, guildId: string, userId: string) {
+  const gate = await getRulesGate(env.DB, guildId)
+  if (!gate?.enabled) {
+    return { content: 'The rules check is not switched on for this server.', flags: 64 }
+  }
+
+  const member = await getMember(env.DB, guildId, userId)
+  if (member.state === 'approved') {
+    return { content: "You're already approved — you can join the queue.", flags: 64 }
+  }
+
+  const config = await getRulesConfig(env.DB, guildId)
+  const session: RulesSession = {
+    page: 0, question: 0, step: 1,
+    generation: member.generation, version: config.version,
+    answers: config.pages.length === 0 ? shuffleAnswers(config, 0) : [],
+    feedback: '', updatedAt: Date.now(),
+  }
+  await saveSession(env.DB, guildId, userId, session)
+  return { ...renderStep(config, session), flags: 64 }
+}
+
 export async function handleRulesStart(c: ComponentContext<AppEnv>) {
   return c.ephemeral().resDefer(async (c) => {
     const guildId = c.interaction.guild_id
@@ -217,24 +245,7 @@ export async function handleRulesStart(c: ComponentContext<AppEnv>) {
     const { userId } = extractMemberInfo(c.interaction)
 
     try {
-      const gate = await getRulesGate(c.env.DB, guildId)
-      if (!gate?.enabled) {
-        return c.followup({ content: 'The rules check is not switched on for this server.', flags: 64 })
-      }
-
-      const member = await getMember(c.env.DB, guildId, userId)
-      if (member.state === 'approved') {
-        return c.followup({ content: "You're already approved — you can join the queue.", flags: 64 })
-      }
-      const config = await getRulesConfig(c.env.DB, guildId)
-      const session: RulesSession = {
-        page: 0, question: 0, step: 1,
-        generation: member.generation, version: config.version,
-        answers: config.pages.length === 0 ? shuffleAnswers(config, 0) : [],
-        feedback: '', updatedAt: Date.now(),
-      }
-      await saveSession(c.env.DB, guildId, userId, session)
-      return c.followup({ ...renderStep(config, session), flags: 64 })
+      return c.followup(await beginQuiz(c.env, guildId, userId))
     } catch (e) {
       console.error('rules start failed:', e)
       return c.followup({ content: 'Could not start the rules check. Please try again.', flags: 64 })
