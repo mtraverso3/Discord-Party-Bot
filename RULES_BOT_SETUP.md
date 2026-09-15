@@ -50,7 +50,7 @@ answer is explained and can be retried, with no penalty and no attempt limit —
 the quiz is a teaching gate, not an exam. A correct answer is explained too,
 heading whatever comes next.
 
-`/party rules` shows a member their own status at any time.
+`/party rules status` shows a member their own status at any time.
 
 ## What is gated
 
@@ -93,13 +93,13 @@ client, where there is no interaction to read permissions from.
 
 | Command | Who can use it | What it does |
 | --- | --- | --- |
-| `/party rules` | Everyone | Privately shows the rules, one page at a time, with Previous and Next buttons. |
-| `/party rules-post` | Manage Roles | Posts the Start rules check button in the configured channel. |
-| `/party rules-status` | Everyone | Privately shows your approval status, lifetime revocations, and completed verifications. |
-| `/party rules-approve member reason` | Manage Roles | Approves a member without the quiz. Recorded as the moderator's decision; their completed-check count is not increased. |
-| `/party rules-history member` | Manage Roles | Shows a member's counters and their latest 10 history entries. |
-| `/party rules-revoke member reason` | Manage Roles | Removes approval and requires a fresh quiz. Increases the lifetime revocation count when an active approval is revoked. |
-| `/party rules-reset member reason` | Manage Roles | Removes approval and requires a fresh quiz without increasing the disciplinary count. |
+| `/party rules read` | Everyone | Privately shows the rules, one page at a time, with Previous and Next buttons. |
+| `/party rules post` | Manage Roles | Posts the Start rules check button in the configured channel. |
+| `/party rules status` | Everyone | Privately shows your approval status, lifetime revocations, and completed verifications. |
+| `/party rules approve member reason` | Manage Roles | Approves a member without the quiz. Recorded as the moderator's decision; their completed-check count is not increased. |
+| `/party rules history member` | Manage Roles | Shows a member's counters and their latest 10 history entries. |
+| `/party rules revoke member reason` | Manage Roles | Removes approval and requires a fresh quiz. Increases the lifetime revocation count when an active approval is revoked. |
+| `/party rules reset member reason` | Manage Roles | Removes approval and requires a fresh quiz without increasing the disciplinary count. |
 
 Discord does not enforce permissions on subcommands, so the Manage Roles
 requirement is checked by the bot when the command runs. Administrator counts
@@ -107,7 +107,7 @@ as Manage Roles. Every reply is private to whoever ran it.
 
 ## Moderation
 
-Approval normally comes from taking the check, but **`/party rules-approve`** —
+Approval normally comes from taking the check, but **`/party rules approve`** —
 or **Approve without the quiz** on the member lookup in the dashboard — lets a
 moderator vouch for someone directly — useful for people who have clearly
 read the rules, or to lift a revocation without making them sit the quiz again.

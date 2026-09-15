@@ -62,7 +62,7 @@ export function startMessage(config: RulesConfig) {
     : 'and agree'
   return {
     content: `**Rules & Conduct**\nRead all rules, ${steps} to get queue access. The check is private —`
-      + ' only you can see it. Use `/party rules-status` to check your status.',
+      + ' only you can see it. Use `/party rules status` to check your status.',
     components: buildStartComponents(),
   }
 }
@@ -122,7 +122,7 @@ export async function handleRulesPage(c: ComponentContext<AppEnv>) {
     return c.resUpdate(payload)
   } catch (e) {
     console.error('rules page failed:', e)
-    return c.resUpdate({ content: 'Could not load that page. Try `/party rules` again.', embeds: [], components: [] })
+    return c.resUpdate({ content: 'Could not load that page. Try `/party rules read` again.', embeds: [], components: [] })
   }
 }
 
@@ -350,7 +350,7 @@ export async function changeApproval(
   }
 }
 
-/** Text for `/party rules-status`, and for the admin panel's member lookup. */
+/** Text for `/party rules status`, and for the admin panel's member lookup. */
 export function formatStatus(member: { state: string; completions: number; revocations: number; version: number | null }): string {
   const label = member.state === 'approved' ? 'Approved' : 'Not approved'
   return `**${label}**\nCompleted checks: **${member.completions}** · Lifetime revocations: **${member.revocations}**`
