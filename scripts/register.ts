@@ -158,57 +158,68 @@ const commands = [
         name: 'bump',
         description: 'Repost the party embed to the bottom of this channel (owner only)',
       },
-      // Anyone may read the rules and check their own status.
+      // A subcommand *group* (type 2), not seven more subcommands: Discord
+      // caps a command at 25 options and /party was over. A group costs one
+      // slot and holds 25 of its own.
+      //
+      // `read` and `status` are for everyone. The rest gate on Manage Roles at
+      // runtime — Discord ignores default_member_permissions below the top
+      // level, so a group cannot hide them either.
       {
-        type: 1,
+        type: 2,
         name: 'rules',
-        description: "Read this server's rules, privately, a page at a time",
-      },
-      {
-        type: 1,
-        name: 'rules-status',
-        description: 'Privately show your approval status, revocations, and completed checks',
-      },
-      // The rest gate on Manage Roles at runtime: Discord ignores
-      // default_member_permissions on subcommands.
-      {
-        type: 1,
-        name: 'rules-post',
-        description: 'Post the Start rules check button in the configured channel (Manage Roles)',
-      },
-      {
-        type: 1,
-        name: 'rules-approve',
-        description: 'Approve a member without the quiz, vouching for them (Manage Roles)',
+        description: "Read the server rules, check your status, or moderate approvals",
         options: [
-          { type: 6, name: 'member', description: 'The member to approve', required: true },
-          { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
-        ],
-      },
-      {
-        type: 1,
-        name: 'rules-history',
-        description: "Show a member's counters and their latest history entries (Manage Roles)",
-        options: [
-          { type: 6, name: 'member', description: 'The member to look up', required: true },
-        ],
-      },
-      {
-        type: 1,
-        name: 'rules-revoke',
-        description: 'Remove approval and require a fresh check, counting a revocation (Manage Roles)',
-        options: [
-          { type: 6, name: 'member', description: 'The member to revoke', required: true },
-          { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
-        ],
-      },
-      {
-        type: 1,
-        name: 'rules-reset',
-        description: 'Require a fresh check without adding a disciplinary count (Manage Roles)',
-        options: [
-          { type: 6, name: 'member', description: 'The member to reset', required: true },
-          { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
+          {
+            type: 1,
+            name: 'read',
+            description: "Read this server's rules, privately, a page at a time",
+          },
+          {
+            type: 1,
+            name: 'status',
+            description: 'Privately show your approval status, revocations, and completed checks',
+          },
+          {
+            type: 1,
+            name: 'post',
+            description: 'Post the Start rules check button in the configured channel (Manage Roles)',
+          },
+          {
+            type: 1,
+            name: 'approve',
+            description: 'Approve a member without the quiz, vouching for them (Manage Roles)',
+            options: [
+              { type: 6, name: 'member', description: 'The member to approve', required: true },
+              { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
+            ],
+          },
+          {
+            type: 1,
+            name: 'history',
+            description: "Show a member's counters and their latest history entries (Manage Roles)",
+            options: [
+              { type: 6, name: 'member', description: 'The member to look up', required: true },
+            ],
+          },
+          {
+            type: 1,
+            name: 'revoke',
+            description: 'Remove approval and require a fresh check, counting a revocation (Manage Roles)',
+            options: [
+              { type: 6, name: 'member', description: 'The member to revoke', required: true },
+              { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
+            ],
+          },
+          {
+            type: 1,
+            name: 'reset',
+            description: 'Require a fresh check without adding a disciplinary count (Manage Roles)',
+            options: [
+              { type: 6, name: 'member', description: 'The member to reset', required: true },
+              { type: 3, name: 'reason', description: 'Recorded against them; shown in their history', required: true },
+            ],
+          },
         ],
       },
       {
@@ -233,7 +244,33 @@ const commands = [
   },
 ]
 
+/**
+ * Discord allows 25 options on a command, and 25 subcommands inside a group.
+ * Going over is a 400 from the API, which previously surfaced as a failed
+ * deploy step well after everything else had shipped. Fail here instead, with
+ * a message that says what to do about it.
+ */
+function checkLimits(cmds: any[]) {
+  for (const cmd of cmds) {
+    const opts: any[] = cmd.options ?? []
+    if (opts.length > 25) {
+      throw new Error(
+        `/${cmd.name} has ${opts.length} options — Discord allows 25. `
+        + 'Move some subcommands into a subcommand group (type 2).',
+      )
+    }
+    for (const opt of opts) {
+      const nested: any[] = opt.options ?? []
+      if (opt.type === 2 && nested.length > 25) {
+        throw new Error(`/${cmd.name} ${opt.name} has ${nested.length} subcommands — Discord allows 25.`)
+      }
+    }
+  }
+}
+
 async function main() {
+  checkLimits(commands)
+
   const res = await fetch(endpoint, {
     method: 'PUT',
     headers: {

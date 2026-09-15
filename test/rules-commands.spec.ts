@@ -28,16 +28,24 @@ beforeEach(() => {
 })
 afterEach(() => { globalThis.fetch = original })
 
-/** Run one /party subcommand and return whatever it replied with. */
+/**
+ * Run one /party subcommand and return whatever it replied with. A `rules-*`
+ * name is sent the way Discord really sends it — nested inside the `rules`
+ * subcommand group — so the dispatcher's unwrapping is covered here too.
+ */
 async function run(guildId: string, name: string, opts: Record<string, any> = {}, permissions = MANAGE_ROLES) {
   const sent: any[] = []
+  const args = Object.entries(opts).map(([k, v]) => ({ name: k, value: v }))
+  const options = name.startsWith('rules-')
+    ? [{ type: 2, name: 'rules', options: [{ type: 1, name: name.slice(6), options: args }] }]
+    : [{ type: 1, name, options: args }]
   const c: any = {
     env,
     interaction: {
       guild_id: guildId,
       channel_id: '700000000000000009',
       member: { user: { id: MOD, username: 'mod' }, permissions },
-      data: { options: [{ name, options: Object.entries(opts).map(([k, v]) => ({ name: k, value: v })) }] },
+      data: { options },
     },
     followup: (payload: any) => { sent.push(payload); return payload },
   }
@@ -194,7 +202,7 @@ describe('rules moderator commands', () => {
     expect(text).toContain('Start rules check')
   })
 
-  describe('/party rules — the read-only viewer', () => {
+  describe('/party rules read — the read-only viewer', () => {
     const RULES = {
       pages: [
         { title: 'First page', text: 'Read this first.' },
@@ -235,7 +243,7 @@ describe('rules moderator commands', () => {
         interaction: {
           guild_id: g,
           member: { user: { id: MOD, username: 'mod' }, permissions: NO_PERMS },
-          data: { options: [{ name: 'rules', options: [] }] },
+          data: { options: [{ type: 2, name: 'rules', options: [{ type: 1, name: 'read', options: [] }] }] },
         },
         followup: (p: any) => { sent.push(p); return p },
       }
@@ -298,7 +306,7 @@ describe('rules moderator commands', () => {
 
     it('does not show the built-in sample rules as if they were the server’s', async () => {
       const untouched = guild()
-      expect(await run(untouched, 'rules', {}, NO_PERMS)).toContain("hasn't set up a rules check")
+      expect(await run(untouched, 'rules-read', {}, NO_PERMS)).toContain("hasn't set up a rules check")
     })
   })
 })

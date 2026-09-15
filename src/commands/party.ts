@@ -19,12 +19,23 @@ import { buildCreateModalJSON, buildEditModalJSON, createModalRules, parseCreate
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * The invoked subcommand and its options. `rules` is registered as a
+ * subcommand *group*, so `/party rules post` arrives nested one level deeper;
+ * it is flattened back to 'rules-post' — the names the switch below already
+ * dispatches on, and distinct from the unrelated top-level 'approve'.
+ */
 function sub(c: CommandContext<AppEnv>): { name: string; opts: Record<string, any> } {
   const options = (c.interaction.data as any).options as any[]
-  const subCmd = options?.[0]
+  let subCmd = options?.[0]
+  let prefix = ''
+  if (subCmd?.type === 2) {
+    prefix = `${subCmd.name}-`
+    subCmd = subCmd.options?.[0]
+  }
   const opts: Record<string, any> = {}
   for (const o of subCmd?.options ?? []) opts[o.name] = o.value
-  return { name: subCmd?.name ?? '', opts }
+  return { name: subCmd ? prefix + subCmd.name : '', opts }
 }
 
 /** The optional `rules:` True/False on /party create and /party edit. */
@@ -70,7 +81,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
         case 'disband': return await disband(c, guildId, userId)
         case 'clear':   return await clearAll(c, guildId)
         case 'bump':    return await bump(c, guildId, channelId, userId)
-        case 'rules':         return await rulesView(c, guildId, userId)
+        case 'rules-read':    return await rulesView(c, guildId, userId)
         case 'rules-status':  return await rulesStatus(c, guildId, userId)
         case 'rules-post':    return await rulesPost(c, guildId)
         case 'rules-approve': return await rulesApprove(c, guildId, opts)
