@@ -136,5 +136,6 @@ export const DEFAULT_RULES: RulesConfig = {
       "explanation": "No defensiveness, flaming, or passive aggression. Report unresolved issues to the host promptly."
     }
   ],
-  "agreement": "I have read the complete Arena In-House Rules & Conduct and agree to follow them.\n\nI understand that these games prioritize content, creativity, and lobby pacing while still requiring honest competition. I will not intentionally let the content creators' team win.\n\nI will follow the gameplay restrictions, conduct expectations, voting instructions, assigned champion ban, and leave/stay directions. If a rule is unclear, I will ask before joining the queue."
+  "agreement": "I have read the complete Arena In-House Rules & Conduct and agree to follow them.\n\nI understand that these games prioritize content, creativity, and lobby pacing while still requiring honest competition. I will not intentionally let the content creators' team win.\n\nI will follow the gameplay restrictions, conduct expectations, voting instructions, assigned champion ban, and leave/stay directions. If a rule is unclear, I will ask before joining the queue.",
+  "passingScore": 100
 }

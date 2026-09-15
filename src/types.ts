@@ -65,6 +65,8 @@ export interface RulesConfig {
   pages: RulesPage[]
   questions: RulesQuestion[]
   agreement: string
+  /** Percentage of the quiz that must be right to pass. 100 by default. */
+  passingScore: number
 }
 
 export type ApprovalState = 'unapproved' | 'approved'
@@ -105,6 +107,8 @@ export interface RulesSession {
   version: number
   /** The answers as shown, already shuffled, so grading matches the buttons. */
   answers: Array<{ text: string; correct: boolean }>
+  /** How many questions have been answered correctly so far. */
+  correct: number
   feedback: string
   updatedAt: number
 }

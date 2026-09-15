@@ -19,13 +19,14 @@ export const SESSION_TTL_MS = 15 * 60 * 1000
 
 export async function getRulesConfig(db: D1Database, guildId: string): Promise<RulesConfig> {
   const row = await db.prepare('SELECT * FROM rules_config WHERE guild_id = ?1').bind(guildId)
-    .first<{ version: number; pages: string; questions: string; agreement: string }>()
+    .first<{ version: number; pages: string; questions: string; agreement: string; passing_score: number }>()
   if (!row) return structuredClone(DEFAULT_RULES)
   return {
     version: row.version,
     pages: JSON.parse(row.pages),
     questions: JSON.parse(row.questions),
     agreement: row.agreement,
+    passingScore: row.passing_score,
   }
 }
 
@@ -63,12 +64,14 @@ export async function publishRulesConfig(
   const now = Date.now()
   const config = { ...validated.config, version }
   await db.prepare(`
-    INSERT INTO rules_config (guild_id, version, pages, questions, agreement, updated_at, updated_by)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+    INSERT INTO rules_config
+      (guild_id, version, pages, questions, agreement, passing_score, updated_at, updated_by)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
     ON CONFLICT (guild_id) DO UPDATE SET
-      version = ?2, pages = ?3, questions = ?4, agreement = ?5, updated_at = ?6, updated_by = ?7
+      version = ?2, pages = ?3, questions = ?4, agreement = ?5, passing_score = ?6,
+      updated_at = ?7, updated_by = ?8
   `).bind(guildId, version, JSON.stringify(config.pages), JSON.stringify(config.questions),
-    config.agreement, now, actor).run()
+    config.agreement, config.passingScore, now, actor).run()
 
   // Any quiz in flight referenced the old version and is now stale; the next
   // click on it reports that rather than grading against replaced questions.
@@ -154,7 +157,14 @@ export function validateRulesConfig(raw: any): ValidationResult {
     }
     questions.push({ text: prompt, correct: groups.correct, incorrect: groups.incorrect, explanation })
   }
-  return { ok: true, config: { pages, questions, agreement } }
+
+  // Left out by an older client, which only ever produced all-or-nothing runs.
+  const passingScore = raw.passingScore === undefined ? 100 : Number(raw.passingScore)
+  if (!Number.isInteger(passingScore) || passingScore < 0 || passingScore > 100) {
+    return { ok: false, error: 'The passing score must be a whole number from 0 to 100.' }
+  }
+
+  return { ok: true, config: { pages, questions, agreement, passingScore } }
 }
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
@@ -368,13 +378,13 @@ export async function getSession(db: D1Database, guildId: string, userId: string
   const row = await db.prepare('SELECT * FROM rules_sessions WHERE guild_id = ?1 AND user_id = ?2')
     .bind(guildId, userId).first<{
       page: number; question: number; step: number; generation: number
-      version: number; answers: string; feedback: string; updated_at: number
+      version: number; answers: string; correct: number; feedback: string; updated_at: number
     }>()
   if (!row) return null
   return {
     page: row.page, question: row.question, step: row.step, generation: row.generation,
-    version: row.version, answers: JSON.parse(row.answers), feedback: row.feedback,
-    updatedAt: row.updated_at,
+    version: row.version, answers: JSON.parse(row.answers), correct: row.correct,
+    feedback: row.feedback, updatedAt: row.updated_at,
   }
 }
 
@@ -382,13 +392,15 @@ export async function saveSession(
   db: D1Database, guildId: string, userId: string, session: RulesSession,
 ): Promise<void> {
   await db.prepare(`
-    INSERT INTO rules_sessions (guild_id, user_id, page, question, step, generation, version, answers, feedback, updated_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+    INSERT INTO rules_sessions
+      (guild_id, user_id, page, question, step, generation, version, answers, correct, feedback, updated_at)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
     ON CONFLICT (guild_id, user_id) DO UPDATE SET
       page = ?3, question = ?4, step = ?5, generation = ?6, version = ?7,
-      answers = ?8, feedback = ?9, updated_at = ?10
+      answers = ?8, correct = ?9, feedback = ?10, updated_at = ?11
   `).bind(guildId, userId, session.page, session.question, session.step, session.generation,
-    session.version, JSON.stringify(session.answers), session.feedback, Date.now()).run()
+    session.version, JSON.stringify(session.answers), session.correct, session.feedback,
+    Date.now()).run()
 }
 
 export async function clearSession(db: D1Database, guildId: string, userId: string): Promise<void> {

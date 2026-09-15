@@ -114,15 +114,41 @@ describe('rules quiz', () => {
     expect(lastEmbed(q1).description).toContain('First?')
   })
 
-  it('explains a wrong answer and keeps the same question', async () => {
+  it('explains a wrong answer and moves on without scoring it', async () => {
     const guildId = await setup()
     const q1 = await toFirstQuestion(guildId)
-    const retry = await answer(guildId, q1, false)
+    const q2 = await answer(guildId, q1, false)
 
-    expect(lastEmbed(retry).title).toBe('Question 1/2')
-    expect(lastEmbed(retry).description).toContain('Please try again.')
-    expect(lastEmbed(retry).description).toContain('Because first.')
-    expect((await getSession(env.DB, guildId, MEMBER))!.question).toBe(0)
+    expect(lastEmbed(q2).title).toBe('Question 2/2')
+    expect(lastEmbed(q2).description).toContain('**Incorrect.** Because first.')
+    const session = (await getSession(env.DB, guildId, MEMBER))!
+    expect(session.question).toBe(1)
+    expect(session.correct).toBe(0)
+  })
+
+  it('refuses the run when it lands under the passing score', async () => {
+    const guildId = await setup()
+    // Default is 100%: one wrong answer out of two is 50%.
+    const agreement = await answer(guildId, await answer(guildId, await toFirstQuestion(guildId), false), true)
+    const done = context(guildId, buttonFor(agreement, 'I understand and agree'))
+    await handleRulesStep(done)
+
+    expect(lastText(done)).toContain('50%')
+    expect(lastText(done)).toContain('100%')
+    expect((await getMember(env.DB, guildId, MEMBER)).state).toBe('unapproved')
+    // The failed run is cleared, so starting again is a clean slate.
+    expect(await getSession(env.DB, guildId, MEMBER)).toBeNull()
+  })
+
+  it('approves a run that clears a lowered bar', async () => {
+    const guildId = await setup({ ...CONFIG, passingScore: 50 })
+    const agreement = await answer(guildId, await answer(guildId, await toFirstQuestion(guildId), false), true)
+    const done = context(guildId, buttonFor(agreement, 'I understand and agree'))
+    await handleRulesStep(done)
+
+    expect(lastText(done)).toContain('Approved')
+    expect(lastText(done)).toContain('50%')
+    expect((await getMember(env.DB, guildId, MEMBER)).state).toBe('approved')
   })
 
   it('explains a correct answer too, heading the next question', async () => {
@@ -248,15 +274,19 @@ describe('rules quiz', () => {
     // Distinct, as the validator requires, but still the full 400 each.
     // Not named `answer`: that would shadow the helper this test calls.
     const maxAnswer = (tag: string) => 'x'.repeat(399) + tag
+    const maxQuestion = () => ({
+      text: long(600),
+      correct: ['a', 'b', 'c', 'd'].map(maxAnswer),
+      incorrect: ['e', 'f', 'g', 'h'].map(maxAnswer),
+      explanation: long(1000),
+    })
+    // Two of them: the second is what renders with an explanation carried in,
+    // now that a wrong answer advances rather than re-asking.
     const huge = {
       pages: [{ title: 'P', text: 'read' }],
-      questions: [{
-        text: long(600),
-        correct: ['a', 'b', 'c', 'd'].map(maxAnswer),
-        incorrect: ['e', 'f', 'g', 'h'].map(maxAnswer),
-        explanation: long(1000),
-      }],
+      questions: [maxQuestion(), maxQuestion()],
       agreement: long(3000),
+      passingScore: 100,
     }
     const guildId = await setup(huge)
     // One page here, so walk it directly rather than via the shared helper.
@@ -266,15 +296,15 @@ describe('rules quiz', () => {
     await handleRulesStep(q1)
     expect(lastEmbed(q1).description.length).toBeLessThanOrEqual(4096)
 
-    // And again with a wrong answer, when the explanation is carried in too.
-    const retry = await answer(guildId, q1, false)
-    expect(lastEmbed(retry).description.length).toBeLessThanOrEqual(4096)
+    // And the next one, which carries the previous explanation in too.
+    const q2 = await answer(guildId, q1, false)
+    expect(lastEmbed(q2).description.length).toBeLessThanOrEqual(4096)
     // The answers survive the trim — they are what the member has to act on.
     for (const letter of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']) {
-      expect(() => buttonFor(retry, letter)).not.toThrow()
+      expect(() => buttonFor(q2, letter)).not.toThrow()
     }
 
-    const agreement = await answer(guildId, retry, true)
+    const agreement = await answer(guildId, q2, true)
     expect(lastEmbed(agreement).description.length).toBeLessThanOrEqual(4096)
   })
 })
