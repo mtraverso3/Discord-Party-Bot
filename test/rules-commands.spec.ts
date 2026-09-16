@@ -362,7 +362,7 @@ describe('rules moderator commands', () => {
     it('refuses when the server has the check switched off', async () => {
       const off = guild()
       await publishRulesConfig(env.DB, off, RULES, 1, false, 'admin')
-      expect((await runRaw(off, 'rules-quiz')).content).toContain('not switched on')
+      expect((await runRaw(off, 'rules-quiz')).content).toContain("hasn't switched the rules check on")
     })
 
     it('tells an approved member there is nothing to take', async () => {

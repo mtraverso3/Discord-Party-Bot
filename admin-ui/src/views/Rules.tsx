@@ -17,7 +17,7 @@ interface RulesConfig {
   passingScore: number
 }
 interface Status {
-  online: boolean; channelId: string; queueConnected: boolean; defaultRequired: boolean
+  channelId: string; enabled: boolean; defaultRequired: boolean
   config: RulesConfig; counts: { total: number; approved: number }
 }
 interface RosterMember {
@@ -29,8 +29,8 @@ interface RosterMember {
 }
 type RosterKey = keyof Pick<RosterMember, 'user_id' | 'state' | 'revocations' | 'completions' | 'version'>
 
-// The rules bot refuses a question outside these, so the editor enforces them.
-// Wrong answers are optional: a question may offer only correct choices.
+// The Worker validates these again before storing. Wrong answers are optional:
+// a question may offer only correct choices.
 const ANSWER_MIN = { correct: 1, incorrect: 0 }
 const ANSWER_MAX = 4
 
@@ -40,8 +40,8 @@ const STATE_RANK: Record<string, number> = { approved: 0, granting: 1, revoking:
 const ROSTER_COLUMNS: { key: RosterKey; label: string; align: string }[] = [
   { key: 'user_id', label: 'Member', align: 'text-left' },
   { key: 'state', label: 'State', align: 'text-left' },
-  { key: 'revocations', label: 'Infractions', align: 'text-right' },
-  { key: 'completions', label: 'Completions', align: 'text-right' },
+  { key: 'revocations', label: 'Revocations', align: 'text-right' },
+  { key: 'completions', label: 'Checks passed', align: 'text-right' },
   { key: 'version', label: 'Rules version', align: 'text-right' },
 ]
 
@@ -106,7 +106,7 @@ export function Rules() {
   const publish = async () => {
     if (!draft || !status) return
     const message = reapprove
-      ? 'Publish these rules and require EVERY tracked member to take the quiz again? Approval roles will be removed; lifetime revocation counts stay unchanged.'
+      ? 'Publish these rules and require EVERY tracked member to take the check again? Every current approval is cleared; revocation counts stay unchanged.'
       : 'Publish these rules and quiz? Existing approvals remain valid. Unfinished quizzes will restart.'
     if (!await confirm(message, 'Publish changes')) return
     await action(async () => {
@@ -130,9 +130,9 @@ export function Rules() {
     await action(async () => { setMember(await api<MemberStatus>(`/rules/members/${id}`)); setReason(''); setNotice('') })
   }
   const PROMPTS: Record<'approve' | 'revoke' | 'reset', [string, string]> = {
-    approve: ['Approve this member without the quiz? It is recorded as your decision, and does not count as a check they have taken.', 'Approve'],
-    revoke: ['Revoke approval for this member? This counts an active approval revocation and requires a fresh quiz.', 'Revoke approval'],
-    reset: ['Require this member to retake the quiz without increasing their disciplinary count?', 'Require retake'],
+    approve: ['Approve this member without the quiz? Recorded as your decision; it does not count as a check they have taken.', 'Approve'],
+    revoke: ['Revoke approval for this member? It counts against them, and they must pass the check again.', 'Revoke approval'],
+    reset: ['Require this member to take the check again, without counting it against them?', 'Require retake'],
   }
 
   const decide = async (mode: 'approve' | 'revoke' | 'reset') => {
@@ -148,7 +148,7 @@ export function Rules() {
     })
   }
 
-  if (error) return <div className="space-y-3"><ErrorNote>{error}</ErrorNote><Button variant="outline" onClick={() => void refresh()}>Retry connection</Button></div>
+  if (error) return <div className="space-y-3"><ErrorNote>{error}</ErrorNote><Button variant="outline" onClick={() => void refresh()}>Try again</Button></div>
   if (!status || !draft) return <Spinner />
 
   // What the percentage works out to, so the bar is stated in questions.
@@ -156,16 +156,16 @@ export function Rules() {
 
   return <div className="space-y-5">
     <Card>
-      <CardHeader><CardTitle>Rules verification</CardTitle><CardDescription>Members prove they have read the rules before they can join a party. The check runs in this bot.</CardDescription></CardHeader>
+      <CardHeader><CardTitle>Rules verification</CardTitle><CardDescription>Members prove they have read the rules before they can join a party.</CardDescription></CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={status.queueConnected ? 'success' : 'warning'}>{status.queueConnected ? 'Required to join' : 'Not required yet'}</Badge>
+          <Badge variant={status.enabled ? 'success' : 'warning'}>{status.enabled ? 'Rules check on' : 'Rules check off'}</Badge>
           <Badge>Rules version {status.config.version}</Badge>
         </div>
         <div className="grid grid-cols-2 gap-3">
           {[[status.counts.approved, 'Approved'], [status.counts.total, 'Tracked members']].map(([value, label]) => <div className="rounded-lg border bg-muted/30 p-3" key={label}><div className="text-xl font-semibold">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div>)}
         </div>
-        {status.queueConnected && (
+        {status.enabled && (
           <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent">
             <Checkbox
               className="mt-0.5"
@@ -189,22 +189,21 @@ export function Rules() {
           </label>
         )}
         <p className="text-xs text-muted-foreground">
-          Approval is this bot's own record of who passed. No Discord role is involved, so it cannot fall out of step
-          with one.
+          Approval is this bot's own record of who passed. Nothing is granted or taken away in Discord.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <Button busy={busy} onClick={() => void action(async () => {
-            const turningOff = status.queueConnected
+            const turningOff = status.enabled
             if (turningOff && !await confirm('Switch the rules check off for this server? Parties that ask for it stop being gated, and their settings are kept.', 'Switch off')) return
             const result = await api<Status>('/rules/connect', { method: 'POST', body: JSON.stringify({ enabled: !turningOff }) })
-            setStatus(result); toast(turningOff ? 'Rules check switched off' : 'Rules check available')
-          })}><ShieldCheck />{status.queueConnected ? 'Switch the rules check off' : 'Switch the rules check on'}</Button>
+            setStatus(result); toast(turningOff ? 'Rules check switched off' : 'Rules check switched on')
+          })}><ShieldCheck />{status.enabled ? 'Switch the rules check off' : 'Switch the rules check on'}</Button>
           <Label className="min-w-56 flex-1">Rules channel
             <ChannelSelect channels={channels} value={channel} onChange={setChannel} placeholder="Pick the channel to post in" />
           </Label>
           <Button variant="outline" busy={busy} disabled={!channel} onClick={() => void post()}>Post Start button</Button>
           <Button variant="ghost" busy={busy} onClick={() => void action(async () => {
-            const result = await api<Status>('/rules/status'); setStatus(s => s ? { ...s, online: result.online, counts: result.counts, queueConnected: result.queueConnected } : result)
+            const result = await api<Status>('/rules/status'); setStatus(s => s ? { ...s, counts: result.counts, enabled: result.enabled } : result)
           })}><RefreshCw />Refresh status</Button>
         </div>
       </CardContent>
@@ -252,7 +251,7 @@ export function Rules() {
               </Table>
             </div>)}
         {member && <>
-          <div className="flex flex-wrap gap-2"><Badge>Member {member.member.user_id}</Badge><Badge>{member.member.state}</Badge><Badge>Revocations: {member.member.revocations}</Badge><Badge>Completed quizzes: {member.member.completions}</Badge></div>
+          <div className="flex flex-wrap gap-2"><Badge>Member {member.member.user_id}</Badge><Badge>{member.member.state}</Badge><Badge>Revocations: {member.member.revocations}</Badge><Badge>Checks passed: {member.member.completions}</Badge></div>
           <Label>Reason<Input maxLength={500} value={reason} onChange={e => setReason(e.target.value)} placeholder="Recorded against them, and shown in their history" /></Label>
           <div className="flex flex-wrap gap-2">
             <Button busy={busy} disabled={!reason.trim() || member.member.state === 'approved'} onClick={() => void decide('approve')}>Approve without the quiz</Button>
@@ -276,11 +275,11 @@ export function Rules() {
         </details>)}
           {draft.pages.length < 8
             ? <Button variant="outline" onClick={() => setDraft({ ...draft, pages: [...draft.pages, { title: '', text: '' }] })}>Add page</Button>
-            : <p className="text-xs text-muted-foreground">Eight pages is the maximum the rules bot accepts.</p>}
+            : <p className="text-xs text-muted-foreground">Eight pages is the maximum.</p>}
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>Quiz · {draft.questions.length === 0 ? 'no questions' : `${draft.questions.length} question${draft.questions.length === 1 ? '' : 's'}`}</CardTitle><CardDescription>As many as you like, and none is allowed — members then read the rules and go straight to the agreement. Each question needs 1–4 correct answers and up to 4 incorrect ones; members pick one, positions are shuffled, and the explanation is shown either way.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Quiz · {draft.questions.length === 0 ? 'no questions' : `${draft.questions.length} question${draft.questions.length === 1 ? '' : 's'}`}</CardTitle><CardDescription>Add as many as you like, or none at all. With no questions, members read the rules and go straight to the agreement. Each question needs 1–4 correct answers and up to 4 incorrect ones. Members pick one, the order is shuffled every time, and the explanation is shown either way.</CardDescription></CardHeader>
         <CardContent className="space-y-3">
           <Label className="max-w-md">Passing score
             <div className="flex items-center gap-2">
@@ -293,8 +292,8 @@ export function Rules() {
             <span className="text-xs font-normal text-muted-foreground">
               {draft.questions.length === 0
                 ? 'No questions, so everyone who reads the rules and agrees passes.'
-                : `${passMark} of ${draft.questions.length} question${draft.questions.length === 1 ? '' : 's'} right. `
-                  + 'Each is asked once; below the bar they are told their score and can start again.'}
+                : `Members need ${passMark} of ${draft.questions.length} right. `
+                  + 'Below that they are shown their score and can start again; there is no attempt limit.'}
             </span>
           </Label>
           {draft.questions.map((question, i) => {
@@ -316,7 +315,7 @@ export function Rules() {
                   ))}
                   {question[group].length < ANSWER_MAX
                     ? <Button variant="outline" size="sm" onClick={() => update({ [group]: [...question[group], ''] })}>Add {group} answer</Button>
-                    : <p className="text-xs text-muted-foreground">{ANSWER_MAX} is the maximum the rules bot accepts.</p>}
+                    : <p className="text-xs text-muted-foreground">{ANSWER_MAX} is the maximum.</p>}
                 </div>
               ))}
               <Label>Explanation, shown after any answer<Textarea maxLength={1000} value={question.explanation} onChange={e => update({ explanation: e.target.value })} /></Label>
@@ -327,9 +326,9 @@ export function Rules() {
           <Button variant="outline" onClick={() => setDraft({ ...draft, questions: [...draft.questions, { text: '', correct: [''], incorrect: [] as string[], explanation: '' }] })}>Add question</Button>
         </CardContent>
       </Card>
-      <Card><CardHeader><CardTitle>Final agreement</CardTitle><CardDescription>Shown after the member passes every question.</CardDescription></CardHeader><CardContent><Textarea aria-label="Final agreement" rows={7} maxLength={3000} value={draft.agreement} onChange={e => setDraft({ ...draft, agreement: e.target.value })} /></CardContent></Card>
+      <Card><CardHeader><CardTitle>Final agreement</CardTitle><CardDescription>Shown at the end of the quiz. Agreeing completes the check.</CardDescription></CardHeader><CardContent><Textarea aria-label="Final agreement" rows={7} maxLength={3000} value={draft.agreement} onChange={e => setDraft({ ...draft, agreement: e.target.value })} /></CardContent></Card>
       <div className="rounded-xl border bg-card p-4 space-y-3">
-        <label className="flex items-start gap-2 text-sm"><Checkbox checked={reapprove} onChange={e => setReapprove(e.target.checked)} />Require everyone to verify again after publishing. This does not increase disciplinary revocation counts.</label>
+        <label className="flex items-start gap-2 text-sm"><Checkbox checked={reapprove} onChange={e => setReapprove(e.target.checked)} />Require everyone to take the check again after publishing. This does not count against anyone.</label>
         <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => void action(async () => { if (await confirm('Discard your unsaved edits and load the latest published rules?', 'Reload saved rules')) await refresh() })}>Reload saved rules</Button><Button busy={busy} onClick={() => void publish()}><CheckCircle2 />Publish rules & quiz</Button></div>
       </div>
     </fieldset>

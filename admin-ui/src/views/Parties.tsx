@@ -308,8 +308,8 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api<{ queueConnected: boolean; defaultRequired: boolean }>('/rules/status')
-      .then(r => { setRulesAvailable(r.queueConnected); setRules(r.defaultRequired) })
+    api<{ enabled: boolean; defaultRequired: boolean }>('/rules/status')
+      .then(r => { setRulesAvailable(r.enabled); setRules(r.defaultRequired) })
       .catch(() => setRulesAvailable(false))
   }, [])
 

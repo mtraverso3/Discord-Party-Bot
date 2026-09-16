@@ -6,10 +6,7 @@ import {
 } from '../store/rules'
 
 /**
- * The dashboard's rules routes. These used to proxy to the Python bot's admin
- * service over an HTTPS tunnel; the state is in this Worker's database now, so
- * they read and write it directly. The routes and response shapes are
- * unchanged, so the Rules tab did not have to be rewritten with them.
+ * The dashboard's rules routes, backing the Rules & verification tab.
  *
  * Called only after the existing Access authentication and guild authorization.
  */
@@ -63,12 +60,9 @@ async function status(env: AppBindings, guildId: string): Promise<Response> {
     memberCounts(env.DB, guildId),
   ])
   return json({
-    // Always "online" now: the rules check is this Worker, so if the dashboard
-    // loaded at all, it is running.
-    online: true,
     guildId,
     channelId: gate?.channelId ?? '',
-    queueConnected: !!gate?.enabled,
+    enabled: !!gate?.enabled,
     defaultRequired: !!gate?.defaultRequired,
     config,
     counts,
@@ -88,7 +82,7 @@ async function roster(env: AppBindings, guildId: string): Promise<Response> {
   })
 }
 
-/** Switch the gate on for this guild — the panel's "Connect queue" button. */
+/** Switch the check on or off for this guild. */
 async function connect(env: AppBindings, guildId: string, body: any): Promise<Response> {
   // `enabled` says the server has a check at all; parties opt in individually.
   const enabled = body?.enabled === undefined ? true : body.enabled === true
@@ -166,9 +160,8 @@ async function approve(
   const approved = await approveManually(env.DB, guildId, userId, actor, reason, config.version)
   return json({
     ok: true,
-    pending: false,
     message: approved
-      ? 'Approved without the check. Recorded as your decision; their completed-check count is unchanged.'
+      ? 'Approved without the check. Recorded as your decision; their checks-passed count is unchanged.'
       : 'They were already approved — nothing changed.',
   })
 }
@@ -180,5 +173,5 @@ async function changeApproval(
   if (!reason) return json({ error: 'Give a reason — it is recorded against the member.' }, 400)
 
   const result = await applyApprovalChange(env, guildId, userId, { disciplinary, reason, actor })
-  return json({ ok: true, pending: false, message: result.message })
+  return json({ ok: true, message: result.message })
 }

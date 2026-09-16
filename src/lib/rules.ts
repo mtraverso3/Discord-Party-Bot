@@ -2,28 +2,23 @@ import type { AppBindings } from '../types'
 import { filterApproved, filterRevoked, getRulesGate } from '../store/rules'
 import { filterAdmins } from '../store/adminAuth'
 
-// Whether a member may be admitted to a party. Approval used to mean holding a
-// Discord role granted by a separate bot, which meant a Discord API call per
-// member on every check. It is now a row in this Worker's own database, so a
-// check is one indexed query and cannot be wrong because Discord was slow.
+// Whether a member may be admitted to a party. Approval is a row in this
+// Worker's database, so a check is one indexed query.
 //
-// Admins are let through without passing. That is a deliberate hole: the people
-// who run the server should not be locked out of their own queue by a check
-// they are responsible for maintaining. They are warned every time instead —
-// see exemptFromRules, which the reply paths use to add that warning.
+// Admins on the bot's own admin list are let through without passing, so the
+// people responsible for the rules cannot be locked out by them. They are
+// warned instead; see exemptFromRules, which the reply paths use to add that
+// warning. Two limits on the exemption:
 //
-// The exemption covers not having taken the check. It does not cover having had
-// approval taken away: a revoked admin takes the quiz like anyone else, or the
-// revocation would mean nothing for the people most able to ignore it. A
-// moderator who wants to undo one without making them sit it uses "require
-// retake without penalty", which clears the mark.
-//
-// The exemption also follows the person being admitted, not whoever is acting.
-// An admin adding an unapproved member is still refused; otherwise "admins are
-// exempt" would quietly mean "admins can admit anyone".
+//  - It covers never having taken the check, not having had approval revoked.
+//    A revoked admin takes the quiz like anyone else; "require retake without
+//    penalty" is the undo for a moderator who does not want that.
+//  - It follows the person being admitted, not whoever is acting. An admin
+//    adding an unapproved member is still refused.
 
 export class RulesAccessError extends Error {
-  constructor(message = 'Complete the rules check in the rules channel before joining or being selected.') {
+  // Also shown in the dashboard and the desktop client, so no Discord markdown.
+  constructor(message = "Pass this server's rules check first. Take it in Discord with /party rules quiz, or the Start button in the rules channel.") {
     super(message)
     this.name = 'RulesAccessError'
   }
@@ -81,7 +76,7 @@ export function rulesAccess(env: AppBindings): RulesAccess {
       if (admins.length > 0 && revoked.length > 0) {
         throw new RulesAccessError(
           'Your approval was revoked, so being an admin no longer gets you in —'
-          + ' take the rules check again in the rules channel.',
+          + ' take the rules check again with /party rules quiz.',
         )
       }
       throw new RulesAccessError()
@@ -112,7 +107,7 @@ export async function exemptFromRules(
 /** The warning an exempt admin sees in place of being refused. */
 export const RULES_EXEMPT_WARNING =
   "\n\n⚠️ You haven't passed this server's rules check — you were let in because you're an admin."
-  + ' Members without it are refused, so please take it when you can.'
+  + ' Everyone else is refused, so please take it when you can: `/party rules quiz`.'
 
 export function rulesErrorMessage(error: unknown): string | null {
   return error instanceof RulesAccessError ? error.message : null

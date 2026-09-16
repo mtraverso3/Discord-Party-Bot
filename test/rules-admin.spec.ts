@@ -49,8 +49,7 @@ it('serves the built-in rules until a guild publishes its own', async () => {
   const res = await call('status', g)
   expect(res.status).toBe(200)
   const body = await res.json<any>()
-  expect(body.online).toBe(true)
-  expect(body.queueConnected).toBe(false)
+  expect(body.enabled).toBe(false)
   expect(body.config.version).toBe(1)
   expect(body.config.pages.length).toBeGreaterThan(0)
   expect(body.counts).toEqual({ total: 0, approved: 0 })
@@ -75,7 +74,7 @@ it('switches the gate on, and off again, from the dashboard', async () => {
   await rulesAccess(env).require(g, MEMBER)  // ungated: anyone passes
 
   const connected = await (await call('connect', g, 'POST')).json<any>()
-  expect(connected.queueConnected).toBe(true)
+  expect(connected.enabled).toBe(true)
   await expect(rulesAccess(env).require(g, MEMBER)).rejects.toThrow('rules check')
 
   await saveRulesGate(env.DB, g, { enabled: false })
