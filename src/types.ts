@@ -131,7 +131,7 @@ export interface AppBindings extends Record<string, unknown> {
   // Optional — enables the Discord-identity admin login (magic link → built-in
   // OIDC provider → Cloudflare Access). All required together; when any is
   // unset, /auth and /oidc return 503 and `/party admin` reports it disabled.
-  // See the "Discord admin login" section of the README.
+  // See docs/admin-ui.md, "Discord admin login".
   PUBLIC_BASE_URL?: string      // public origin serving this Worker, e.g. https://partybot.example.com (no trailing slash)
   ADMIN_SESSION_SECRET?: string // HMAC secret for the 24h admin session cookie
   OIDC_CLIENT_ID?: string       // client_id configured in the Cloudflare Access OIDC login method

@@ -25,14 +25,13 @@ migrations_dir = "migrations"
 
 # Legacy KV namespace — kept only so POST /admin/api/import-kv can copy the
 # durable data (profiles, settings, templates, client tokens) into D1.
-# Remove this binding once the import has been run.
+# Remove this binding once the import has been run. See docs/migrating-from-kv.md.
 [[kv_namespaces]]
 binding = "PARTY_KV"
 id = "32fff28077814cbcac824ebd05c0ce66"
 
-# Replaces the old Durable Object inactivity alarm: sweeps idle parties,
-# expired link codes/client tokens, admin login tokens/OIDC codes, and trims
-# audit logs.
+# Cron sweeps: idle parties, expired link codes and client tokens, admin login
+# tokens and OIDC codes, and audit log trimming.
 [triggers]
 crons = ["*/15 * * * *", "* * * * *"]
 
@@ -40,7 +39,8 @@ crons = ["*/15 * * * *", "* * * * *"]
 # Discord role mirroring it, and clears abandoned quizzes. The rules check is
 # configured per guild from the admin UI and needs no secrets.
 
-# The PartyState Durable Object is retired — state moved to D1.
+# Durable Object migration history. The PartyState class is gone (state is in
+# D1), but the tags have to stay for Cloudflare to track the deletion.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PartyState"]
@@ -59,7 +59,7 @@ invocation_logs = true
 # for the desktop client. Without it, the client shows champions from the local
 # champ-select session only.
 # Optional: CF_ACCESS_TEAM, CF_ACCESS_AUD — enable the /admin UI behind Access.
-# Optional (Discord admin login — see README "Discord admin login"):
+# Optional (Discord admin login, see docs/admin-ui.md):
 #   PUBLIC_BASE_URL, ADMIN_SESSION_SECRET, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET,
 #   OIDC_PRIVATE_JWK (from scripts/gen-oidc-key.ts), and optionally
 #   OIDC_EMAIL_DOMAIN / OIDC_REDIRECT_URI. All required together or the

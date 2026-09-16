@@ -71,7 +71,7 @@ export function Admins({ superAdmin }: { superAdmin: boolean }) {
 
       {admins.length === 0 ? (
         <EmptyState icon={<ShieldCheck />} title="No Discord admins yet">
-          Add one above, or seed the first admin with <Mono>wrangler d1 execute</Mono> (see the README).
+          Add one above, or seed the first admin with <Mono>wrangler d1 execute</Mono> (see docs/admin-ui.md).
         </EmptyState>
       ) : (
         <Card>
