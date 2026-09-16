@@ -9,13 +9,9 @@ import {
 /**
  * The member-facing rules check, as Discord interactions.
  *
- * This was a gateway bot: a persistent connection, an in-memory session per
- * member, and asyncio locks around every step. A Worker has none of those, so
- * the session lives in D1 and each click re-reads it. That is strictly better
- * in one way — a deploy no longer loses everyone's progress.
- *
  * One ephemeral message per check, edited in place the whole way through:
- * rules pages, then questions, then the agreement.
+ * rules pages, then questions, then the agreement. The session lives in D1 and
+ * every click re-reads it, so progress survives a deploy.
  */
 
 export const START_BUTTON = 'rules_start'
@@ -57,12 +53,14 @@ export function buildStartComponents() {
 }
 
 export function startMessage(config: RulesConfig) {
-  const steps = config.questions.length
-    ? `answer ${config.questions.length} question${config.questions.length === 1 ? '' : 's'}, and agree`
-    : 'and agree'
+  const count = config.questions.length
+  const steps = count
+    ? `Read the rules, answer ${count} question${count === 1 ? '' : 's'}, and agree`
+    : 'Read the rules and agree'
   return {
-    content: `**Rules & Conduct**\nRead all rules, ${steps} to get queue access. The check is private —`
-      + ' only you can see it. Use `/party rules status` to check your status.',
+    content: `**Rules & Conduct**\n${steps}. Then you can join parties in this server.`
+      + '\nThe check is private: only you can see it. Check where you stand any time with'
+      + ' `/party rules status`.',
     components: buildStartComponents(),
   }
 }
@@ -160,7 +158,7 @@ export function renderStep(config: RulesConfig, session: RulesSession) {
         title: `Question ${session.question + 1}/${total}`,
         description: questionDescription(session.feedback, question.text, lines),
         color: 0x5865f2,
-        footer: { text: 'Every answer is explained. A wrong one can be retried.' },
+        footer: { text: 'Each question is asked once. Every answer is explained.' },
       }],
       // Five per row is Discord's limit, and there can be up to eight answers.
       components: chunk(session.answers.map((_, i) => ({
@@ -171,12 +169,12 @@ export function renderStep(config: RulesConfig, session: RulesSession) {
 
   return {
     embeds: [{
-      title: total === 0 ? 'Final agreement' : `${session.correct}/${total} correct — final agreement`,
+      title: total === 0 ? 'Final agreement' : `Final agreement · ${session.correct}/${total} correct`,
       // Carries the last question's explanation, which nothing else would show.
       description: ((session.feedback ? session.feedback + '\n\n' : '') + config.agreement)
         .slice(0, EMBED_DESCRIPTION_MAX),
       color: 0x5865f2,
-      footer: { text: `Rules version ${config.version} · Agreeing gives you queue access.` },
+      footer: { text: `Rules version ${config.version} · Agree to finish the check.` },
     }],
     components: [{
       type: 1,
@@ -212,19 +210,19 @@ function shuffleAnswers(config: RulesConfig, index: number): RulesSession['answe
 
 /**
  * Open someone's rules check at step one and return that first step, always
- * ephemeral. Shared by the Start button and `/party rules quiz` so the two
- * enter on identical terms — starting again simply replaces the session,
- * which is what makes a half-finished check recoverable.
+ * ephemeral. Shared by the Start button and `/party rules quiz`, so the two
+ * enter on identical terms. Starting again replaces the session, which is what
+ * makes a half-finished check recoverable.
  */
 export async function beginQuiz(env: AppBindings, guildId: string, userId: string) {
   const gate = await getRulesGate(env.DB, guildId)
   if (!gate?.enabled) {
-    return { content: 'The rules check is not switched on for this server.', flags: 64 }
+    return { content: "This server hasn't switched the rules check on.", flags: 64 }
   }
 
   const member = await getMember(env.DB, guildId, userId)
   if (member.state === 'approved') {
-    return { content: "You're already approved — you can join the queue.", flags: 64 }
+    return { content: "You're already approved. You can join parties here.", flags: 64 }
   }
 
   const config = await getRulesConfig(env.DB, guildId)
@@ -270,8 +268,8 @@ export async function handleRulesStep(c: ComponentContext<AppEnv>) {
       getRulesConfig(c.env.DB, guildId),
     ])
 
-    // Re-checked on every click, exactly as the Python bot did under its lock:
-    // a revocation, a publish, or a second Start makes this view stale.
+    // Re-checked on every click: a revocation, a publish, or a second Start
+    // makes this view stale.
     if (!session || session.generation !== member.generation || session.version !== config.version
         || member.state !== 'unapproved') {
       return stale('This rules check is no longer valid. Start a fresh one.')
@@ -333,9 +331,9 @@ async function finish(
   if (score < config.passingScore) {
     await clearSession(c.env.DB, guildId, userId)
     return c.resUpdate({
-      content: `You scored **${score}%**, and this server asks for **${config.passingScore}%**.`
-        + `\nYou answered ${session.correct} of ${config.questions.length} correctly.`
-        + ' Nothing is held against you — start the check again whenever you like.',
+      content: `**${session.correct} of ${config.questions.length} correct (${score}%).**`
+        + ` This server asks for ${config.passingScore}%.`
+        + '\nNothing is recorded against you. Run `/party rules quiz` to take it again.',
       embeds: [],
       components: [],
     })
@@ -348,11 +346,13 @@ async function finish(
   await clearSession(c.env.DB, guildId, userId)
 
   const member = await getMember(c.env.DB, guildId, userId)
-  const scoreLine = config.questions.length > 0 ? `\nScored **${score}%**.` : ''
+  const parts = [
+    ...(config.questions.length > 0 ? [`Scored **${score}%**`] : []),
+    `Checks passed: **${member.completions}**`,
+    ...(member.revocations > 0 ? [`Revocations: **${member.revocations}**`] : []),
+  ]
   return c.resUpdate({
-    content: `Approved — you can now join the queue.${scoreLine}`
-      + `\nCompleted checks: **${member.completions}**`
-      + ` · Lifetime revocations: **${member.revocations}**`,
+    content: `**Approved.** You can now join parties in this server.\n${parts.join(' · ')}`,
     embeds: [],
     components: [],
   })
@@ -366,8 +366,7 @@ export interface ApprovalChange {
 /**
  * Withdraw approval, optionally as discipline. Shared by the moderator slash
  * commands and the dashboard so the two cannot drift apart on what a
- * revocation means. It takes effect immediately: approval is a row here, not a
- * Discord role that might refuse to come off.
+ * revocation means. It takes effect immediately.
  */
 export async function changeApproval(
   env: AppBindings, guildId: string, userId: string,
@@ -379,15 +378,15 @@ export async function changeApproval(
   return {
     counted,
     message: opts.disciplinary
-      ? `Approval removed. Lifetime revocations: ${counted ? 'increased by 1' : 'unchanged'}.`
-      : 'They must take the rules check again. No disciplinary count was added.',
+      ? `Approval removed; they must pass the check again. Revocations ${counted ? 'increased by 1' : 'unchanged'}.`
+      : 'Approval removed; they must pass the check again. No disciplinary count was added.',
   }
 }
 
 /** Text for `/party rules status`, and for the admin panel's member lookup. */
 export function formatStatus(member: { state: string; completions: number; revocations: number; version: number | null }): string {
   const label = member.state === 'approved' ? 'Approved' : 'Not approved'
-  return `**${label}**\nCompleted checks: **${member.completions}** · Lifetime revocations: **${member.revocations}**`
+  return `**${label}**\nChecks passed: **${member.completions}** · Revocations: **${member.revocations}**`
     + (member.version ? `\nAgreed to rules version ${member.version}.` : '')
 }
 

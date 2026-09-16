@@ -4,9 +4,8 @@ import type {
 import { DEFAULT_RULES } from '../lib/rules-content'
 
 // All rules state: the published text and quiz, who has passed, the audit
-// trail, and any quiz in flight. This is the half of the old Python bot that
-// lived in its own SQLite file; the mutations it did under asyncio locks are
-// guarded statements here, the same way the party store works.
+// trail, and any quiz in flight. Mutations are guarded statements, the same
+// way the party store works.
 
 export const MAX_PAGES = 8
 export const ANSWER_MAX = 4
@@ -158,7 +157,7 @@ export function validateRulesConfig(raw: any): ValidationResult {
     questions.push({ text: prompt, correct: groups.correct, incorrect: groups.incorrect, explanation })
   }
 
-  // Left out by an older client, which only ever produced all-or-nothing runs.
+  // Absent in configs published before the passing score existed.
   const passingScore = raw.passingScore === undefined ? 100 : Number(raw.passingScore)
   if (!Number.isInteger(passingScore) || passingScore < 0 || passingScore > 100) {
     return { ok: false, error: 'The passing score must be a whole number from 0 to 100.' }

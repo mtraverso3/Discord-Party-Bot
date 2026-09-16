@@ -1,9 +1,7 @@
 import type { RulesConfig } from '../types'
 
 /**
- * What a guild starts with before anyone publishes from the dashboard — the
- * text the Python rules bot shipped in content.py, carried over so an existing
- * server sees the same rules check after the move into this Worker.
+ * What a guild starts with before anyone publishes from the dashboard.
  *
  * Editing here only affects guilds that have never published. Once a guild
  * publishes, its own copy in rules_config wins.

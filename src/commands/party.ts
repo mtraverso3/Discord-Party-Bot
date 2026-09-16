@@ -134,7 +134,7 @@ async function openCreateModal(c: CommandContext<AppEnv>) {
     const gate = await getRulesGate(c.env.DB, guildId)
     if (!gate?.enabled) {
       return c.ephemeral().res({
-        content: "This server hasn't set up a rules check — an admin turns it on in the dashboard.",
+        content: "This server hasn't switched the rules check on. An admin turns it on in the dashboard, under **Rules & verification**.",
         flags: 64,
       })
     }
@@ -357,7 +357,7 @@ async function openEditModal(c: CommandContext<AppEnv>) {
     const gate = await getRulesGate(c.env.DB, guildId)
     if (!gate?.enabled) {
       return c.ephemeral().res({
-        content: "This server hasn't set up a rules check — an admin turns it on in the dashboard.",
+        content: "This server hasn't switched the rules check on. An admin turns it on in the dashboard, under **Rules & verification**.",
         flags: 64,
       })
     }
@@ -616,15 +616,12 @@ async function rulesView(c: CommandContext<AppEnv>, guildId: string, userId: str
   return c.followup(renderRulesPage(config, 0, member.state === 'approved'))
 }
 
-/**
- * `/party rules quiz` — take the check on demand, rather than having to find
- * the Start button someone posted in a channel months ago.
- */
+/** `/party rules quiz`: take the check on demand, without the Start button. */
 async function rulesQuiz(c: CommandContext<AppEnv>, guildId: string, userId: string) {
   return c.followup(await beginQuiz(c.env, guildId, userId))
 }
 
-/** Shared guard: Discord will not enforce Manage Roles on a subcommand for us. */
+/** Shared guard: Discord does not enforce Manage Roles on a subcommand for us. */
 function requireModerator(c: CommandContext<AppEnv>): boolean {
   return canModerateRules(c.interaction)
 }
@@ -636,7 +633,7 @@ async function rulesPost(c: CommandContext<AppEnv>, guildId: string) {
 
   const gate = await getRulesGate(c.env.DB, guildId)
   if (!gate?.enabled) {
-    return c.followup({ content: "This server hasn't switched the rules check on yet.", flags: 64 })
+    return c.followup({ content: "This server hasn't switched the rules check on.", flags: 64 })
   }
   if (!gate.channelId) {
     return c.followup({
@@ -658,7 +655,7 @@ async function rulesApprove(c: CommandContext<AppEnv>, guildId: string, opts: Re
 
   const gate = await getRulesGate(c.env.DB, guildId)
   if (!gate?.enabled) {
-    return c.followup({ content: "This server hasn't switched the rules check on yet.", flags: 64 })
+    return c.followup({ content: "This server hasn't switched the rules check on.", flags: 64 })
   }
 
   const targetId = opts['member'] as string
@@ -672,7 +669,7 @@ async function rulesApprove(c: CommandContext<AppEnv>, guildId: string, opts: Re
   )
   return c.followup({
     content: approved
-      ? `<@${targetId}> is approved without taking the check. It is recorded as your decision, and their completed-check count is unchanged.`
+      ? `<@${targetId}> is approved without taking the check. Recorded as your decision; their checks-passed count is unchanged.`
       : `<@${targetId}> is already approved.`,
     flags: 64,
   })
@@ -697,7 +694,7 @@ async function rulesHistory(c: CommandContext<AppEnv>, guildId: string, opts: Re
       return `\`${e.kind}\` ${when} — ${reason}${e.actor ? ` *(${e.actor})*` : ''}`
     }).join('\n')
 
-  const content = `**<@${targetId}>**\n${formatStatus(member)}\n\n**Last ${history.length} entries**\n${lines}`
+  const content = `**<@${targetId}>**\n${formatStatus(member)}\n\n**Recent history**\n${lines}`
   return c.followup({
     content: content.length > 1990 ? content.slice(0, 1989) + '…' : content,
     flags: 64,
@@ -723,12 +720,12 @@ async function rulesChange(
 async function rulesStatus(c: CommandContext<AppEnv>, guildId: string, userId: string) {
   const gate = await getRulesGate(c.env.DB, guildId)
   if (!gate?.enabled) {
-    return c.followup({ content: 'This server does not require a rules check.', flags: 64 })
+    return c.followup({ content: "This server hasn't switched the rules check on.", flags: 64 })
   }
   const member = await getMember(c.env.DB, guildId, userId)
   const hint = member.state === 'approved'
     ? ''
-    : '\n\nUse the **Start rules check** button in the rules channel.'
+    : '\n\nTake it with `/party rules quiz`, or the **Start rules check** button in the rules channel.'
   return c.followup({ content: formatStatus(member) + hint, flags: 64 })
 }
 

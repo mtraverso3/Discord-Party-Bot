@@ -35,9 +35,9 @@ id = "32fff28077814cbcac824ebd05c0ce66"
 [triggers]
 crons = ["*/15 * * * *", "* * * * *"]
 
-# The every-minute trigger drops members who lose rules approval, settles any
-# Discord role mirroring it, and clears abandoned quizzes. The rules check is
-# configured per guild from the admin UI and needs no secrets.
+# The every-minute trigger drops members who lose rules approval and clears
+# abandoned quizzes. The rules check is configured per guild from the admin UI
+# and needs no secrets.
 
 # Durable Object migration history. The PartyState class is gone (state is in
 # D1), but the tags have to stay for Cloudflare to track the deletion.

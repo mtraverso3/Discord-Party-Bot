@@ -129,6 +129,10 @@ export function buildHelpEmbed(page: number) {
           name: '3. Join a party',
           value: 'Click the green **Join** button on a party message. Or use `/party list` to see what\'s out there, then `/party join` to hop in.\n\nUse `/party leave` anytime to leave. Stepping away for a bit? Click **💤 BRB** to mark yourself away — click it again when you\'re back.',
         },
+        {
+          name: '4. Rules check (some servers)',
+          value: 'Parties marked 🔒 need you to pass this server\'s rules check first.\n`/party rules read` — read the rules\n`/party rules quiz` — take the check\n`/party rules status` — see where you stand',
+        },
       ],
       footer: { text: 'Page 1 / 3 · Getting Started' },
     }
@@ -154,7 +158,7 @@ export function buildHelpEmbed(page: number) {
         },
         {
           name: 'End',
-          value: '`/party rules status` — check your own rules approval\n`/party disband` — end the party\n*Parties auto-disband when idle — about 2h if solo, 6h with a few players, up to 12h when full or with a queue.*',
+          value: '`/party disband` — end the party\n*Parties auto-disband when idle — about 2h if solo, 6h with a few players, up to 12h when full or with a queue.*',
         },
       ],
       footer: { text: 'Page 2 / 3 · Owner Controls' },

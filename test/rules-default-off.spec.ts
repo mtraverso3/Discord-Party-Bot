@@ -79,7 +79,7 @@ it('reports itself as not required until someone turns it on', async () => {
   const g = guild()
   const url = new URL(`https://p.test/admin/api/rules/status?guild=${g}`)
   const body = await (await handleAdminApi(new Request(url), env, url, `1@${g}.discord.local`)).json<any>()
-  expect(body.queueConnected).toBe(false)
+  expect(body.enabled).toBe(false)
   expect(body.defaultRequired).toBe(false)
   expect(body.counts).toEqual({ total: 0, approved: 0 })
 })

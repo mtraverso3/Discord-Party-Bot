@@ -166,7 +166,7 @@ describe('rules quiz', () => {
     const q2 = await answer(guildId, await toFirstQuestion(guildId), true)
     const agreement = await answer(guildId, q2, true)
 
-    expect(lastEmbed(agreement).title).toBe('2/2 correct — final agreement')
+    expect(lastEmbed(agreement).title).toBe('Final agreement · 2/2 correct')
     expect(lastEmbed(agreement).description).toContain('**Correct.** Because second.')
     expect(lastEmbed(agreement).description).toContain('I agree to everything.')
   })
@@ -179,7 +179,7 @@ describe('rules quiz', () => {
     await handleRulesStep(done)
 
     expect(lastText(done)).toContain('Approved')
-    expect(lastText(done)).toContain('Completed checks: **1**')
+    expect(lastText(done)).toContain('Checks passed: **1**')
     expect((await getMember(env.DB, guildId, MEMBER)).state).toBe('approved')
     expect(await getSession(env.DB, guildId, MEMBER)).toBeNull()
     await rulesAccess(env).require(guildId, MEMBER)
@@ -252,7 +252,7 @@ describe('rules quiz', () => {
     await saveRulesGate(env.DB, guildId, { enabled: false })
     const start = context(guildId, 'rules_start;go')
     await handleRulesStart(start)
-    expect(lastText(start)).toContain('not switched on')
+    expect(lastText(start)).toContain("hasn't switched the rules check on")
   })
 
   it('approves immediately, with nothing left pending', async () => {
