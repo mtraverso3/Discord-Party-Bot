@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleAdminApi } from '../src/admin/api'
 import { getUserIgn } from '../src/store/profiles'
+import { createParty, getParty } from '../src/store/parties'
 
 // The settings allowlists resolve user IDs to names through GET
 // /members/resolve. Stub the two Discord endpoints it leans on (guild member
@@ -189,5 +190,33 @@ describe('PATCH /users/:id/profile', () => {
   it("won't touch someone outside the guild", async () => {
     expect((await patch('leftguild', 'Hijacked')).status).toBe(404)
     expect(await getUserIgn(env.DB, 'leftguild', 'Valorant')).toBeUndefined()
+  })
+})
+
+describe('cross-site requests', () => {
+  async function send(method: string, path: string, headers: Record<string, string>) {
+    const url = new URL(`https://party.example.test/admin/api${path}?guild=csrf`)
+    return handleAdminApi(new Request(url, { method, headers }), env, url, 'boss@example.com')
+  }
+
+  const seed = () => createParty(env.DB, {
+    id: 'CSRF01', guildId: 'csrf', name: 'p', description: '', game: 'Other',
+    owner: { userId: 'o', username: 'o', displayName: 'O' }, maxSize: 5,
+  })
+
+  it('refuses writes from another origin or site', async () => {
+    await seed()
+    expect((await send('POST', '/clear', { origin: 'https://evil.test' })).status).toBe(403)
+    expect((await send('DELETE', '/parties/CSRF01', { 'sec-fetch-site': 'cross-site' })).status).toBe(403)
+    expect((await send('POST', '/clear', { 'sec-fetch-site': 'same-site' })).status).toBe(403)
+    expect(await getParty(env.DB, 'csrf', 'CSRF01')).not.toBeNull()
+  })
+
+  it('allows reads from anywhere and writes from the dashboard itself', async () => {
+    await seed()
+    expect((await send('GET', '/settings', { 'sec-fetch-site': 'cross-site' })).status).toBe(200)
+    const res = await send('POST', '/clear', { origin: 'https://party.example.test', 'sec-fetch-site': 'same-origin' })
+    expect(res.status).toBe(200)
+    expect(await getParty(env.DB, 'csrf', 'CSRF01')).toBeNull()
   })
 })
