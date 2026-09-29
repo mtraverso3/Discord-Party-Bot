@@ -4,6 +4,7 @@ import { canBump, gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSett
 import { appendAudit, getAudit } from '../src/store/audit'
 import { IGN_MAX, findUserIdByRiotId, getIgnMap, getUserProfile, saveUserIgn } from '../src/store/profiles'
 import { randomId } from '../src/lib/id'
+import { timingSafeEqual } from '../src/lib/jwt'
 import { parseCreateModalSubmit } from '../src/lib/modal'
 import {
   createTemplate, deleteTemplate, getTemplate, getTemplates,
@@ -204,5 +205,14 @@ describe('modal submit parsing', () => {
     expect(parseCreateModalSubmit({ data: { components: [] } })).toEqual({
       name: '', description: '', capacity: '', game: '', voiceChannelId: '',
     })
+  })
+})
+
+describe('timingSafeEqual', () => {
+  it('compares strings of any length', async () => {
+    expect(await timingSafeEqual('secret', 'secret')).toBe(true)
+    expect(await timingSafeEqual('secret', 'secreT')).toBe(false)
+    expect(await timingSafeEqual('secret', 'a much longer string')).toBe(false)
+    expect(await timingSafeEqual('', '')).toBe(true)
   })
 })

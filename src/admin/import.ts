@@ -1,6 +1,7 @@
 import type { AppBindings, GuildSettings, PartyTemplate } from '../types'
 import { saveUserIgn } from '../store/profiles'
 import { sanitizeSettings, saveGuildSettings } from '../store/settings'
+import { hashToken } from '../store/clientAuth'
 
 /**
  * One-time migration: copy the durable data from the legacy KV namespace into
@@ -84,7 +85,7 @@ export async function importFromKv(env: AppBindings): Promise<Response> {
         INSERT INTO client_tokens (token, user_id, guild_id, display_name, created_at, refreshed_at, expires_at)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         ON CONFLICT (token) DO NOTHING
-      `).bind(token, rec.userId, rec.guildId, rec.displayName,
+      `).bind(await hashToken(token), rec.userId, rec.guildId, rec.displayName,
         rec.createdAt, rec.refreshedAt, rec.refreshedAt + TOKEN_TTL_MS).run()
       counts.clientTokens++
     } catch (e) {

@@ -18,7 +18,7 @@
 // their link (see src/admin/api.ts).
 
 import type { AppBindings } from '../types'
-import { publicJwk, signRs256, verifyRs256, sha256B64url, type RsaPrivateJwk } from '../lib/jwt'
+import { publicJwk, signRs256, verifyRs256, sha256B64url, timingSafeEqual, type RsaPrivateJwk } from '../lib/jwt'
 import { consumeOidcCode, generateOidcCode, isAdmin, writeOidcCode } from '../store/adminAuth'
 import { readSession, page, normalizeBaseUrl } from './session'
 
@@ -167,7 +167,7 @@ async function token(req: Request, env: AppBindings, cfg: OidcConfig): Promise<R
 
   // Client auth: HTTP Basic (client_secret_basic) or form body (client_secret_post).
   const creds = clientCreds(req, field)
-  if (creds.id !== cfg.clientId || creds.secret !== cfg.clientSecret) {
+  if (creds.id !== cfg.clientId || !(await timingSafeEqual(creds.secret, cfg.clientSecret))) {
     return json({ error: 'invalid_client' }, 401)
   }
 
