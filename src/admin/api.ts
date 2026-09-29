@@ -2,7 +2,7 @@ import { rulesAccess, rulesErrorMessage } from '../lib/rules'
 import type { AppBindings } from '../types'
 import { createPartyAndEmbed, repostPartyEmbed, tryMarkDisbanded, trySyncEmbed } from '../lib/party'
 import * as parties from '../store/parties'
-import { getIgnMap, getUserIgn, getUserProfile, saveUserIgn } from '../store/profiles'
+import { IGN_MAX, getIgnMap, getUserIgn, getUserProfile, saveUserIgn } from '../store/profiles'
 import { GAMES } from '../lib/games'
 import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings } from '../store/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../store/templates'
@@ -529,7 +529,7 @@ async function getUser(env: AppBindings, guildId: string, userId: string): Promi
 async function patchUserProfile(env: AppBindings, guildId: string, userId: string, body: any): Promise<Response> {
   const game = (body.game ?? '').toString()
   if (!GAMES.some(g => g.value === game)) return json({ error: 'Unknown game' }, 400)
-  const ign = (body.ign ?? '').toString().trim().slice(0, 100)
+  const ign = (body.ign ?? '').toString().trim().slice(0, IGN_MAX).trim()
 
   await saveUserIgn(env.DB, userId, game, ign)
   const profile = await getUserProfile(env.DB, userId)
