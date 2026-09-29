@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as parties from '../src/store/parties'
 import * as history from '../src/store/history'
 import * as games from '../src/store/games'
@@ -83,6 +83,88 @@ describe('game reporting', () => {
     // History rows persist across disband, so the game report stays attached.
     await parties.disbandParty(env.DB, guildId, partyId, 'owner')
     expect(await games.listGamesForHistory(env.DB, historyId)).toHaveLength(1)
+  })
+})
+
+describe('resolvePendingGames', () => {
+  const original = globalThis.fetch
+  let finished: Set<string>
+  let calls: string[]
+
+  beforeEach(() => {
+    finished = new Set()
+    calls = []
+    globalThis.fetch = vi.fn(async (input: any) => {
+      const matchId = String(input).split('/').pop()!
+      calls.push(matchId)
+      if (matchId.endsWith('_500')) return new Response('boom', { status: 500 })
+      if (!finished.has(matchId)) return new Response('', { status: 404 })
+      return Response.json({
+        info: {
+          queueId: 420, gameCreation: 1, gameDuration: 1800,
+          participants: [{ puuid: 'p1', riotIdGameName: 'Me', riotIdTagline: 'NA1', championId: 1, championName: 'Annie', teamId: 100, win: true }],
+        },
+      })
+    }) as any
+  })
+  afterEach(() => { globalThis.fetch = original })
+
+  const report = (s: Awaited<ReturnType<typeof makeSession>>, gameId: string) =>
+    games.reportGame(env.DB, { ...s, region: 'NA', gameId, reportedBy: 'owner' })
+  const status = async (historyId: number) =>
+    Object.fromEntries((await games.listGamesForHistory(env.DB, historyId)).map(g => [g.gameId, g]))
+
+  it('resolves a finished match with its participants', async () => {
+    const s = await makeSession()
+    await report(s, '1')
+    finished.add('NA1_1')
+    expect(await games.resolvePendingGames(env.DB, 'key')).toBeGreaterThanOrEqual(1)
+    const g = (await status(s.historyId))['1']!
+    expect(g.status).toBe('resolved')
+    expect(g.queueId).toBe(420)
+    expect(g.participants).toEqual([
+      { puuid: 'p1', riotId: 'Me#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true },
+    ])
+  })
+
+  it('backs off a match that is not available yet', async () => {
+    const s = await makeSession()
+    await report(s, '2')
+    const now = Date.now()
+    await games.resolvePendingGames(env.DB, 'key', now)
+    calls = []
+    await games.resolvePendingGames(env.DB, 'key', now + 60_000)
+    expect(calls).not.toContain('NA1_2')
+    await games.resolvePendingGames(env.DB, 'key', now + games.retryDelayMs(1))
+    expect(calls).toContain('NA1_2')
+    expect((await status(s.historyId))['2']!.status).toBe('pending')
+  })
+
+  it("doesn't let unresolvable reports starve newer ones", async () => {
+    const s = await makeSession()
+    for (let i = 0; i < 25; i++) await report(s, `${100 + i}`)
+    await report(s, '999')
+    finished.add('NA1_999')
+    const now = Date.now()
+    await games.resolvePendingGames(env.DB, 'key', now)
+    await games.resolvePendingGames(env.DB, 'key', now)
+    expect((await status(s.historyId))['999']!.status).toBe('resolved')
+  })
+
+  it('records upstream errors and gives up after a day', async () => {
+    const s = await makeSession()
+    await report(s, '500')
+    const now = Date.now()
+    await games.resolvePendingGames(env.DB, 'key', now)
+    expect((await status(s.historyId))['500']!.error).toContain('500')
+    // Earlier tests' pending reports share the batch, so sweep until it drains.
+    for (let i = 0; i < 5; i++) await games.resolvePendingGames(env.DB, 'key', now + 25 * 60 * 60 * 1000)
+    expect((await status(s.historyId))['500']!.status).toBe('failed')
+  })
+
+  it('doubles the delay up to a cap', () => {
+    expect(games.retryDelayMs(2)).toBe(2 * games.retryDelayMs(1))
+    expect(games.retryDelayMs(50)).toBe(games.retryDelayMs(10))
   })
 })
 
