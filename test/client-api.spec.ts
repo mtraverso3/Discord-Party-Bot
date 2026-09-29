@@ -3,13 +3,19 @@ import { describe, expect, it } from 'vitest'
 import { generateLinkCode, handleClientApi, writeLinkCode } from '../src/client-api'
 import { closeParty, createParty, joinParty } from '../src/store/parties'
 import { saveUserIgn } from '../src/store/profiles'
+import { MAX_GAMES_PER_SESSION } from '../src/store/games'
 import { saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
 
 const OWNER = '100000000000000001'
 const MEMBER = '100000000000000002'
 
-function req(method: string, path: string, opts: { body?: unknown; token?: string } = {}): Promise<Response> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+let ipSeq = 0
+
+function req(method: string, path: string, opts: { body?: unknown; token?: string; ip?: string } = {}): Promise<Response> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'cf-connecting-ip': opts.ip ?? `10.0.0.${++ipSeq}`,
+  }
   if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`
   const url = new URL(`https://bot.test${path}`)
   const r = new Request(url, {
@@ -368,5 +374,56 @@ describe('client lookup', () => {
     const token = await linkUser(OWNER, 'Owner', 'g-lookup4')
     const res = await req('POST', '/client/lookup', { body: { riotIds: ['Anyone#NA1'] }, token })
     expect(res.status).toBe(404)
+  })
+})
+
+describe('client game reports', () => {
+  const report = (token: string, gameId: string) =>
+    req('POST', '/client/party/game-report', { token, body: { region: 'NA', gameId } })
+
+  it('records a game for a party member', async () => {
+    await makeParty('g-rep1', 'REP001', OWNER)
+    const token = await linkUser(OWNER, 'Owner', 'g-rep1')
+    const res = await report(token, '123')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, matchId: 'NA1_123' })
+  })
+
+  it('ignores reports from someone only in the queue', async () => {
+    await makeParty('g-rep2', 'REP002', OWNER)
+    await closeParty(env.DB, 'g-rep2', 'REP002', OWNER)
+    await joinParty(env.DB, 'g-rep2', 'REP002', { userId: MEMBER, username: 'm', displayName: 'M' })
+    const token = await linkUser(MEMBER, 'M', 'g-rep2')
+    expect((await report(token, '1')).status).toBe(404)
+  })
+
+  it(`caps a session at ${MAX_GAMES_PER_SESSION} reports, but re-reporting a known game is fine`, async () => {
+    await makeParty('g-rep3', 'REP003', OWNER)
+    const token = await linkUser(OWNER, 'Owner', 'g-rep3')
+    for (let i = 0; i < MAX_GAMES_PER_SESSION; i++) expect((await report(token, `${i}`)).status).toBe(200)
+    expect((await report(token, '999999')).status).toBe(400)
+    expect((await report(token, '0')).status).toBe(200)
+  })
+})
+
+describe('client rate limits', () => {
+  it('limits link-code guesses per IP', async () => {
+    const guess = () => req('POST', '/client/auth', { body: { code: 'AAAAAAAA' }, ip: '203.0.113.7' })
+    for (let i = 0; i < 10; i++) expect((await guess()).status).toBe(404)
+    expect((await guess()).status).toBe(429)
+    expect((await req('POST', '/client/auth', { body: { code: 'AAAAAAAA' }, ip: '203.0.113.8' })).status).toBe(404)
+  })
+
+  it('limits live-game lookups per user', async () => {
+    const token = await linkUser(MEMBER, 'M', 'g-riot')
+    const live = () => req('POST', '/client/champions/live', { token, body: { region: 'NA', gameName: 'a', tagLine: 'b' } })
+    for (let i = 0; i < 30; i++) expect((await live()).status).toBe(200)
+    expect((await live()).status).toBe(429)
+  })
+
+  it('limits every call per token', async () => {
+    const token = 'e'.repeat(64)
+    for (let i = 0; i < 300; i++) expect((await req('GET', '/client/session', { token })).status).toBe(401)
+    expect((await req('GET', '/client/session', { token })).status).toBe(429)
   })
 })

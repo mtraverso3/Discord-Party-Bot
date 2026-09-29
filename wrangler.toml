@@ -30,6 +30,23 @@ migrations_dir = "migrations"
 binding = "PARTY_KV"
 id = "32fff28077814cbcac824ebd05c0ce66"
 
+# Desktop-client API rate limits, per data center. Hits are logged as
+# "rate limited" in Workers Logs.
+[[ratelimits]]
+name = "CLIENT_LIMITER"       # every client call, per token (or IP without one)
+namespace_id = "4201"
+simple = { limit = 300, period = 60 }
+
+[[ratelimits]]
+name = "CLIENT_AUTH_LIMITER"  # link-code exchange, per IP
+namespace_id = "4202"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RIOT_LIMITER"         # live-game lookups that spend the Riot API key, per user
+namespace_id = "4203"
+simple = { limit = 30, period = 60 }
+
 # Cron sweeps: idle parties, expired link codes and client tokens, admin login
 # tokens and OIDC codes, and audit log trimming.
 [triggers]

@@ -143,6 +143,10 @@ export interface AppBindings extends Record<string, unknown> {
   // client's Spectator-based fallback). When unset, that endpoint reports the
   // feature as unavailable and the client relies on the local champ-select read.
   RIOT_API_KEY?: string
+  // Client API rate limits (wrangler.toml [[ratelimits]]).
+  CLIENT_LIMITER?: RateLimit
+  CLIENT_AUTH_LIMITER?: RateLimit
+  RIOT_LIMITER?: RateLimit
   // Static assets binding serving the built admin SPA (admin-ui/dist).
   ASSETS?: Fetcher
 }

@@ -49,9 +49,21 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
   }
 }
 
+/** A 429 when `limiter` is out of budget for `key`, otherwise null. */
+async function rateLimited(limiter: RateLimit | undefined, key: string, what: string): Promise<Response | null> {
+  if (!limiter || (await limiter.limit({ key })).success) return null
+  console.warn(`rate limited: ${what}`)
+  return json({ ok: false, error: 'Too many requests. Try again in a minute.' }, 429)
+}
+
 async function routeClientApi(req: Request, env: AppBindings, url: URL): Promise<Response> {
+  const ip = req.headers.get('cf-connecting-ip') ?? 'unknown'
+  const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/, '').trim()
+  const limited = await rateLimited(env.CLIENT_LIMITER, bearer ? `t:${bearer}` : `ip:${ip}`, url.pathname)
+  if (limited) return limited
+
   if (url.pathname === '/client/auth' && req.method === 'POST') {
-    return await auth(req, env)
+    return await rateLimited(env.CLIENT_AUTH_LIMITER, ip, '/client/auth') ?? await auth(req, env)
   }
   if (url.pathname === '/client/session') {
     if (req.method !== 'GET' && req.method !== 'DELETE') {
@@ -442,8 +454,9 @@ async function reportPartyGame(req: Request, env: AppBindings): Promise<Response
   if (!region || !gameId) return json({ ok: false, error: 'region and gameId are required.' }, 400)
   if (!platformForRegion(region)) return json({ ok: false, error: `Unsupported region "${region}".` }, 400)
 
-  const partyId = await parties.getUserPartyId(env.DB, rec.guildId, rec.userId)
-  if (!partyId) return json({ ok: false, error: 'You are not in a party.' }, 404)
+  const membership = await parties.getUserMembership(env.DB, rec.guildId, rec.userId)
+  if (membership?.role !== 'member') return json({ ok: false, error: 'You are not in a party.' }, 404)
+  const partyId = membership.partyId
   const historyId = await activeSessionId(env.DB, rec.guildId, partyId)
   if (historyId == null) return json({ ok: false, error: 'No active party session.' }, 404)
 
@@ -475,6 +488,9 @@ async function championCatalog(req: Request, env: AppBindings): Promise<Response
 async function liveChampions(req: Request, env: AppBindings): Promise<Response> {
   const auth = await authenticate(req, env)
   if (!auth) return json({ ok: false, error: 'Not linked.' }, 401)
+
+  const limited = await rateLimited(env.RIOT_LIMITER, auth.rec.userId, `/client/champions/live user=${auth.rec.userId}`)
+  if (limited) return limited
 
   if (!env.RIOT_API_KEY) {
     // Not an error — the client treats this as "fall back to local data".
