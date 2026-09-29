@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { generateLinkCode, handleClientApi, writeLinkCode } from '../src/client-api'
+import { hashToken } from '../src/store/clientAuth'
 import { closeParty, createParty, joinParty } from '../src/store/parties'
 import { saveUserIgn } from '../src/store/profiles'
 import { MAX_GAMES_PER_SESSION } from '../src/store/games'
@@ -425,5 +426,31 @@ describe('client rate limits', () => {
     const token = 'e'.repeat(64)
     for (let i = 0; i < 300; i++) expect((await req('GET', '/client/session', { token })).status).toBe(401)
     expect((await req('GET', '/client/session', { token })).status).toBe(429)
+  })
+})
+
+describe('client token storage', () => {
+  it('stores tokens hashed, never raw', async () => {
+    const token = await linkUser('100000000000000077', 'Hashed', 'g-hash')
+    const { results } = await env.DB.prepare('SELECT token FROM client_tokens WHERE user_id = ?1')
+      .bind('100000000000000077').all<{ token: string }>()
+    expect(results.map(r => r.token)).toEqual([await hashToken(token)])
+  })
+
+  it('still accepts a token stored raw before hashing, and upgrades it', async () => {
+    const raw = 'c'.repeat(64)
+    const now = Date.now()
+    await env.DB.prepare(`
+      INSERT INTO client_tokens (token, user_id, guild_id, display_name, created_at, refreshed_at, expires_at)
+      VALUES (?1, 'legacy', 'g-legacy', 'Legacy', ?2, ?2, ?3)
+    `).bind(raw, now, now + 60_000).run()
+
+    expect((await req('GET', '/client/session', { token: raw })).status).toBe(200)
+    const row = await env.DB.prepare("SELECT token FROM client_tokens WHERE user_id = 'legacy'").first<{ token: string }>()
+    expect(row!.token).toBe(await hashToken(raw))
+    expect((await req('GET', '/client/session', { token: raw })).status).toBe(200)
+
+    expect((await req('DELETE', '/client/session', { token: raw })).status).toBe(200)
+    expect((await req('GET', '/client/session', { token: raw })).status).toBe(401)
   })
 })

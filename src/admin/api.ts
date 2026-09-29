@@ -197,7 +197,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
   } catch (e) {
     if (rulesErrorMessage(e)) return json({ error: rulesErrorMessage(e) }, 403)
     console.error('admin api error:', e)
-    return json({ error: (e as Error).message ?? 'internal error' }, 500)
+    return json({ error: 'Internal error' }, 500)
   }
 }
 
@@ -287,7 +287,7 @@ async function addAdminRoute(env: AppBindings, guildId: string, body: any, email
 
   // Prefer a caller-supplied name (from the member picker); otherwise resolve
   // the global Discord username so the list shows something readable.
-  let displayName = (body.displayName ?? '').toString().trim()
+  let displayName = (body.displayName ?? '').toString().trim().slice(0, 100)
   if (!displayName) {
     const user = await getUserById(env.DISCORD_BOT_TOKEN, userId).catch(() => null)
     displayName = user ? (user.global_name ?? user.username) : userId

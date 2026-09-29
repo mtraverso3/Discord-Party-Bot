@@ -36,6 +36,12 @@ export function generateToken(): string {
   return [...buf].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+/** Tokens are stored as their SHA-256, so a database leak can't be replayed. */
+export async function hashToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
 export async function writeLinkCode(db: D1Database, code: string, record: LinkRecord): Promise<void> {
   await db.prepare(`
     INSERT INTO link_codes (code, guild_id, user_id, display_name, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)
@@ -57,7 +63,7 @@ export async function createClientToken(db: D1Database, link: LinkRecord): Promi
   await db.prepare(`
     INSERT INTO client_tokens (token, user_id, guild_id, display_name, created_at, refreshed_at, expires_at)
     VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
-  `).bind(token, link.discordUserId, link.guildId, link.displayName, now, now + TOKEN_TTL_MS).run()
+  `).bind(await hashToken(token), link.discordUserId, link.guildId, link.displayName, now, now + TOKEN_TTL_MS).run()
   return token
 }
 
@@ -67,14 +73,19 @@ export async function createClientToken(db: D1Database, link: LinkRecord): Promi
  */
 export async function resolveClientToken(db: D1Database, token: string): Promise<TokenRecord | null> {
   const now = Date.now()
-  const row = await db.prepare('SELECT * FROM client_tokens WHERE token = ?1 AND expires_at > ?2')
-    .bind(token, now)
-    .first<{ user_id: string; guild_id: string; display_name: string; created_at: number; refreshed_at: number }>()
+  const hashed = await hashToken(token)
+  // Tokens issued before hashing are still stored raw; upgrade them on first use.
+  const row = await db.prepare('SELECT * FROM client_tokens WHERE token IN (?1, ?2) AND expires_at > ?3')
+    .bind(hashed, token, now)
+    .first<{ token: string; user_id: string; guild_id: string; display_name: string; created_at: number; refreshed_at: number }>()
   if (!row) return null
+  if (row.token === token) {
+    await db.prepare('UPDATE client_tokens SET token = ?2 WHERE token = ?1').bind(token, hashed).run()
+  }
 
   if (now - row.refreshed_at > TOKEN_REFRESH_INTERVAL_MS) {
     await db.prepare('UPDATE client_tokens SET refreshed_at = ?2, expires_at = ?3 WHERE token = ?1')
-      .bind(token, now, now + TOKEN_TTL_MS).run()
+      .bind(hashed, now, now + TOKEN_TTL_MS).run()
   }
   return {
     userId: row.user_id,
@@ -86,7 +97,7 @@ export async function resolveClientToken(db: D1Database, token: string): Promise
 }
 
 export async function deleteClientToken(db: D1Database, token: string): Promise<void> {
-  await db.prepare('DELETE FROM client_tokens WHERE token = ?1').bind(token).run()
+  await db.prepare('DELETE FROM client_tokens WHERE token IN (?1, ?2)').bind(await hashToken(token), token).run()
 }
 
 /** Cron cleanup: purge expired link codes and client tokens. */

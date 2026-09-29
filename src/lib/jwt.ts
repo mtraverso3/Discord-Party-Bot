@@ -114,3 +114,10 @@ export async function sha256B64url(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
   return bytesToB64url(new Uint8Array(digest))
 }
+
+/** String equality that takes the same time wherever the inputs differ. */
+export async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  const digest = (s: string) => crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
+  const [x, y] = await Promise.all([digest(a), digest(b)])
+  return crypto.subtle.timingSafeEqual(x, y)
+}

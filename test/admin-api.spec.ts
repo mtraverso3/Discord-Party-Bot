@@ -220,3 +220,23 @@ describe('cross-site requests', () => {
     expect(await getParty(env.DB, 'csrf', 'CSRF01')).toBeNull()
   })
 })
+
+describe('admin API hardening', () => {
+  it("doesn't leak internal error details", async () => {
+    const url = new URL('http://x/admin/api/settings?guild=g1')
+    const broken = { ...env, DB: { prepare() { throw new Error('D1_ERROR: secret table detail') } } } as any
+    const res = await handleAdminApi(new Request(url), broken, url, 'boss@example.com')
+    expect(res.status).toBe(500)
+    expect(await res.text()).not.toContain('secret')
+  })
+
+  it('caps admin display names', async () => {
+    const url = new URL('http://x/admin/api/admins?guild=g-cap')
+    const res = await handleAdminApi(new Request(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: '123456789012345678', displayName: 'n'.repeat(5000) }),
+    }), env, url, 'boss@example.com')
+    const [admin] = await res.json<any[]>()
+    expect(admin.displayName).toHaveLength(100)
+  })
+})
