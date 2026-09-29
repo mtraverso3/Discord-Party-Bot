@@ -19,7 +19,11 @@ const OWNER = '410000000000000001'
 const OTHER = '410000000000000002'
 
 const original = globalThis.fetch
-beforeEach(() => { globalThis.fetch = vi.fn(async () => Response.json({ id: 'm', channel_id: 'c' })) as any })
+beforeEach(() => {
+  globalThis.fetch = vi.fn(async (input: any) => String(input).endsWith('/channels')
+    ? Response.json([{ id: '700000000000000001', type: 0 }])
+    : Response.json({ id: 'm', channel_id: 'c' })) as any
+})
 afterEach(() => { globalThis.fetch = original })
 
 it('leaves a guild that has never touched the rules tab ungated', async () => {

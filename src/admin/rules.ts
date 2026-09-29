@@ -4,6 +4,7 @@ import {
   approveManually, getMember, getRulesConfig, getRulesGate, listMembers, memberCounts,
   memberHistory, publishRulesConfig, saveRulesGate,
 } from '../store/rules'
+import { checkGuildChannels } from './channels'
 
 /**
  * The dashboard's rules routes, backing the Rules & verification tab.
@@ -111,6 +112,8 @@ async function post(env: AppBindings, guildId: string, body: any): Promise<Respo
   const channelId = (body?.channelId ?? '').toString().trim() || gate?.channelId
   if (!channelId) return json({ error: 'Pick the channel to post the rules check in.' }, 400)
   if (!/^\d{5,25}$/.test(channelId)) return json({ error: 'That is not a valid channel ID.' }, 400)
+  const channel = await checkGuildChannels(env, guildId, [{ id: channelId, kind: 'text' }])
+  if (!channel.ok) return json({ error: channel.error }, channel.status)
   try {
     await postRulesMessage(env, guildId, channelId)
   } catch (e) {

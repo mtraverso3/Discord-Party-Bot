@@ -18,7 +18,9 @@ const original = globalThis.fetch
 let discord: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
-  discord = vi.fn(async () => Response.json({ id: 'posted', channel_id: 'chan' }))
+  discord = vi.fn(async (input: any) => String(input).endsWith('/channels')
+    ? Response.json([{ id: '700000000000000001', type: 0 }])
+    : Response.json({ id: 'posted', channel_id: 'chan' }))
   globalThis.fetch = discord as any
 })
 afterEach(() => { globalThis.fetch = original })
@@ -146,9 +148,17 @@ it('posts the start message to a channel and remembers it', async () => {
   expect(res.status).toBe(200)
   expect((await getRulesGate(env.DB, g))?.channelId).toBe('700000000000000001')
 
-  const [url, init] = discord.mock.calls[0] as any
+  const [url, init] = discord.mock.calls.find(([u]) => String(u).endsWith('/messages')) as any
   expect(url).toContain('/channels/700000000000000001/messages')
   expect(JSON.parse(init.body).components[0].components[0].custom_id).toContain('rules_start')
+})
+
+it("won't post the start message into another server's channel", async () => {
+  const g = guild()
+  const res = await call('post', g, 'POST', { channelId: '799999999999999999' })
+  expect(res.status).toBe(400)
+  expect(discord.mock.calls.some(([u]) => String(u).endsWith('/messages'))).toBe(false)
+  expect((await getRulesGate(env.DB, g))?.channelId).toBeUndefined()
 })
 
 it('counts a revocation only when it takes away a live approval', async () => {
