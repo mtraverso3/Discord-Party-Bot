@@ -118,3 +118,54 @@ describe('GET /members/resolve', () => {
     expect(Object.keys(names).sort()).toEqual(['inguild', 'leftguild'])
   })
 })
+
+describe("channels must belong to the admin's guild", () => {
+  const TEXT = '700000000000000001'
+  const VOICE = '700000000000000002'
+  const FOREIGN = '799999999999999999'
+  let posts: string[]
+  let seq = 0
+
+  beforeEach(() => {
+    posts = []
+    const inner = globalThis.fetch
+    globalThis.fetch = vi.fn(async (input: any, init?: any) => {
+      const path = new URL(typeof input === 'string' ? input : input.url).pathname
+      if (path.endsWith('/channels')) return Response.json([{ id: TEXT, type: 0 }, { id: VOICE, type: 2 }])
+      if (path.endsWith('/messages')) { posts.push(path); return Response.json({ id: `m${posts.length}`, channel_id: TEXT }) }
+      return inner(input, init)
+    }) as any
+  })
+
+  async function api(guild: string, method: string, path: string, body?: unknown) {
+    const url = new URL(`http://x/admin/api${path}?guild=${guild}`)
+    return handleAdminApi(new Request(url, {
+      method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+    }), env, url, `1@${guild}.discord.local`)
+  }
+  const create = (guild: string, extra: Record<string, string>) =>
+    api(guild, 'POST', '/parties', { ownerId: 'inguild', channelId: TEXT, ...extra })
+
+  it('creates a party in its own channels', async () => {
+    const res = await create(`cg${++seq}`, { voiceChannelId: VOICE })
+    expect(res.status).toBe(200)
+    expect(posts).toEqual([`/api/v10/channels/${TEXT}/messages`])
+  })
+
+  it("refuses another server's text or voice channel", async () => {
+    expect((await create(`cg${++seq}`, { channelId: FOREIGN })).status).toBe(400)
+    expect((await create(`cg${++seq}`, { voiceChannelId: FOREIGN })).status).toBe(400)
+    expect((await create(`cg${++seq}`, { voiceChannelId: TEXT })).status).toBe(400)
+    expect(posts).toEqual([])
+  })
+
+  it('refuses to bump or re-point an existing party elsewhere', async () => {
+    const g = `cg${++seq}`
+    const party = await (await create(g, {})).json<any>()
+    posts = []
+    expect((await api(g, 'POST', `/parties/${party.id}/bump`, { channelId: FOREIGN })).status).toBe(400)
+    expect((await api(g, 'PATCH', `/parties/${party.id}`, { voiceChannelId: FOREIGN })).status).toBe(400)
+    expect(posts).toEqual([])
+    expect((await api(g, 'PATCH', `/parties/${party.id}`, { voiceChannelId: VOICE })).status).toBe(200)
+  })
+})

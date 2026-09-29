@@ -15,6 +15,7 @@ import * as notes from '../store/notes'
 import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 import { importFromKv } from './import'
 import { handleRulesAdmin } from './rules'
+import { checkGuildChannels } from './channels'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -355,6 +356,8 @@ async function getOne(env: AppBindings, guildId: string, partyId: string): Promi
 async function patchOne(env: AppBindings, guildId: string, partyId: string, body: any): Promise<Response> {
   const party = await parties.getParty(env.DB, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
+  const channel = await checkGuildChannels(env, guildId, [{ id: body.voiceChannelId, kind: 'voice' }])
+  if (!channel.ok) return json({ error: channel.error }, channel.status)
 
   let ignMap: Record<string, string> | undefined
   if (body.game && party.game !== body.game) {
@@ -392,6 +395,12 @@ async function spawnParty(env: AppBindings, guildId: string, body: any): Promise
   const channelId = (body.channelId ?? '').toString().trim()
   if (!ownerId) return json({ error: 'ownerId required' }, 400)
   if (!channelId) return json({ error: 'channelId (text channel for the embed) required' }, 400)
+  const voiceChannelId = (body.voiceChannelId ?? '').toString() || undefined
+  const channels = await checkGuildChannels(env, guildId, [
+    { id: channelId, kind: 'text' },
+    { id: voiceChannelId, kind: 'voice' },
+  ])
+  if (!channels.ok) return json({ error: channels.error }, channels.status)
 
   const [settings, partyCount, existingPartyId, member] = await Promise.all([
     getGuildSettings(env.DB, guildId),
@@ -422,7 +431,7 @@ async function spawnParty(env: AppBindings, guildId: string, body: any): Promise
     description: (body.description ?? '').toString().slice(0, 1000),
     game,
     maxSize,
-    voiceChannelId: (body.voiceChannelId ?? '').toString() || undefined,
+    voiceChannelId,
     // Same default the create form and /party create use, so the three agree.
     rulesRequired: body.rulesRequired != null
       ? !!body.rulesRequired
@@ -487,8 +496,11 @@ async function applyTemplate(env: AppBindings, guildId: string, templateId: stri
 async function bumpOne(env: AppBindings, guildId: string, partyId: string, body: any): Promise<Response> {
   const party = await parties.getParty(env.DB, guildId, partyId)
   if (!party) return json({ error: 'Party not found' }, 404)
-  const channelId = (body.channelId ?? '').toString().trim() || party.embedChannelId
+  const requested = (body.channelId ?? '').toString().trim()
+  const channelId = requested || party.embedChannelId
   if (!channelId) return json({ error: 'No channel known for this party — pass channelId' }, 400)
+  const channel = await checkGuildChannels(env, guildId, [{ id: requested, kind: 'text' }])
+  if (!channel.ok) return json({ error: channel.error }, channel.status)
   await repostPartyEmbed(env, party, channelId)
   return json(await parties.getParty(env.DB, guildId, partyId))
 }
