@@ -22,45 +22,32 @@ export function buildPartyEmbed(party: PartyData, rulesEnforced = party.rulesReq
   const isFull = party.members.length >= party.maxSize
   const statusLabel = party.isClosed ? '🔒 CLOSED' : isFull ? '🟡 FULL' : '🟢 OPEN'
 
-  const memberLines = party.members
-    .map((m, i) => {
-      const ign = m.ign ? ` *(${m.ign})*` : ''
-      const crown = m.userId === party.ownerId ? ' 👑' : ''
-      const away = m.away ? ' 💤' : ''
-      const assigned = party.banlist?.assignments[m.userId]
-      const ban = assigned ? ` — 🚫 **${assigned}**` : ''
-      return `\`${i + 1}.\` <@${m.userId}>${crown}${away}${ign}${ban}`
-    })
-    .join('\n') || '*No members yet*'
+  const memberLines = party.members.map((m, i) => {
+    const ign = m.ign ? ` *(${m.ign})*` : ''
+    const crown = m.userId === party.ownerId ? ' 👑' : ''
+    const away = m.away ? ' 💤' : ''
+    const assigned = party.banlist?.assignments[m.userId]
+    const ban = assigned ? ` — 🚫 **${assigned}**` : ''
+    return `\`${i + 1}.\` <@${m.userId}>${crown}${away}${ign}${ban}`
+  })
+  const queueLines = party.queue.map((q, i) => {
+    const ign = q.ign ? ` *(${q.ign})*` : ''
+    return `\`${i + 1}.\` <@${q.userId}>${ign}`
+  })
 
   const awayCount = party.members.filter(m => m.away).length
-  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
-    {
-      name: `Members — ${party.members.length}/${party.maxSize}`
-        + (awayCount > 0 ? ` · 💤 ${awayCount} away` : ''),
-      value: memberLines,
-    },
-  ]
+  const membersName = `Members — ${party.members.length}/${party.maxSize}`
+    + (awayCount > 0 ? ` · 💤 ${awayCount} away` : '')
+  const queueName = `Queue — ${party.queue.length} waiting`
+  const voice = party.voiceChannelId
+    ? { name: 'Voice Channel', value: `<#${party.voiceChannelId}>`, inline: true }
+    : null
 
-  if (party.voiceChannelId) {
-    fields.push({ name: 'Voice Channel', value: `<#${party.voiceChannelId}>`, inline: true })
-  }
-
-  if (party.queue.length > 0) {
-    const queueLines = party.queue
-      .map((q, i) => {
-        const ign = q.ign ? ` *(${q.ign})*` : ''
-        return `\`${i + 1}.\` <@${q.userId}>${ign}`
-      })
-      .join('\n')
-    fields.push({ name: `Queue — ${party.queue.length} waiting`, value: queueLines })
-  }
-
-  return {
+  const embed = {
     title: party.name,
     description: party.description || null,
     color: embedColor(party),
-    fields,
+    fields: [] as EmbedField[],
     footer: {
       text: `${party.game} · ${statusLabel}`
         + (rulesEnforced ? ' · 🔒 Rules check required' : '')
@@ -68,6 +55,70 @@ export function buildPartyEmbed(party: PartyData, rulesEnforced = party.rulesReq
     },
     timestamp: new Date(party.createdAt).toISOString(),
   }
+
+  let budget = EMBED_MAX - embedSize(embed) - (voice ? voice.name.length + voice.value.length : 0)
+  const members = memberLines.length > 0
+    ? listFields(membersName, memberLines, budget - (queueLines.length > 0 ? QUEUE_RESERVE : 0))
+    : [{ name: membersName, value: '*No members yet*' }]
+  budget -= fieldsSize(members)
+  embed.fields.push(...members)
+  if (voice) embed.fields.push(voice)
+  if (queueLines.length > 0) embed.fields.push(...listFields(queueName, queueLines, budget))
+  return embed
+}
+
+// Discord's embed limits.
+const FIELD_VALUE_MAX = 1024
+const EMBED_MAX = 6000
+// Keeps one oversized entry (a long banlist line) from crowding out the rest.
+const LINE_MAX = 200
+// Held back from the member list so a long roster can't squeeze out the queue.
+const QUEUE_RESERVE = 150
+const CONTINUED = '​'
+
+interface EmbedField { name: string; value: string; inline?: boolean }
+
+function clip(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + '…' : s
+}
+
+function fieldsSize(fields: EmbedField[]): number {
+  return fields.reduce((n, f) => n + f.name.length + f.value.length, 0)
+}
+
+/** The characters Discord counts toward an embed's total. */
+export function embedSize(embed: { title?: string; description?: string | null; fields?: EmbedField[]; footer?: { text?: string } }): number {
+  return (embed.title?.length ?? 0) + (embed.description?.length ?? 0)
+    + fieldsSize(embed.fields ?? []) + (embed.footer?.text?.length ?? 0)
+}
+
+/**
+ * One line per entry, spread over as many fields as the per-field limit needs.
+ * Anything past `budget` characters is summarised as "…and N more".
+ */
+function listFields(name: string, lines: string[], budget: number): EmbedField[] {
+  const values: string[][] = [[]]
+  let used = name.length
+  const valueLength = (v: string[]) => v.reduce((n, l) => n + l.length, 0) + Math.max(v.length - 1, 0)
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = clip(lines[i]!, LINE_MAX)
+    const more = `…and ${lines.length - i} more`
+    const current = values.at(-1)!
+    const newField = current.length > 0 && valueLength(current) + 1 + line.length > FIELD_VALUE_MAX
+    const cost = line.length + (newField ? CONTINUED.length : current.length > 0 ? 1 : 0)
+    const last = i === lines.length - 1
+    if (used + cost + (last ? 0 : more.length + 2) > budget) {
+      if (current.length > 0 && valueLength(current) + 1 + more.length > FIELD_VALUE_MAX) values.push([])
+      values.at(-1)!.push(more)
+      break
+    }
+    if (newField) values.push([])
+    values.at(-1)!.push(line)
+    used += cost
+  }
+
+  return values.map((v, i) => ({ name: i === 0 ? name : CONTINUED, value: v.join('\n') }))
 }
 
 /**
