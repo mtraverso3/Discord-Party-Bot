@@ -542,6 +542,9 @@ async function patchUserProfile(env: AppBindings, guildId: string, userId: strin
   const game = (body.game ?? '').toString()
   if (!GAMES.some(g => g.value === game)) return json({ error: 'Unknown game' }, 400)
   const ign = (body.ign ?? '').toString().trim().slice(0, IGN_MAX).trim()
+  // IGNs are global, so only a member of this guild can be edited from it.
+  const member = await getGuildMember(env.DISCORD_BOT_TOKEN, guildId, userId).catch(() => null)
+  if (!member?.user) return json({ error: 'User not in this guild' }, 404)
 
   await saveUserIgn(env.DB, userId, game, ign)
   const profile = await getUserProfile(env.DB, userId)

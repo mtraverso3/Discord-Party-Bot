@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleAdminApi } from '../src/admin/api'
+import { getUserIgn } from '../src/store/profiles'
 
 // The settings allowlists resolve user IDs to names through GET
 // /members/resolve. Stub the two Discord endpoints it leans on (guild member
@@ -167,5 +168,26 @@ describe("channels must belong to the admin's guild", () => {
     expect((await api(g, 'PATCH', `/parties/${party.id}`, { voiceChannelId: FOREIGN })).status).toBe(400)
     expect(posts).toEqual([])
     expect((await api(g, 'PATCH', `/parties/${party.id}`, { voiceChannelId: VOICE })).status).toBe(200)
+  })
+})
+
+describe('PATCH /users/:id/profile', () => {
+  async function patch(userId: string, ign: string) {
+    const url = new URL(`http://x/admin/api/users/${userId}/profile?guild=g1`)
+    return handleAdminApi(new Request(url, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game: 'Valorant', ign }),
+    }), env, url, '1@g1.discord.local')
+  }
+
+  it("edits a member's IGN", async () => {
+    const res = await patch('inguild', 'Shooty#NA1')
+    expect(res.status).toBe(200)
+    expect((await res.json<any>()).igns.Valorant).toBe('Shooty#NA1')
+  })
+
+  it("won't touch someone outside the guild", async () => {
+    expect((await patch('leftguild', 'Hijacked')).status).toBe(404)
+    expect(await getUserIgn(env.DB, 'leftguild', 'Valorant')).toBeUndefined()
   })
 })
