@@ -23,8 +23,8 @@ beforeAll(async () => {
   const kp = await crypto.subtle.generateKey(
     { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
     true, ['sign', 'verify'],
-  )
-  const jwk = await crypto.subtle.exportKey('jwk', kp.privateKey)
+  ) as CryptoKeyPair
+  const jwk = await crypto.subtle.exportKey('jwk', kp.privateKey) as JsonWebKey & { kid?: string }
   jwk.kid = 'test-key'
 
   oidcEnv = {

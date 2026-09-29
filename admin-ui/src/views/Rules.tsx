@@ -225,7 +225,11 @@ export function Rules() {
                       <button
                         type="button"
                         className={cn('inline-flex cursor-pointer items-center gap-1 rounded transition-colors hover:text-foreground', !active && 'text-muted-foreground')}
-                        onClick={() => { active ? setSortDesc(d => !d) : (setSortKey(col.key), setSortDesc(false)) }}
+                        onClick={() => {
+                          if (active) return setSortDesc(d => !d)
+                          setSortKey(col.key)
+                          setSortDesc(false)
+                        }}
                       >
                         {col.label}
                         {active && (sortDesc ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />)}

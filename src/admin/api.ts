@@ -1,5 +1,5 @@
 import { rulesAccess, rulesErrorMessage } from '../lib/rules'
-import type { AppBindings, PartyData } from '../types'
+import type { AppBindings } from '../types'
 import { createPartyAndEmbed, repostPartyEmbed, tryMarkDisbanded, trySyncEmbed } from '../lib/party'
 import * as parties from '../store/parties'
 import { getIgnMap, getUserIgn, getUserProfile, saveUserIgn } from '../store/profiles'

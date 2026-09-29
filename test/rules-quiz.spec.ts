@@ -220,7 +220,7 @@ describe('rules quiz', () => {
   it('invalidates a quiz when approval is revoked underneath it', async () => {
     const guildId = await setup()
     const q1 = await toFirstQuestion(guildId)
-    await revokeApproval(env.DB, guildId, MEMBER, 'mod', 'Mid-quiz', true, false)
+    await revokeApproval(env.DB, guildId, MEMBER, 'mod', 'Mid-quiz', true)
 
     const click = context(guildId, buttonFor(q1, 'A'))
     await handleRulesStep(click)

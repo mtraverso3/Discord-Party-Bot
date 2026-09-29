@@ -760,7 +760,7 @@ async function adminLink(c: CommandContext<AppEnv>, guildId: string, userId: str
   const { displayName } = extractMemberInfo(c.interaction)
   const token = generateAdminToken()
   await writeAdminLinkToken(c.env.DB, token, { guildId, userId, displayName })
-  const url = `\<${normalizeBaseUrl(base)}/auth/login?token=${token}\>`
+  const url = `<${normalizeBaseUrl(base)}/auth/login?token=${token}>`
 
   return c.followup({
     content: `**Admin panel login:** ${url}\n\nThis link is single-use and expires in 24 hours. Don't share it — anyone who opens it signs in as you.`,

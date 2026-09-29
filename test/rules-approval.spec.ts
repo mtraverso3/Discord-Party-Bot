@@ -55,7 +55,7 @@ async function approve(guildId: string, ...ids: string[]) {
 }
 
 const revoke = (guildId: string, id: string) =>
-  revokeApproval(env.DB, guildId, id, 'moderator', 'Test revocation', true, false)
+  revokeApproval(env.DB, guildId, id, 'moderator', 'Test revocation', true)
 
 /** A gated guild with a party owned by an approved OWNER. */
 async function make(maxSize = 2) {
@@ -292,7 +292,7 @@ describe('admin exemption', () => {
     await expect(rulesAccess(env).require(guildId, ADMIN)).rejects.toThrow('revoked')
 
     // "Require retake without penalty" is the undo for a revocation.
-    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'Sorted out', false, false)
+    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'Sorted out', false)
     await rulesAccess(env).require(guildId, ADMIN)
     expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
   })
@@ -305,10 +305,10 @@ describe('admin exemption', () => {
 
     // Through the real grant path, which is what clears the mark.
     const { generation } = await getMember(env.DB, guildId, ADMIN)
-    expect(await grantApproval(env.DB, guildId, ADMIN, generation, 1, false)).toBe(true)
+    expect(await grantApproval(env.DB, guildId, ADMIN, generation, 1)).toBe(true)
 
     // A later non-disciplinary lapse leaves them exempt again.
-    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'New season', false, false)
+    await revokeApproval(env.DB, guildId, ADMIN, 'moderator', 'New season', false)
     expect(await exemptFromRules(env, guildId, ADMIN, true)).toBe(true)
   })
 
