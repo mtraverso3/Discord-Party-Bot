@@ -145,11 +145,9 @@ export async function listGamesForUser(
   `).bind(guildId, userId, limit).all<GameRow>()
   if (games.length === 0) return []
 
-  const ids = games.map(g => g.id)
-  const placeholders = ids.map((_, i) => `?${i + 1}`).join(', ')
   const { results: parts } = await db.prepare(`
-    SELECT * FROM party_game_participants WHERE game_row_id IN (${placeholders})
-  `).bind(...ids).all<{
+    SELECT * FROM party_game_participants WHERE game_row_id IN (SELECT value FROM json_each(?1))
+  `).bind(JSON.stringify(games.map(g => g.id))).all<{
     game_row_id: number; puuid: string; riot_id: string
     champion_id: number; champion_name: string; team_id: number; win: number | null
   }>()

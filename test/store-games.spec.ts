@@ -85,3 +85,25 @@ describe('game reporting', () => {
     expect(await games.listGamesForHistory(env.DB, historyId)).toHaveLength(1)
   })
 })
+
+describe('listGamesForUser', () => {
+  it("returns games from the user's sessions with their participants", async () => {
+    const mine = await makeSession()
+    await parties.joinParty(env.DB, mine.guildId, mine.partyId, user('player'))
+    await games.reportGame(env.DB, { ...mine, region: 'NA', gameId: '42', reportedBy: 'owner' })
+    const [row] = await games.listGamesForHistory(env.DB, mine.historyId)
+    await env.DB.prepare(`
+      INSERT INTO party_game_participants (game_row_id, puuid, riot_id, champion_id, champion_name, team_id, win)
+      VALUES (?1, 'p1', 'Player#NA1', 1, 'Annie', 100, 1)
+    `).bind(row!.id).run()
+
+    const other = await makeSession()
+    await games.reportGame(env.DB, { ...other, guildId: mine.guildId, region: 'NA', gameId: '43', reportedBy: 'owner' })
+
+    const list = await games.listGamesForUser(env.DB, mine.guildId, 'player')
+    expect(list.map(g => g.matchId)).toEqual(['NA1_42'])
+    expect(list[0]!.participants).toEqual([
+      { puuid: 'p1', riotId: 'Player#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true },
+    ])
+  })
+})

@@ -35,10 +35,9 @@ export async function getUserIgn(db: D1Database, userId: string, game: string): 
 export async function getIgnMap(db: D1Database, userIds: string[], game: string): Promise<Record<string, string>> {
   const map: Record<string, string> = {}
   if (userIds.length === 0) return map
-  const placeholders = userIds.map((_, i) => `?${i + 2}`).join(', ')
   const { results } = await db.prepare(
-    `SELECT user_id, ign FROM user_igns WHERE game = ?1 AND user_id IN (${placeholders})`,
-  ).bind(game, ...userIds).all<{ user_id: string; ign: string }>()
+    'SELECT user_id, ign FROM user_igns WHERE game = ?1 AND user_id IN (SELECT value FROM json_each(?2))',
+  ).bind(game, JSON.stringify(userIds)).all<{ user_id: string; ign: string }>()
   for (const r of results) map[r.user_id] = r.ign
   return map
 }
