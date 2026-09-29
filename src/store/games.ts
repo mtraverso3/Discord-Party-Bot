@@ -12,6 +12,14 @@ import { fetchMatch, matchIdForGame, platformForRegion } from '../lib/riot'
 // Match-v5 at all, so those will always age out — expected).
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000
 const RESOLVE_BATCH = 20
+// Just under the 15-minute sweep, so a retry isn't pushed back a whole tick.
+const RETRY_BASE_MS = 14 * 60 * 1000
+const RETRY_MAX_MS = 4 * 60 * 60 * 1000
+
+/** Delay before the next try after `attempts` misses, doubling up to 4h. */
+export function retryDelayMs(attempts: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** Math.max(attempts - 1, 0), RETRY_MAX_MS)
+}
 
 export interface GameParticipant {
   puuid: string
@@ -81,6 +89,7 @@ interface GameRow {
   reported_by: string
   reported_at: number
   status: 'pending' | 'resolved' | 'failed'
+  attempts: number
   resolved_at: number | null
   queue_id: number | null
   game_creation: number | null
@@ -182,13 +191,15 @@ export async function listGamesForUser(
  * left pending (and aged out to `failed` after PENDING_MAX_AGE_MS). Requires
  * RIOT_API_KEY; a no-op without one. Returns how many resolved this pass.
  */
-export async function resolvePendingGames(db: D1Database, riotApiKey: string | undefined): Promise<number> {
+export async function resolvePendingGames(
+  db: D1Database, riotApiKey: string | undefined, now = Date.now(),
+): Promise<number> {
   if (!riotApiKey) return 0
-  const { results } = await db.prepare(
-    "SELECT * FROM party_games WHERE status = 'pending' ORDER BY id LIMIT ?1",
-  ).bind(RESOLVE_BATCH).all<GameRow>()
+  const { results } = await db.prepare(`
+    SELECT * FROM party_games WHERE status = 'pending' AND next_attempt_at <= ?1
+    ORDER BY next_attempt_at, id LIMIT ?2
+  `).bind(now, RESOLVE_BATCH).all<GameRow>()
 
-  const now = Date.now()
   let resolved = 0
   for (const g of results) {
     if (!g.region) { await failGame(db, g.id, 'no region recorded'); continue }
@@ -199,7 +210,7 @@ export async function resolvePendingGames(db: D1Database, riotApiKey: string | u
         if (now - g.reported_at > PENDING_MAX_AGE_MS) {
           await failGame(db, g.id, 'match not found before timeout (custom game, or never finished)')
         } else {
-          await db.prepare('UPDATE party_games SET attempts = attempts + 1 WHERE id = ?1').bind(g.id).run()
+          await retryLater(db, g, now)
         }
         continue
       }
@@ -222,12 +233,18 @@ export async function resolvePendingGames(db: D1Database, riotApiKey: string | u
       if (now - g.reported_at > PENDING_MAX_AGE_MS) {
         await failGame(db, g.id, msg)
       } else {
-        await db.prepare('UPDATE party_games SET attempts = attempts + 1, error = ?2 WHERE id = ?1')
-          .bind(g.id, msg).run()
+        await retryLater(db, g, now, msg)
       }
     }
   }
   return resolved
+}
+
+async function retryLater(db: D1Database, g: GameRow, now: number, error?: string): Promise<void> {
+  await db.prepare(`
+    UPDATE party_games SET attempts = attempts + 1, next_attempt_at = ?2, error = COALESCE(?3, error)
+    WHERE id = ?1
+  `).bind(g.id, now + retryDelayMs(g.attempts + 1), error ?? null).run()
 }
 
 async function failGame(db: D1Database, id: number, error: string): Promise<void> {
