@@ -42,8 +42,10 @@ export async function getIgnMap(db: D1Database, userIds: string[], game: string)
   return map
 }
 
+export const IGN_MAX = 100
+
 export async function saveUserIgn(db: D1Database, userId: string, game: string, ign: string): Promise<void> {
-  const trimmed = ign.trim()
+  const trimmed = ign.trim().slice(0, IGN_MAX).trim()
   if (!trimmed) {
     await db.prepare('DELETE FROM user_igns WHERE user_id = ?1 AND game = ?2').bind(userId, game).run()
     return

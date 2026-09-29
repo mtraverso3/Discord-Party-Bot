@@ -79,7 +79,7 @@ const commands = [
         description: 'Set your in-game name for a game (saves to profile)',
         options: [
           { type: 3, name: 'game', description: 'Game to set IGN for', required: true, choices: GAMES },
-          { type: 3, name: 'name', description: 'Your in-game name / summoner name', required: true },
+          { type: 3, name: 'name', description: 'Your in-game name / summoner name', required: true, max_length: 100 },
         ],
       },
       {

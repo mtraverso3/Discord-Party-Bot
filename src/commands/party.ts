@@ -8,7 +8,7 @@ import {
   repostPartyEmbed, tryMarkDisbanded, trySyncEmbed,
 } from '../lib/party'
 import * as parties from '../store/parties'
-import { getIgnMap, getUserIgn, saveUserIgn } from '../store/profiles'
+import { IGN_MAX, getIgnMap, getUserIgn, saveUserIgn } from '../store/profiles'
 import { canBump, gameAllowed, getGuildSettings } from '../store/settings'
 import { generateLinkCode, writeLinkCode } from '../store/clientAuth'
 import { generateAdminToken, isAdmin, writeAdminLinkToken } from '../store/adminAuth'
@@ -328,7 +328,7 @@ async function list(c: CommandContext<AppEnv>, guildId: string) {
 
 async function ign(c: CommandContext<AppEnv>, guildId: string, userId: string, opts: Record<string, any>) {
   const game = opts['game'] as string
-  const ignValue = opts['name'] as string
+  const ignValue = ((opts['name'] as string) ?? '').trim().slice(0, IGN_MAX).trim()
 
   const [membership] = await Promise.all([
     parties.getUserMembership(c.env.DB, guildId, userId),

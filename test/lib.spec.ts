@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { canBump, gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
 import { appendAudit, getAudit } from '../src/store/audit'
-import { findUserIdByRiotId, getIgnMap, getUserProfile, saveUserIgn } from '../src/store/profiles'
+import { IGN_MAX, findUserIdByRiotId, getIgnMap, getUserProfile, saveUserIgn } from '../src/store/profiles'
 import { randomId } from '../src/lib/id'
 import { parseCreateModalSubmit } from '../src/lib/modal'
 import {
@@ -142,6 +142,11 @@ describe('user profiles and Riot ID lookup', () => {
 
     await saveUserIgn(env.DB, 'u1', 'Other', '  ')
     expect((await getUserProfile(env.DB, 'u1')).igns).toEqual({ Valorant: 'Shooty#NA1' })
+  })
+
+  it('caps stored IGNs at IGN_MAX', async () => {
+    await saveUserIgn(env.DB, 'u-long', 'Other', 'y'.repeat(IGN_MAX + 50))
+    expect((await getUserProfile(env.DB, 'u-long')).igns.Other).toBe('y'.repeat(IGN_MAX))
   })
 
   it('reverse-resolves Riot IDs case-insensitively with tag wildcards', async () => {
