@@ -287,6 +287,20 @@ async function info(c: CommandContext<AppEnv>, guildId: string, userId: string, 
 
 // ── /party list ───────────────────────────────────────────────────────────────
 
+const EMBED_DESCRIPTION_MAX = 4096
+
+/** Lines joined up to `max` characters, with "…and N more" for the rest. */
+function joinWithin(lines: string[], max: number): string {
+  let out = ''
+  for (let i = 0; i < lines.length; i++) {
+    const next = (out ? out + '\n' : '') + lines[i]
+    const reserve = i < lines.length - 1 ? `\n…and ${lines.length - i - 1} more`.length : 0
+    if (next.length + reserve > max) return (out ? out + '\n' : '') + `…and ${lines.length - i} more`
+    out = next
+  }
+  return out
+}
+
 async function list(c: CommandContext<AppEnv>, guildId: string) {
   const all = await parties.listParties(c.env.DB, guildId)
   if (all.length === 0) {
@@ -302,7 +316,7 @@ async function list(c: CommandContext<AppEnv>, guildId: string) {
   return c.followup({
     embeds: [{
       title: 'Active Parties',
-      description: lines.join('\n'),
+      description: joinWithin(lines, EMBED_DESCRIPTION_MAX),
       color: 0x5865f2,
       footer: { text: 'Use /party join <name or ID> to join · 🟢 open · 🟡 full · 🔒 closed' },
     }],
