@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { canBump, gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
 import { appendAudit, getAudit } from '../src/store/audit'
-import { findUserIdByRiotId, getUserProfile, saveUserIgn } from '../src/store/profiles'
+import { findUserIdByRiotId, getIgnMap, getUserProfile, saveUserIgn } from '../src/store/profiles'
 import { randomId } from '../src/lib/id'
 import { parseCreateModalSubmit } from '../src/lib/modal'
 import {
@@ -163,6 +163,13 @@ describe('user profiles and Riot ID lookup', () => {
     await saveUserIgn(env.DB, 'u2', 'LoL NA', 'NewName#NA1')
     expect(await findUserIdByRiotId(env.DB, 'LoL NA', 'OldName', 'NA1')).toBeNull()
     expect(await findUserIdByRiotId(env.DB, 'LoL NA', 'NewName', 'NA1')).toBe('u2')
+  })
+
+  it('bulk-fetches IGNs for more users than D1 allows bound parameters', async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `bulk-${i}`)
+    await saveUserIgn(env.DB, 'bulk-7', 'Valorant', 'Seven')
+    await saveUserIgn(env.DB, 'bulk-149', 'Valorant', 'Last')
+    expect(await getIgnMap(env.DB, ids, 'Valorant')).toEqual({ 'bulk-7': 'Seven', 'bulk-149': 'Last' })
   })
 })
 
