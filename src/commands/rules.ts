@@ -116,7 +116,7 @@ export async function handleRulesPage(c: ComponentContext<AppEnv>) {
       getRulesConfig(c.env.DB, guildId),
       getMember(c.env.DB, guildId, userId),
     ])
-    const { flags, ...payload } = renderRulesPage(config, Number.isFinite(page) ? page : 0, member.state === 'approved')
+    const { flags: _flags, ...payload } = renderRulesPage(config, Number.isFinite(page) ? page : 0, member.state === 'approved')
     return c.resUpdate(payload)
   } catch (e) {
     console.error('rules page failed:', e)

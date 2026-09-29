@@ -23,9 +23,6 @@ export default defineConfig(async () => {
             // would otherwise decide whether "not configured" tests pass.
             // Blank them here; tests that need them set them per case.
             ADMIN_DEV_EMAIL: '',
-            RULES_BOT_API_URL: '',
-            RULES_BOT_API_TOKEN: '',
-            RULES_BOT_DEV_STUB: '',
           },
         },
       }),
