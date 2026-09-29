@@ -12,6 +12,7 @@ import { fetchMatch, matchIdForGame, platformForRegion } from '../lib/riot'
 // Match-v5 at all, so those will always age out — expected).
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000
 const RESOLVE_BATCH = 20
+export const MAX_GAMES_PER_SESSION = 100
 // Just under the 15-minute sweep, so a retry isn't pushed back a whole tick.
 const RETRY_BASE_MS = 14 * 60 * 1000
 const RETRY_MAX_MS = 4 * 60 * 60 * 1000
@@ -69,13 +70,19 @@ export async function reportGame(db: D1Database, input: ReportGameInput): Promis
   if (!platform || !matchId) return { ok: false, error: `Unsupported region "${input.region}".` }
   if (!/^\d{1,20}$/.test(input.gameId)) return { ok: false, error: 'Invalid gameId.' }
 
-  await db.prepare(`
+  const res = await db.prepare(`
     INSERT INTO party_games (history_id, guild_id, party_id, match_id, platform, region, game_id, reported_by, reported_at, status)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending')
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending'
+    WHERE (SELECT COUNT(*) FROM party_games WHERE history_id = ?1) < ?10
     ON CONFLICT (history_id, match_id) DO NOTHING
   `).bind(input.historyId, input.guildId, input.partyId, matchId, platform,
-    input.region.toUpperCase(), input.gameId, input.reportedBy, Date.now()).run()
+    input.region.toUpperCase(), input.gameId, input.reportedBy, Date.now(), MAX_GAMES_PER_SESSION).run()
 
+  if (!res.meta.changes) {
+    const known = await db.prepare('SELECT 1 FROM party_games WHERE history_id = ?1 AND match_id = ?2')
+      .bind(input.historyId, matchId).first()
+    if (!known) return { ok: false, error: 'This party has reported too many games.' }
+  }
   return { ok: true, status: 'pending', matchId }
 }
 
