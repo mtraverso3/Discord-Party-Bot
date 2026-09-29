@@ -2,7 +2,9 @@ import { env } from 'cloudflare:test'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { handleAdminApi } from '../src/admin/api'
 import { handleAdmin } from '../src/admin'
-import { getRulesConfig, getRulesGate, saveRulesGate } from '../src/store/rules'
+import {
+  approveManually, getMember, getRulesConfig, getRulesGate, memberHistory, publishRulesConfig, saveRulesGate,
+} from '../src/store/rules'
 import { rulesAccess } from '../src/lib/rules'
 
 // The dashboard's rules routes. These used to proxy to a Python service over a
@@ -243,4 +245,26 @@ it('rejects unknown routes and cross-origin writes', async () => {
   )
   expect(res.status).toBe(403)
   expect((await getRulesGate(env.DB, g))?.enabled).toBeUndefined()
+})
+
+it('lets only one of two simultaneous publishes land', async () => {
+  const g = guild()
+  const results = await Promise.all([
+    publishRulesConfig(env.DB, g, { ...CONFIG, agreement: 'A' }, 1, false, 'first'),
+    publishRulesConfig(env.DB, g, { ...CONFIG, agreement: 'B' }, 1, false, 'second'),
+  ])
+  expect(results.filter(r => r.ok)).toHaveLength(1)
+  expect(results.find(r => !r.ok)).toMatchObject({ conflict: true })
+  const winner = results.find(r => r.ok)!
+  expect((await getRulesConfig(env.DB, g))).toMatchObject({ version: 2, agreement: winner.ok ? winner.config.agreement : '' })
+})
+
+it('requeues exactly the members approved when a publish asks for it', async () => {
+  const g = guild()
+  await call('connect', g, 'POST')
+  await approveManually(env.DB, g, MEMBER, 'mod', 'vouched', 1)
+  const res = await publishRulesConfig(env.DB, g, CONFIG, 1, true, 'admin')
+  expect(res).toMatchObject({ ok: true, requeued: 1 })
+  expect((await getMember(env.DB, g, MEMBER)).state).toBe('unapproved')
+  expect((await memberHistory(env.DB, g, MEMBER))[0]).toMatchObject({ kind: 'reset', actor: 'admin' })
 })

@@ -54,52 +54,49 @@ export async function publishRulesConfig(
   const validated = validateRulesConfig(input)
   if (!validated.ok) return { ok: false, error: validated.error }
 
-  const current = await getRulesConfig(db, guildId)
-  if (current.version !== expectedVersion) {
-    return { ok: false, error: 'Another admin published changes. Reload before editing.', conflict: true }
-  }
-
-  const version = current.version + 1
+  const version = expectedVersion + 1
   const now = Date.now()
   const config = { ...validated.config, version }
-  await db.prepare(`
+  // The version check rides on the write, so of two admins publishing from
+  // the same version only one lands. A guild with no row is on version 1.
+  const write = await db.prepare(`
     INSERT INTO rules_config
       (guild_id, version, pages, questions, agreement, passing_score, updated_at, updated_by)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+    WHERE ?2 = 2 OR EXISTS (SELECT 1 FROM rules_config WHERE guild_id = ?1)
     ON CONFLICT (guild_id) DO UPDATE SET
       version = ?2, pages = ?3, questions = ?4, agreement = ?5, passing_score = ?6,
       updated_at = ?7, updated_by = ?8
+    WHERE rules_config.version = ?2 - 1
   `).bind(guildId, version, JSON.stringify(config.pages), JSON.stringify(config.questions),
     config.agreement, config.passingScore, now, actor).run()
+  if (!write.meta.changes) {
+    return { ok: false, error: 'Another admin published changes. Reload before editing.', conflict: true }
+  }
 
   // Any quiz in flight referenced the old version and is now stale; the next
   // click on it reports that rather than grading against replaced questions.
-  await db.prepare('DELETE FROM rules_sessions WHERE guild_id = ?1').bind(guildId).run()
-
-  let requeued = 0
+  const stmts = [db.prepare('DELETE FROM rules_sessions WHERE guild_id = ?1').bind(guildId)]
   if (requireReapproval) {
-    // Who is losing approval has to be read before the update, since
-    // afterwards they are indistinguishable from everyone else unapproved.
-    const { results } = await db.prepare(
-      "SELECT user_id FROM rules_members WHERE guild_id = ?1 AND state = 'approved'",
-    ).bind(guildId).all<{ user_id: string }>()
-    requeued = results.length
-
-    if (requeued > 0) {
-      await db.prepare(`
+    // Logged before the update, in the same transaction, since afterwards the
+    // requeued are indistinguishable from everyone else unapproved. Not
+    // disciplinary, so revoked_at stays clear and an exempt admin keeps their
+    // exemption.
+    stmts.push(
+      db.prepare(`
+        INSERT INTO rules_events (guild_id, user_id, kind, actor, reason, created_at)
+        SELECT guild_id, user_id, 'reset', ?2, ?3, ?4 FROM rules_members
+        WHERE guild_id = ?1 AND state = 'approved'
+      `).bind(guildId, actor, `Rules version ${version} published; fresh check required`, now),
+      db.prepare(`
         UPDATE rules_members SET state = 'unapproved', generation = generation + 1,
           version = NULL, accepted_at = NULL
         WHERE guild_id = ?1 AND state = 'approved'
-      `).bind(guildId).run()
-      // Not disciplinary, so revoked_at stays clear and an exempt admin keeps
-      // their exemption.
-      await db.prepare(`
-        INSERT INTO rules_events (guild_id, user_id, kind, actor, reason, created_at)
-        SELECT ?1, value, 'reset', ?2, ?3, ?4 FROM json_each(?5)
-      `).bind(guildId, actor, `Rules version ${version} published; fresh check required`, now,
-        JSON.stringify(results.map(r => r.user_id))).run()
-    }
+      `).bind(guildId),
+    )
   }
+  const results = await db.batch(stmts)
+  const requeued = requireReapproval ? results.at(-1)!.meta.changes ?? 0 : 0
   return { ok: true, config, requeued }
 }
 
