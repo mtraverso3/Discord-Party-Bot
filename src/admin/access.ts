@@ -6,7 +6,8 @@
  * reachable from anywhere if its URL leaks, so trusting "the request reached
  * us, therefore it's authorized" is wrong.
  *
- * JWKS are cached in module scope; each fresh isolate fetches once.
+ * JWKS are cached per team in module scope and refetched when a token names
+ * a key we haven't seen.
  */
 
 interface JsonWebKey {
@@ -17,20 +18,23 @@ interface JsonWebKey {
   e: string
 }
 
-let jwksCache: { keys: JsonWebKey[]; expiresAt: number } | null = null
+const jwksCache = new Map<string, { keys: JsonWebKey[]; fetchedAt: number }>()
 const JWKS_TTL_MS = 60 * 60 * 1000
+// Floor between refetches for an unknown key ID, so forged IDs can't hammer Access.
+const JWKS_REFRESH_MIN_MS = 30 * 1000
 
 export interface VerifyResult {
   ok: boolean
   email?: string
 }
 
-async function getJwks(team: string): Promise<JsonWebKey[]> {
-  if (jwksCache && jwksCache.expiresAt > Date.now()) return jwksCache.keys
+async function getJwks(team: string, refresh = false): Promise<JsonWebKey[]> {
+  const cached = jwksCache.get(team)
+  if (cached && Date.now() - cached.fetchedAt < (refresh ? JWKS_REFRESH_MIN_MS : JWKS_TTL_MS)) return cached.keys
   const res = await fetch(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`)
   if (!res.ok) throw new Error(`JWKS fetch failed: ${res.status}`)
   const data = await res.json<{ keys: JsonWebKey[] }>()
-  jwksCache = { keys: data.keys, expiresAt: Date.now() + JWKS_TTL_MS }
+  jwksCache.set(team, { keys: data.keys, fetchedAt: Date.now() })
   return data.keys
 }
 
@@ -51,12 +55,13 @@ export async function verifyAccessJwt(jwt: string, team: string, aud: string): P
 
     const audOk = Array.isArray(payload.aud) ? payload.aud.includes(aud) : payload.aud === aud
     if (!audOk) return { ok: false }
-    if (payload.exp && payload.exp * 1000 < Date.now()) return { ok: false }
+    if (typeof payload.exp !== 'number' || payload.exp * 1000 < Date.now()) return { ok: false }
     if (payload.nbf && payload.nbf * 1000 > Date.now() + 60_000) return { ok: false }
     if (payload.iss !== `https://${team}.cloudflareaccess.com`) return { ok: false }
 
-    const keys = await getJwks(team)
-    const jwk = keys.find(k => k.kid === header.kid)
+    // An unknown key ID usually means Access rotated its keys since the last fetch.
+    const jwk = (await getJwks(team)).find(k => k.kid === header.kid)
+      ?? (await getJwks(team, true)).find(k => k.kid === header.kid)
     if (!jwk) return { ok: false }
 
     const key = await crypto.subtle.importKey(
