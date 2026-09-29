@@ -49,7 +49,21 @@ export function adminIdentity(env: AppBindings, email?: string): AdminIdentity {
   return m ? { superAdmin: false, userId: m[1], guildId: m[2] } : { superAdmin: true }
 }
 
+/**
+ * A page on another site must not be able to drive the API with the admin's
+ * Access cookie. Browsers label every request with where it came from.
+ */
+function isCrossSite(req: Request, url: URL): boolean {
+  const site = req.headers.get('sec-fetch-site')
+  if (site && site !== 'same-origin' && site !== 'none') return true
+  const origin = req.headers.get('origin')
+  return !!origin && origin !== url.origin
+}
+
 export async function handleAdminApi(req: Request, env: AppBindings, url: URL, email?: string): Promise<Response> {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && isCrossSite(req, url)) {
+    return json({ error: 'Cross-origin changes are not allowed.' }, 403)
+  }
   const guildId = url.searchParams.get('guild')
   const identity = adminIdentity(env, email)
 

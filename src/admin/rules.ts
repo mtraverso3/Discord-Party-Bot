@@ -20,12 +20,6 @@ export async function handleRulesAdmin(
 ): Promise<Response> {
   const method = req.method.toUpperCase()
 
-  // A browser form on another origin must not be able to drive these.
-  const origin = req.headers.get('origin')
-  if (method !== 'GET' && origin && origin !== new URL(req.url).origin) {
-    return json({ error: 'Cross-origin changes are not allowed.' }, 403)
-  }
-
   let body: any = {}
   if (method === 'POST') {
     if (!req.headers.get('content-type')?.includes('application/json')) {
