@@ -300,7 +300,7 @@ describe('client party game switch', () => {
     expect((await res.json() as any).ok).toBe(true)
   })
 
-  it('rejects games outside the GAMES catalog', async () => {
+  it("rejects games outside the guild's game list", async () => {
     await makeParty('g11', 'LCU015', OWNER, [])
     const token = await linkUser(OWNER, 'Owner', 'g11')
     const res = await req('POST', '/client/party/game', { body: { game: 'Not A Real Game' }, token })
@@ -316,10 +316,19 @@ describe('client party game switch', () => {
 
   it('rejects games disabled by guild settings', async () => {
     await makeParty('g8', 'LCU013', OWNER, [])
-    await saveGuildSettings(env.DB, 'g8', { ...SETTINGS_DEFAULTS, allowedGames: ['Valorant'] })
+    await saveGuildSettings(env.DB, 'g8', { ...SETTINGS_DEFAULTS, disabledGames: ['LoL NA'] })
     const token = await linkUser(OWNER, 'Owner', 'g8')
     const res = await req('POST', '/client/party/game', { body: { game: 'LoL NA' }, token })
     expect(res.status).toBe(400)
+  })
+
+  it("accepts the guild's custom games", async () => {
+    await makeParty('g12', 'LCU016', OWNER, [])
+    await saveGuildSettings(env.DB, 'g12', { ...SETTINGS_DEFAULTS, customGames: ['Deadlock'] })
+    const token = await linkUser(OWNER, 'Owner', 'g12')
+    const res = await req('POST', '/client/party/game', { body: { game: 'Deadlock' }, token })
+    expect(res.status).toBe(200)
+    expect((await res.json() as any).game).toBe('Deadlock')
   })
 
   it('404s when not in a party', async () => {

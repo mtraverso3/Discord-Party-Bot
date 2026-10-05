@@ -221,6 +221,46 @@ describe('cross-site requests', () => {
   })
 })
 
+describe('guild game list', () => {
+  async function patch(guildId: string, body: unknown) {
+    const url = new URL(`http://x/admin/api/settings?guild=${guildId}`)
+    return handleAdminApi(new Request(url, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }), env, url, 'boss@example.com')
+  }
+
+  it('adds custom games and toggles games off without touching other settings', async () => {
+    expect((await patch('gg1', { maxParties: 7 })).status).toBe(200)
+    const res = await patch('gg1', { customGames: ['Deadlock', 'deadlock', 'LoL NA'], disabledGames: ['Valorant'] })
+    expect(res.status).toBe(200)
+    const s = await res.json<any>()
+    expect(s.customGames).toEqual(['Deadlock'])
+    expect(s.disabledGames).toEqual(['Valorant'])
+    expect(s.maxParties).toBe(7)
+  })
+
+  it('drops a removed custom game from the disabled list too', async () => {
+    await patch('gg2', { customGames: ['Deadlock'], disabledGames: ['Deadlock'] })
+    const s = await (await patch('gg2', { customGames: [] })).json<any>()
+    expect(s.disabledGames).toEqual([])
+  })
+
+  it('keeps at least one and at most 25 games enabled', async () => {
+    const all = ['LoL NA', 'LoL EUW', 'LoL PBE', 'Valorant', 'Overwatch', 'Starcraft 2', 'Other']
+    expect((await patch('gg3', { disabledGames: all })).status).toBe(400)
+    const many = Array.from({ length: 19 }, (_, i) => `Game ${i}`)
+    expect((await patch('gg3', { customGames: many })).status).toBe(400)
+    expect((await patch('gg3', { customGames: many, disabledGames: ['Other'] })).status).toBe(200)
+  })
+
+  it('persists the game list across reads', async () => {
+    await patch('gg4', { disabledGames: ['Valorant'] })
+    const url = new URL('http://x/admin/api/settings?guild=gg4')
+    const res = await handleAdminApi(new Request(url), env, url, 'boss@example.com')
+    expect((await res.json<any>()).disabledGames).toEqual(['Valorant'])
+  })
+})
+
 describe('admin API hardening', () => {
   it("doesn't leak internal error details", async () => {
     const url = new URL('http://x/admin/api/settings?guild=g1')

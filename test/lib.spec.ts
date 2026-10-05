@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import { canBump, gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
+import { canBump, enabledGames, gameAllowed, getGuildSettings, guildGames, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
+import { BUILTIN_GAMES, GAME_NAME_MAX, resolveGameName } from '../src/lib/games'
 import { appendAudit, getAudit } from '../src/store/audit'
 import { IGN_MAX, findUserIdByRiotId, getIgnMap, getUserProfile, saveUserIgn } from '../src/store/profiles'
 import { randomId } from '../src/lib/id'
@@ -12,17 +13,45 @@ import {
 } from '../src/store/templates'
 
 describe('settings', () => {
-  it('clamps numbers and filters unknown games', () => {
-    const s = sanitizeSettings({ maxParties: 999, defaultCap: 0, allowedGames: ['Valorant', 'NotAGame', 42] })
+  it('clamps numbers and filters unknown disabled games', () => {
+    const s = sanitizeSettings({ maxParties: 999, defaultCap: 0, disabledGames: ['Valorant', 'NotAGame', 42, 'Valorant'] })
     expect(s.maxParties).toBe(SETTINGS_DEFAULTS.maxParties)
     expect(s.defaultCap).toBe(SETTINGS_DEFAULTS.defaultCap)
-    expect(s.allowedGames).toEqual(['Valorant'])
+    expect(s.disabledGames).toEqual(['Valorant'])
   })
 
-  it('empty allowlist allows every game', () => {
-    expect(gameAllowed({ ...SETTINGS_DEFAULTS, allowedGames: [] }, 'Valorant')).toBe(true)
-    expect(gameAllowed({ ...SETTINGS_DEFAULTS, allowedGames: ['Other'] }, 'Valorant')).toBe(false)
-    expect(gameAllowed({ ...SETTINGS_DEFAULTS, allowedGames: ['Other'] }, 'Other')).toBe(true)
+  it('cleans custom games: trimmed, deduped, never shadowing a built-in', () => {
+    const s = sanitizeSettings({
+      customGames: ['  Deadlock  ', 'deadlock', 'lol na', '', 42, 'Rocket\u0000 League', 'x'.repeat(80)],
+      disabledGames: ['Deadlock'],
+    })
+    expect(s.customGames).toEqual(['Deadlock', 'Rocket League', 'x'.repeat(GAME_NAME_MAX)])
+    expect(s.disabledGames).toEqual(['Deadlock'])
+    expect(sanitizeSettings({ customGames: 'nope' }).customGames).toEqual([])
+  })
+
+  it('lists built-ins, then custom games, with Other last', () => {
+    const s = { ...SETTINGS_DEFAULTS, customGames: ['Deadlock'] }
+    const all = guildGames(s)
+    expect(all.slice(0, 3)).toEqual(['LoL NA', 'LoL EUW', 'LoL PBE'])
+    expect(all.at(-2)).toBe('Deadlock')
+    expect(all.at(-1)).toBe('Other')
+    expect(all).toHaveLength(BUILTIN_GAMES.length + 1)
+  })
+
+  it('every known game is allowed unless switched off', () => {
+    expect(gameAllowed(SETTINGS_DEFAULTS, 'Valorant')).toBe(true)
+    expect(gameAllowed(SETTINGS_DEFAULTS, 'NotAGame')).toBe(false)
+    expect(gameAllowed({ ...SETTINGS_DEFAULTS, disabledGames: ['Valorant'] }, 'Valorant')).toBe(false)
+    expect(gameAllowed({ ...SETTINGS_DEFAULTS, customGames: ['Deadlock'] }, 'Deadlock')).toBe(true)
+    expect(enabledGames({ ...SETTINGS_DEFAULTS, disabledGames: ['Other'] })).not.toContain('Other')
+  })
+
+  it('resolves typed game names case-insensitively', () => {
+    const s = { ...SETTINGS_DEFAULTS, customGames: ['Deadlock'] }
+    expect(resolveGameName(s, '  lol euw ')).toBe('LoL EUW')
+    expect(resolveGameName(s, 'DEADLOCK')).toBe('Deadlock')
+    expect(resolveGameName(s, 'Nope')).toBeNull()
   })
 
   it('falls back to defaults for guilds with no stored settings', async () => {
@@ -30,7 +59,7 @@ describe('settings', () => {
   })
 
   it('round-trips through the database', async () => {
-    const s = { maxParties: 5, defaultCap: 4, allowedGames: ['Other'], clientInviters: ['123456789012345678'], partyBumpers: ['234567890123456789'] }
+    const s = { maxParties: 5, defaultCap: 4, customGames: ['Deadlock'], disabledGames: ['Other'], clientInviters: ['123456789012345678'], partyBumpers: ['234567890123456789'] }
     await saveGuildSettings(env.DB, 'g1', s)
     expect(await getGuildSettings(env.DB, 'g1')).toEqual(s)
     // and an update overwrites, not duplicates
@@ -66,7 +95,7 @@ describe('party templates', () => {
     const t = sanitizeTemplateInput({
       label: '  Friday ARAM  ', name: 'x'.repeat(200), game: 'NotAGame',
       maxSize: 999, description: 'd', voiceChannelId: '', banlist: '  Ahri\nZed  ',
-    })
+    }, guildGames(SETTINGS_DEFAULTS))
     expect(t.label).toBe('Friday ARAM')
     expect(t.name.length).toBe(100)
     expect(t.game).toBe('Other')

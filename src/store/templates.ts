@@ -1,9 +1,8 @@
 import type { PartyTemplate } from '../types'
-import { GAMES } from '../lib/games'
+import { getGuildSettings, guildGames } from './settings'
 import { randomId } from '../lib/id'
 
 const MAX_TEMPLATES = 50
-const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
 interface TemplateRow {
   id: string
@@ -47,8 +46,11 @@ export async function getTemplate(db: D1Database, guildId: string, id: string): 
   return row ? toTemplate(row) : null
 }
 
-/** Coerce admin-submitted fields into the stored template shape. */
-export function sanitizeTemplateInput(raw: any): {
+/**
+ * Coerce admin-submitted fields into the stored template shape. `games` is the
+ * guild's game list; anything else falls back to "Other".
+ */
+export function sanitizeTemplateInput(raw: any, games: readonly string[]): {
   label: string
   name: string
   description: string
@@ -65,7 +67,7 @@ export function sanitizeTemplateInput(raw: any): {
     label: (raw?.label ?? '').toString().trim().slice(0, 100),
     name: (raw?.name ?? '').toString().trim().slice(0, 100),
     description: (raw?.description ?? '').toString().slice(0, 1000),
-    game: VALID_GAMES.has(game) ? game : 'Other',
+    game: games.includes(game) ? game : 'Other',
     maxSize: Number.isInteger(maxSize) && maxSize >= 2 && maxSize <= 50 ? maxSize : 10,
     voiceChannelId: (raw?.voiceChannelId ?? '').toString() || undefined,
     banlist: banlist || undefined,
@@ -80,7 +82,7 @@ export async function createTemplate(
     .bind(guildId).first<{ n: number }>()
   if ((count?.n ?? 0) >= MAX_TEMPLATES) return { ok: false, error: `Guild already has ${MAX_TEMPLATES} templates` }
 
-  const input = sanitizeTemplateInput(raw)
+  const input = sanitizeTemplateInput(raw, guildGames(await getGuildSettings(db, guildId)))
   if (!input.label) return { ok: false, error: 'A template label is required' }
 
   const now = Date.now()
@@ -103,7 +105,7 @@ export async function updateTemplate(
   const existing = await getTemplate(db, guildId, id)
   if (!existing) return { ok: false, error: 'Template not found' }
 
-  const input = sanitizeTemplateInput(raw)
+  const input = sanitizeTemplateInput(raw, guildGames(await getGuildSettings(db, guildId)))
   if (!input.label) return { ok: false, error: 'A template label is required' }
 
   await db.prepare(`

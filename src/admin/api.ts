@@ -3,8 +3,8 @@ import type { AppBindings } from '../types'
 import { createPartyAndEmbed, repostPartyEmbed, tryMarkDisbanded, trySyncEmbed } from '../lib/party'
 import * as parties from '../store/parties'
 import { IGN_MAX, getIgnMap, getUserIgn, getUserProfile, saveUserIgn } from '../store/profiles'
-import { GAMES } from '../lib/games'
-import { gameAllowed, getGuildSettings, sanitizeSettings, saveGuildSettings } from '../store/settings'
+import { MAX_ENABLED_GAMES } from '../lib/games'
+import { enabledGames, gameAllowed, getGuildSettings, isKnownGame, sanitizeSettings, saveGuildSettings } from '../store/settings'
 import { createTemplate, deleteTemplate, getTemplate, getTemplates, updateTemplate } from '../store/templates'
 import { appendAudit, getAudit } from '../store/audit'
 import { getRulesGate } from '../store/rules'
@@ -220,8 +220,21 @@ async function patchSettings(env: AppBindings, guildId: string, body: any): Prom
   if (body.partyBumpers != null && !Array.isArray(body.partyBumpers)) {
     return json({ error: 'partyBumpers must be an array of user IDs' }, 400)
   }
+  if (body.customGames != null && !Array.isArray(body.customGames)) {
+    return json({ error: 'customGames must be an array of game names' }, 400)
+  }
+  if (body.disabledGames != null && !Array.isArray(body.disabledGames)) {
+    return json({ error: 'disabledGames must be an array of game names' }, 400)
+  }
 
   const settings = sanitizeSettings({ ...current, ...body })
+  // The create/edit modal's game picker is a Discord select: it needs at least
+  // one option and takes at most 25.
+  const enabled = enabledGames(settings).length
+  if (enabled === 0) return json({ error: 'Keep at least one game enabled' }, 400)
+  if (enabled > MAX_ENABLED_GAMES) {
+    return json({ error: `At most ${MAX_ENABLED_GAMES} games can be enabled at once (Discord's limit) — switch some off first` }, 400)
+  }
   await saveGuildSettings(env.DB, guildId, settings)
   return json(settings)
 }
@@ -428,7 +441,7 @@ async function spawnParty(env: AppBindings, guildId: string, body: any): Promise
   if (!member?.user) return json({ error: 'Owner is not in this guild' }, 404)
 
   const game = (body.game ?? 'Other').toString()
-  if (!GAMES.some(g => g.value === game)) return json({ error: 'Unknown game' }, 400)
+  if (!isKnownGame(settings, game)) return json({ error: 'Unknown game' }, 400)
   if (!gameAllowed(settings, game)) return json({ error: `${game} is not enabled on this server` }, 400)
 
   const maxSize = body.maxSize != null ? Number(body.maxSize) : settings.defaultCap
@@ -554,7 +567,7 @@ async function getUser(env: AppBindings, guildId: string, userId: string): Promi
 
 async function patchUserProfile(env: AppBindings, guildId: string, userId: string, body: any): Promise<Response> {
   const game = (body.game ?? '').toString()
-  if (!GAMES.some(g => g.value === game)) return json({ error: 'Unknown game' }, 400)
+  if (!isKnownGame(await getGuildSettings(env.DB, guildId), game)) return json({ error: 'Unknown game' }, 400)
   const ign = (body.ign ?? '').toString().trim().slice(0, IGN_MAX).trim()
   // IGNs are global, so only a member of this guild can be edited from it.
   const member = await getGuildMember(env.DISCORD_BOT_TOKEN, guildId, userId).catch(() => null)

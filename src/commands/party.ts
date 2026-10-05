@@ -9,7 +9,8 @@ import {
 } from '../lib/party'
 import * as parties from '../store/parties'
 import { IGN_MAX, getIgnMap, getUserIgn, saveUserIgn } from '../store/profiles'
-import { canBump, gameAllowed, getGuildSettings } from '../store/settings'
+import { canBump, enabledGames, gameAllowed, getGuildSettings, guildGames } from '../store/settings'
+import { resolveGameName } from '../lib/games'
 import { generateLinkCode, writeLinkCode } from '../store/clientAuth'
 import { generateAdminToken, isAdmin, writeAdminLinkToken } from '../store/adminAuth'
 import { normalizeBaseUrl } from '../auth/session'
@@ -327,7 +328,16 @@ async function list(c: CommandContext<AppEnv>, guildId: string) {
 // ── /party ign ────────────────────────────────────────────────────────────────
 
 async function ign(c: CommandContext<AppEnv>, guildId: string, userId: string, opts: Record<string, any>) {
-  const game = opts['game'] as string
+  // The game option is free text with autocomplete, so match it back to one of
+  // this server's games rather than trusting it.
+  const settings = await getGuildSettings(c.env.DB, guildId)
+  const game = resolveGameName(settings, ((opts['game'] as string) ?? ''))
+  if (!game) {
+    return c.followup({
+      content: `That's not a game on this server. Pick one of: ${guildGames(settings).map(g => `**${g}**`).join(', ')}.`,
+      flags: 64,
+    })
+  }
   const ignValue = ((opts['name'] as string) ?? '').trim().slice(0, IGN_MAX).trim()
 
   const [membership] = await Promise.all([
@@ -344,6 +354,26 @@ async function ign(c: CommandContext<AppEnv>, guildId: string, userId: string, o
   }
 
   return c.followup({ content: `IGN for **${game}** set to **${ignValue}**.`, flags: 64 })
+}
+
+/**
+ * Autocomplete for `/party ign game:` — the guild's enabled games, filtered by
+ * what's typed so far. Returns the raw interaction response (type 8).
+ */
+export async function handlePartyAutocomplete(interaction: any, env: AppBindings): Promise<Response> {
+  const guildId = interaction.guild_id as string | undefined
+  const subCmd = interaction.data?.options?.[0]
+  const focused = (subCmd?.options as any[] | undefined)?.find(o => o.focused)
+  let choices: { name: string; value: string }[] = []
+  if (guildId && subCmd?.name === 'ign' && focused?.name === 'game') {
+    const typed = String(focused.value ?? '').trim().toLowerCase()
+    const games = enabledGames(await getGuildSettings(env.DB, guildId))
+    choices = games
+      .filter(g => g.toLowerCase().includes(typed))
+      .slice(0, 25)
+      .map(g => ({ name: g, value: g }))
+  }
+  return Response.json({ type: 8, data: { choices } })
 }
 
 // ── /party edit (modal) ───────────────────────────────────────────────────────

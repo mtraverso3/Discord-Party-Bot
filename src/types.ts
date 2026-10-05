@@ -262,7 +262,8 @@ export interface PartyTemplate {
 export interface GuildSettings {
   maxParties: number        // max concurrent parties per guild
   defaultCap: number        // pre-filled player cap when creating a party
-  allowedGames: string[]    // subset of GAMES values; empty = all allowed
+  customGames: string[]     // games this guild added on top of BUILTIN_GAMES
+  disabledGames: string[]   // built-in or custom games switched off for this guild
   clientInviters: string[]  // Discord user IDs allowed to lobby-invite from the desktop client (besides the party owner)
   partyBumpers: string[]    // Discord user IDs allowed to bump any party they're in, even when not the owner
 }

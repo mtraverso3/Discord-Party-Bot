@@ -1,10 +1,9 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { GAMES } from '../games'
 import { useToast } from '../components/Toast'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ErrorNote, Input, Label, Spinner } from '../components/ui'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorNote, Input, Label, Spinner } from '../components/ui'
 import { useGuildData } from '../lib/guildData'
 import { useLoad } from '../lib/useLoad'
 import type { GuildSettings } from '../types'
@@ -23,7 +22,6 @@ function SettingsForm({ initial }: { initial: GuildSettings }) {
 
   const [maxParties, setMaxParties] = useState(initial.maxParties)
   const [defaultCap, setDefaultCap] = useState(initial.defaultCap)
-  const [allowedGames, setAllowedGames] = useState<string[]>(initial.allowedGames)
   const [inviters, setInviters] = useState<string[]>(initial.clientInviters || [])
   const [bumpers, setBumpers] = useState<string[]>(initial.partyBumpers || [])
   // User-ID allowlists share one name cache; fall back to the raw ID.
@@ -40,9 +38,6 @@ function SettingsForm({ initial }: { initial: GuildSettings }) {
       .then(map => setMemberNames(n => ({ ...n, ...(map || {}) })))
       .catch(() => { /* leave raw IDs */ })
   }, [initial])
-
-  const toggleGame = (g: string, on: boolean) =>
-    setAllowedGames(gs => on ? [...gs, g] : gs.filter(x => x !== g))
 
   const chipList = (ids: string[], emptyText: string, onRemove: (id: string) => void) => (
     <div className="flex flex-wrap gap-1.5">
@@ -72,7 +67,6 @@ function SettingsForm({ initial }: { initial: GuildSettings }) {
         body: JSON.stringify({
           maxParties: Number(maxParties),
           defaultCap: Number(defaultCap),
-          allowedGames,
           clientInviters: inviters,
           partyBumpers: bumpers,
         }),
@@ -102,21 +96,6 @@ function SettingsForm({ initial }: { initial: GuildSettings }) {
             Default player cap in create modal (2–50)
             <Input type="number" min={2} max={50} value={defaultCap} onChange={e => setDefaultCap(Number(e.target.value))} />
           </Label>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Allowed games</CardTitle>
-          <CardDescription>Leave all unchecked to allow every game.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {GAMES.map(g => (
-            <label key={g} className="flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent">
-              <Checkbox checked={allowedGames.includes(g)} onChange={e => toggleGame(g, e.target.checked)} />
-              {g}
-            </label>
-          ))}
         </CardContent>
       </Card>
 
