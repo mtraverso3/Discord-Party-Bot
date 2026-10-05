@@ -10,8 +10,7 @@
  */
 
 import type { GuildSettings, PartyData } from '../types'
-import { GAMES } from './games'
-import { gameAllowed } from '../store/settings'
+import { MAX_ENABLED_GAMES, enabledGames } from './games'
 
 export const CREATE_MODAL_PREFIX = 'party_create'
 export const EDIT_MODAL_PREFIX = 'party_edit'
@@ -50,10 +49,14 @@ export interface EditFields {
   voiceChannelId: string
 }
 
-/** Game options limited to the guild's allowlist; `current` is always kept. */
+/**
+ * The guild's enabled games as select options, within Discord's 25-option cap.
+ * `current` is always kept, even if it's since been switched off or removed.
+ */
 function gameOptions(settings: GuildSettings, current: string) {
-  const games = GAMES.filter(g => g.value === current || gameAllowed(settings, g.value))
-  return games.map(g => ({ label: g.name, value: g.value, default: g.value === current }))
+  let games = enabledGames(settings)
+  if (!games.includes(current)) games = [current, ...games]
+  return games.slice(0, MAX_ENABLED_GAMES).map(g => ({ label: g, value: g, default: g === current }))
 }
 
 export function buildEditModalJSON(party: PartyData, settings: GuildSettings, rulesRequired?: boolean): any {
@@ -114,8 +117,8 @@ export interface CreateFields {
 }
 
 export function buildCreateModalJSON(displayName: string, settings: GuildSettings, rulesRequired?: boolean): any {
-  const allowed = GAMES.filter(g => gameAllowed(settings, g.value))
-  const defaultGame = allowed.some(g => g.value === 'Other') ? 'Other' : allowed[0]?.value
+  const allowed = enabledGames(settings).slice(0, MAX_ENABLED_GAMES)
+  const defaultGame = allowed.includes('Other') ? 'Other' : allowed[0]
   return {
     custom_id: `${CREATE_MODAL_PREFIX}${rulesSuffix(rulesRequired)}`,
     title: 'Create party',
@@ -135,7 +138,7 @@ export function buildCreateModalJSON(displayName: string, settings: GuildSetting
       }),
       label('Game', {
         type: 3, custom_id: 'game',
-        options: allowed.map(g => ({ label: g.name, value: g.value, default: g.value === defaultGame })),
+        options: allowed.map(g => ({ label: g, value: g, default: g === defaultGame })),
         min_values: 1, max_values: 1,
       }),
       label('Voice channel', {

@@ -3,7 +3,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { GAMES } from '../games'
+import { allGames } from '../games'
+import { useGuildData } from '../lib/guildData'
 import { fmtAbs, relTime } from '../lib/time'
 import { useLoad } from '../lib/useLoad'
 import { useToast } from '../components/Toast'
@@ -237,12 +238,14 @@ function PartyState({ u }: { u: UserLookup }) {
 // ── IGNs ──────────────────────────────────────────────────────────────────────
 
 function IgnCard({ u }: { u: UserLookup }) {
+  const guildData = useGuildData()
+  const { data: settings } = useLoad(() => guildData.getSettings())
   return (
     <Card>
       <CardContent>
         <h4 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">In-game names</h4>
         <div className="space-y-2">
-          {GAMES.map(g => <IgnRow key={g} game={g} userId={u.userId} initial={u.profile.igns[g] || ''} />)}
+          {allGames(settings).map(g => <IgnRow key={g} game={g} userId={u.userId} initial={u.profile.igns[g] || ''} />)}
         </div>
       </CardContent>
     </Card>

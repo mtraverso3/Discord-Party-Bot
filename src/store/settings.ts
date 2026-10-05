@@ -1,10 +1,13 @@
 import type { GuildSettings } from '../types'
-import { GAMES } from '../lib/games'
+import { guildGames, sanitizeCustomGames } from '../lib/games'
+
+export { enabledGames, gameAllowed, guildGames, isKnownGame } from '../lib/games'
 
 export const SETTINGS_DEFAULTS: GuildSettings = {
   maxParties: 10,
   defaultCap: 10,
-  allowedGames: [],    // empty = all games allowed
+  customGames: [],     // added on top of the built-in catalog
+  disabledGames: [],   // empty = every known game enabled
   clientInviters: [],  // party owners can always invite; these users can too
   partyBumpers: [],    // party owners can always bump; these users can too
 }
@@ -12,8 +15,6 @@ export const SETTINGS_DEFAULTS: GuildSettings = {
 const DISCORD_ID_RE = /^\d{5,25}$/
 const MAX_CLIENT_INVITERS = 50
 const MAX_PARTY_BUMPERS = 50
-
-const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
 function clampInt(v: unknown, min: number, max: number, fallback: number): number {
   const n = Number(v)
@@ -30,11 +31,14 @@ function idList(v: unknown, max: number): string[] {
 
 /** Coerce arbitrary stored/submitted data into a valid settings object. */
 export function sanitizeSettings(raw: any): GuildSettings {
+  const customGames = sanitizeCustomGames(raw?.customGames)
+  const known = new Set(guildGames({ customGames, disabledGames: [] }))
   return {
     maxParties: clampInt(raw?.maxParties, 1, 50, SETTINGS_DEFAULTS.maxParties),
     defaultCap: clampInt(raw?.defaultCap, 2, 50, SETTINGS_DEFAULTS.defaultCap),
-    allowedGames: Array.isArray(raw?.allowedGames)
-      ? raw.allowedGames.filter((g: unknown): g is string => typeof g === 'string' && VALID_GAMES.has(g))
+    customGames,
+    disabledGames: Array.isArray(raw?.disabledGames)
+      ? [...new Set<string>(raw.disabledGames.filter((g: unknown): g is string => typeof g === 'string' && known.has(g)))]
       : [],
     clientInviters: idList(raw?.clientInviters, MAX_CLIENT_INVITERS),
     partyBumpers: idList(raw?.partyBumpers, MAX_PARTY_BUMPERS),
@@ -44,10 +48,6 @@ export function sanitizeSettings(raw: any): GuildSettings {
 /** Whether a user may bump the given party: the owner, or a designated bumper. */
 export function canBump(settings: GuildSettings, party: { ownerId: string }, userId: string): boolean {
   return party.ownerId === userId || settings.partyBumpers.includes(userId)
-}
-
-export function gameAllowed(settings: GuildSettings, game: string): boolean {
-  return settings.allowedGames.length === 0 || settings.allowedGames.includes(game)
 }
 
 function parseList(json: string): string[] {
@@ -61,12 +61,13 @@ function parseList(json: string): string[] {
 
 export async function getGuildSettings(db: D1Database, guildId: string): Promise<GuildSettings> {
   const row = await db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?1').bind(guildId)
-    .first<{ max_parties: number; default_cap: number; allowed_games: string; client_inviters: string; party_bumpers: string }>()
+    .first<{ max_parties: number; default_cap: number; custom_games: string; disabled_games: string; client_inviters: string; party_bumpers: string }>()
   if (!row) return { ...SETTINGS_DEFAULTS }
   return sanitizeSettings({
     maxParties: row.max_parties,
     defaultCap: row.default_cap,
-    allowedGames: parseList(row.allowed_games),
+    customGames: parseList(row.custom_games),
+    disabledGames: parseList(row.disabled_games),
     clientInviters: parseList(row.client_inviters),
     partyBumpers: parseList(row.party_bumpers),
   })
@@ -74,13 +75,14 @@ export async function getGuildSettings(db: D1Database, guildId: string): Promise
 
 export async function saveGuildSettings(db: D1Database, guildId: string, settings: GuildSettings): Promise<void> {
   await db.prepare(`
-    INSERT INTO guild_settings (guild_id, max_parties, default_cap, allowed_games, client_inviters, party_bumpers)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    INSERT INTO guild_settings (guild_id, max_parties, default_cap, custom_games, disabled_games, client_inviters, party_bumpers)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
     ON CONFLICT (guild_id) DO UPDATE SET
-      max_parties = ?2, default_cap = ?3, allowed_games = ?4, client_inviters = ?5, party_bumpers = ?6
+      max_parties = ?2, default_cap = ?3, custom_games = ?4, disabled_games = ?5, client_inviters = ?6, party_bumpers = ?7
   `).bind(
     guildId, settings.maxParties, settings.defaultCap,
-    JSON.stringify(settings.allowedGames),
+    JSON.stringify(settings.customGames),
+    JSON.stringify(settings.disabledGames),
     JSON.stringify(settings.clientInviters),
     JSON.stringify(settings.partyBumpers),
   ).run()

@@ -15,7 +15,7 @@ command unless the command posts something on purpose.
 | `/party leave` | Leave your current party or queue |
 | `/party info [party]` | Show a party's embed, yours by default |
 | `/party list` | List the active parties in this server |
-| `/party ign <game> <name>` | Save your in-game name for a game |
+| `/party ign <game> <name>` | Save your in-game name for a game (autocompletes from this server's games) |
 
 ## Owner commands
 

@@ -1,7 +1,7 @@
 import { ChevronDown, FileStack, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { GAMES } from '../games'
+import { defaultGame, gameChoices } from '../games'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
@@ -156,12 +156,12 @@ function TemplateForm({ t, settings, voiceChannels, onSaved, onCancel }: {
   onCancel: () => void
 }) {
   const toast = useToast()
-  const s = settings || { defaultCap: 10, allowedGames: [] as string[] }
-  const allowed = GAMES.filter(g => s.allowedGames.length === 0 || s.allowedGames.includes(g))
+  const s = settings || { defaultCap: 10 }
+  const allowed = gameChoices(settings, t?.game)
 
   const [label, setLabel] = useState(t?.label || '')
   const [name, setName] = useState(t?.name || '')
-  const [game, setGame] = useState(t?.game || 'Other')
+  const [game, setGame] = useState(t?.game || defaultGame(settings))
   const [cap, setCap] = useState(t?.maxSize || s.defaultCap)
   const [voice, setVoice] = useState(t?.voiceChannelId || '')
   const [desc, setDesc] = useState(t?.description || '')

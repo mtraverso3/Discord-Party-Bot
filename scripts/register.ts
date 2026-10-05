@@ -8,7 +8,6 @@
  * Omit --guild to register globally (takes up to 1 hour to propagate).
  */
 
-import { GAMES } from '../src/lib/games'
 
 const APP_ID = process.env['DISCORD_APPLICATION_ID']
 const TOKEN = process.env['DISCORD_BOT_TOKEN']
@@ -78,7 +77,7 @@ const commands = [
         name: 'ign',
         description: 'Set your in-game name for a game (saves to profile)',
         options: [
-          { type: 3, name: 'game', description: 'Game to set IGN for', required: true, choices: GAMES },
+          { type: 3, name: 'game', description: 'Game to set IGN for', required: true, autocomplete: true, max_length: 50 },
           { type: 3, name: 'name', description: 'Your in-game name / summoner name', required: true, max_length: 100 },
         ],
       },

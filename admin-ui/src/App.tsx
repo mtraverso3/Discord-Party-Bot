@@ -1,4 +1,4 @@
-import { ArrowLeftRight, History as HistoryIcon, LayoutDashboard, LogOut, Moon, ScrollText, Settings as SettingsIcon, ShieldCheck, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
+import { ArrowLeftRight, Gamepad2, History as HistoryIcon, LayoutDashboard, LogOut, Moon, ScrollText, Settings as SettingsIcon, ShieldCheck, Sun, Swords, User, FileStack, PartyPopper } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, guildId, onSessionExpired } from './api'
 import type { GuildInfo } from './types'
@@ -16,6 +16,7 @@ import { History } from './views/History'
 import { Audit } from './views/Audit'
 import { Admins } from './views/Admins'
 import { Settings } from './views/Settings'
+import { Games } from './views/Games'
 import { Rules } from './views/Rules'
 
 const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
@@ -26,6 +27,7 @@ const TABS: { id: string; label: string; icon: ReactNode; desc: string }[] = [
   { id: 'users', label: 'Users', icon: <User />, desc: 'Look up a member — IGN profile, admin notes, party history, and games played.' },
   { id: 'audit', label: 'Audit log', icon: <ScrollText />, desc: 'Every admin action taken through this panel.' },
   { id: 'admins', label: 'Admins', icon: <ShieldCheck />, desc: 'Discord users allowed to sign in to this server via /party admin.' },
+  { id: 'games', label: 'Games', icon: <Gamepad2 />, desc: 'The games members can pick for a party — built-ins plus your own, each switchable on or off.' },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon />, desc: 'Guild-wide limits enforced by the bot.' },
   { id: 'rules', label: 'Rules & verification', icon: <ShieldCheck />, desc: 'Manage the rules quiz, queue approval, and member verification history.' },
 ]
@@ -273,6 +275,7 @@ function TabView({ tab, superAdmin }: { tab: string; superAdmin: boolean }) {
     case 'users': return <Users />
     case 'audit': return <Audit />
     case 'admins': return <Admins superAdmin={superAdmin} />
+    case 'games': return <Games />
     case 'settings': return <Settings />
     case 'rules': return <Rules />
     default: return <Dashboard />

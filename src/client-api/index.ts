@@ -1,19 +1,17 @@
 import { rulesAccess, rulesErrorMessage } from '../lib/rules'
 import type { AppBindings } from '../types'
-import { GAMES } from '../lib/games'
 import * as parties from '../store/parties'
 import { findUserIdByRiotId, getIgnMap, getUserIgn } from '../store/profiles'
 import { consumeLinkCode, createClientToken, deleteClientToken, resolveClientToken, type TokenRecord } from '../store/clientAuth'
 import { activeSessionId } from '../store/history'
 import { reportGame } from '../store/games'
-import { gameAllowed, getGuildSettings } from '../store/settings'
+import { gameAllowed, getGuildSettings, isKnownGame } from '../store/settings'
 import { trySyncEmbed } from '../lib/party'
 import { getGuildMember, getMemberAvatarUrl } from '../lib/discord'
 import { fetchLiveGame, getChampionCatalog, platformForRegion } from '../lib/riot'
 
 export { generateLinkCode, writeLinkCode, type LinkRecord } from '../store/clientAuth'
 
-const VALID_GAMES = new Set<string>(GAMES.map(g => g.value))
 
 // HTTP API consumed by the PartyBot desktop client.
 //
@@ -217,10 +215,11 @@ async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
   const game = typeof body.game === 'string' ? body.game.trim() : ''
   if (!game) return json({ ok: false, error: 'game is required.' }, 400)
   // Every other way to set a party's game (the /party create/edit dropdown,
-  // the admin API) is constrained to the GAMES catalog — this client-facing
-  // path is reachable by any linked user, so it needs the same guard against
-  // an arbitrary, unbounded string.
-  if (!VALID_GAMES.has(game)) return json({ ok: false, error: 'Invalid game.' }, 400)
+  // the admin API) is constrained to the guild's game list — this
+  // client-facing path is reachable by any linked user, so it needs the same
+  // guard against an arbitrary, unbounded string.
+  const settings = await getGuildSettings(env.DB, rec.guildId)
+  if (!isKnownGame(settings, game)) return json({ ok: false, error: 'Invalid game.' }, 400)
 
   const partyId = await parties.getUserPartyId(env.DB, rec.guildId, rec.userId)
   if (!partyId) return json({ ok: false, error: 'You are not in a party.' }, 404)
@@ -232,7 +231,6 @@ async function setPartyGame(req: Request, env: AppBindings): Promise<Response> {
   }
   if (current.game === game) return json({ ok: true, game })
 
-  const settings = await getGuildSettings(env.DB, rec.guildId)
   if (!gameAllowed(settings, game)) return json({ ok: false, error: `${game} is not enabled on this server.` }, 400)
 
   // Refresh every member's/queued user's IGN from their per-game profile, same

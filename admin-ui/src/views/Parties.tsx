@@ -2,7 +2,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Crown, Megaphone, Moon, Pl
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import { cn } from '../lib/cn'
-import { GAMES } from '../games'
+import { defaultGame, gameChoices } from '../games'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
 import { Avatar } from '../components/Avatar'
@@ -11,6 +11,7 @@ import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
 import { ChannelSelect } from '../components/ChannelSelect'
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Checkbox, EmptyState, ErrorNote, Input, Label, Mono, Segmented, Select, Spinner, StatusDot, Switch, Textarea } from '../components/ui'
 import { useGuildData } from '../lib/guildData'
+import { useLoad } from '../lib/useLoad'
 import { deadlineOf, fmtAbs, relTime } from '../lib/time'
 import type { ChannelInfo, GuildSettings, Party, PartyGamesResponse, PartyMember, QueueEntry, VoiceStatus } from '../types'
 
@@ -293,12 +294,12 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
   onCancel: () => void
 }) {
   const toast = useToast()
-  const s = settings || { defaultCap: 10, allowedGames: [] as string[] }
-  const allowed = GAMES.filter(g => s.allowedGames.length === 0 || s.allowedGames.includes(g))
+  const s = settings || { defaultCap: 10 }
+  const allowed = gameChoices(settings)
   const ownerPicker = useRef<UserPickerHandle>(null)
 
   const [name, setName] = useState('')
-  const [game, setGame] = useState('Other')
+  const [game, setGame] = useState(() => defaultGame(settings))
   const [cap, setCap] = useState(s.defaultCap)
   const [channel, setChannel] = useState('')
   const [voice, setVoice] = useState('')
@@ -685,6 +686,8 @@ function SettingsSection({ p, voiceChannels, onUpdate, onRemove }: {
 }) {
   const toast = useToast()
   const confirm = useConfirm()
+  const guildData = useGuildData()
+  const { data: settings } = useLoad(() => guildData.getSettings())
   const [name, setName] = useState(p.name)
   const [cap, setCap] = useState(p.maxSize)
   const [game, setGame] = useState(p.game)
@@ -715,7 +718,7 @@ function SettingsSection({ p, voiceChannels, onUpdate, onRemove }: {
         <Label>Player cap<Input type="number" min={2} max={50} required value={cap} onChange={e => setCap(Number(e.target.value))} /></Label>
         <Label>Game
           <Select value={game} onChange={e => setGame(e.target.value)}>
-            {GAMES.map(g => <option key={g} value={g}>{g}</option>)}
+            {gameChoices(settings, p.game).map(g => <option key={g} value={g}>{g}</option>)}
           </Select>
         </Label>
         <Label>Voice channel

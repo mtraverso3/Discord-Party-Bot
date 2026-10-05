@@ -62,7 +62,8 @@ export interface PartyTemplate {
 export interface GuildSettings {
   maxParties: number
   defaultCap: number
-  allowedGames: string[]
+  customGames: string[]
+  disabledGames: string[]
   clientInviters: string[]
   partyBumpers: string[]
 }

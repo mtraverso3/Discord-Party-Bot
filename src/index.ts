@@ -1,7 +1,7 @@
 import { DiscordHono } from 'discord-hono'
 import type { AppBindings, AppEnv } from './types'
 import {
-  handleBanlistModal, handleCreateModalRaw, handleEditModalRaw, handleParty,
+  handleBanlistModal, handleCreateModalRaw, handleEditModalRaw, handleParty, handlePartyAutocomplete,
 } from './commands/party'
 import { handleAwayButton, handleHelpPage, handleJoinButton, handleLeaveButton, handleQueueButton } from './components/buttons'
 import { PAGE_BUTTON, START_BUTTON, STEP_BUTTON, handleRulesPage, handleRulesStart, handleRulesStep } from './commands/rules'
@@ -73,6 +73,12 @@ export default {
 
     let interaction: any
     try { interaction = JSON.parse(body) } catch { return new Response('Bad JSON', { status: 400 }) }
+
+    // Autocomplete (the per-guild game list on /party ign) is answered here
+    // directly; it's a quick read and discord-hono has no handler for it.
+    if (interaction.type === 4 && interaction.data?.name === 'party') {
+      return handlePartyAutocomplete(interaction, env)
+    }
 
     // Intercept /party create and /party edit modal submits — bypass
     // discord-hono entirely. Ack with a deferred ephemeral now; the real work

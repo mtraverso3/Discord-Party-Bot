@@ -29,8 +29,12 @@ assets alike.
 - **Audit log**: the last 200 admin actions with the acting admin's email, or
   Discord name for Discord-identity admins.
 - **Admins**: the Discord users allowed to sign in via `/party admin`.
+- **Games**: the server's game list. A few games are built in (League regions
+  first, since the desktop client and match tracking are League-only); add
+  your own custom games and switch any game on or off. Changes save
+  immediately. Discord's select menus cap the enabled list at 25.
 - **Settings**: the per-guild limits the bot enforces, such as max concurrent
-  parties, default player cap, allowed games and desktop client inviters.
+  parties, default player cap and desktop client inviters.
 
 ## Setup
 
