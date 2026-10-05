@@ -7,12 +7,13 @@ import {
 import {
   addToParty, approveQueued, clearLink, denyQueued, fetchChampionCatalog, fetchLiveChampions, fetchSession,
   getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode, lookupPlayers, reportGame, setAutoJoinSettings, setPartyGame,
-  setTaggedPlayers, type ChampionCatalog,
+  setTaggedPlayers, type ChampionCatalog, type LiveParticipant,
 } from './bot'
 import {
   crossReference, formatRiotId, ignMatches, parseRiotId, reconcileKnownPlayers,
   type LobbyEntry, type PartyEntry,
 } from '../shared/match'
+import { needsLiveFetch, nextLiveCache, type LiveCache } from '../shared/live-cache'
 import type {
   AutoJoinSettings, BanCheck, ChampionPick, GamePhase, GameView, InviteOutcome, InviteResult, LcuStatus,
   LobbyMode, LobbyView, Session, SessionResult, SummonerInfo, TaggedPlayer,
@@ -448,6 +449,8 @@ interface BanSnapshot {
 }
 let banSnapshot: BanSnapshot | null = null
 
+let liveCache: LiveCache<LiveParticipant> | null = null
+
 /**
  * Champion picks for the party's current champ select or live game.
  *
@@ -518,9 +521,14 @@ async function gameChampions(): Promise<GameView> {
 
   // Live game: championId by normalized public Riot ID.
   const liveByRiotId = new Map<string, number>()
+  if (phase !== 'InProgress') liveCache = null
   if (phase === 'InProgress' && summoner) {
-    const live = await fetchLiveChampions(region ?? '', summoner.gameName, summoner.tagLine)
-    for (const p of live.participants) {
+    const gameId = await fetchGameId(creds)
+    if (needsLiveFetch(liveCache, gameId, Date.now())) {
+      const result = await fetchLiveChampions(region ?? '', summoner.gameName, summoner.tagLine)
+      liveCache = nextLiveCache(gameId, result, Date.now())
+    }
+    for (const p of liveCache?.participants ?? []) {
       if (p.riotId) liveByRiotId.set(normalizeRiotId(p.riotId), p.championId)
     }
   }

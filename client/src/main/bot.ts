@@ -4,6 +4,7 @@ import { app } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { KnownPlayer, TaggedPlayer } from '../shared/types'
+import type { LiveResult } from '../shared/live-cache'
 
 const DEFAULT_BOT_URL = 'https://partybot.mtraverso.net'
 
@@ -161,15 +162,15 @@ export async function fetchLiveChampions(
   region: string,
   gameName: string,
   tagLine: string,
-): Promise<{ live: boolean; participants: LiveParticipant[] }> {
+): Promise<LiveResult<LiveParticipant>> {
   const token = loadConfig().token
-  if (!token || !gameName || !tagLine) return { live: false, participants: [] }
+  if (!token || !gameName || !tagLine) return { ok: false, live: false, participants: [] }
   try {
     const res = await botFetch('POST', '/client/champions/live', { region, gameName, tagLine }, token)
-    if (res.status !== 200 || !res.body?.ok) return { live: false, participants: [] }
-    return { live: !!res.body.live, participants: res.body.participants ?? [] }
+    if (res.status !== 200 || !res.body?.ok) return { ok: false, live: false, participants: [] }
+    return { ok: true, live: !!res.body.live, participants: res.body.participants ?? [] }
   } catch {
-    return { live: false, participants: [] }
+    return { ok: false, live: false, participants: [] }
   }
 }
 
