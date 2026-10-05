@@ -876,8 +876,11 @@ export async function sweepInactiveParties(db: D1Database, now = Date.now()): Pr
     if (now - row.last_activity_at < threshold) continue
     const party = await getParty(db, row.guild_id, row.id)
     if (!party) continue
+    // Re-checked in the delete: activity since the scan above keeps the party.
+    const deleted = await db.prepare('DELETE FROM parties WHERE guild_id = ?1 AND id = ?2 AND last_activity_at <= ?3')
+      .bind(row.guild_id, row.id, now - threshold).run()
+    if (!deleted.meta.changes) continue
     await history.closeSession(db, row.guild_id, row.id, `inactive ${Math.round(threshold / HOUR)}h`)
-    await db.prepare('DELETE FROM parties WHERE guild_id = ?1 AND id = ?2').bind(row.guild_id, row.id).run()
     out.push({ party, thresholdMs: threshold })
   }
   return out

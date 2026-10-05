@@ -394,4 +394,32 @@ describe('inactivity sweep', () => {
     await ageParty(guildId, party.id, parties.INACTIVITY_PARTIAL_MS + 60_000)
     expect(await parties.sweepInactiveParties(env.DB)).toHaveLength(1)
   })
+
+  it('keeps a party that became active after the scan', async () => {
+    const { guildId, party } = await makeParty({ maxSize: 5 })
+    await ageParty(guildId, party.id, parties.INACTIVITY_SOLO_MS + 60_000)
+
+    // Someone joins between the sweep's scan and its delete.
+    const db = new Proxy(env.DB, {
+      get(target, key) {
+        if (key !== 'prepare') return Reflect.get(target, key).bind(target)
+        return (sql: string) => {
+          const stmt = target.prepare(sql)
+          if (!sql.includes('LEFT JOIN party_members')) return stmt
+          return {
+            bind: (...args: unknown[]) => ({
+              all: async () => {
+                const scanned = await stmt.bind(...args).all()
+                await parties.joinParty(env.DB, guildId, party.id, user('late'))
+                return scanned
+              },
+            }),
+          }
+        }
+      },
+    }) as D1Database
+
+    expect(await parties.sweepInactiveParties(db)).toHaveLength(0)
+    expect((await parties.getParty(env.DB, guildId, party.id))!.members.map(m => m.userId)).toContain('late')
+  })
 })
