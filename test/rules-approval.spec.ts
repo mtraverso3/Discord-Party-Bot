@@ -175,6 +175,98 @@ describe('queue operations', () => {
   })
 })
 
+describe('sweep removal DMs', () => {
+  const QUEUED = '700000000000000000'
+  let dms: Array<{ userId: string; content: string }>
+  let closedDms: Set<string>
+
+  beforeEach(() => {
+    dms = []
+    closedDms = new Set()
+    discord.mockImplementation(async (input: any, init: any) => {
+      const url = new URL(typeof input === 'string' ? input : input.url)
+      if (url.pathname.endsWith('/users/@me/channels')) {
+        const { recipient_id } = JSON.parse(init.body)
+        if (closedDms.has(recipient_id)) return new Response('Cannot send messages to this user', { status: 403 })
+        return Response.json({ id: `dm-${recipient_id}` })
+      }
+      const dm = url.pathname.match(/\/channels\/dm-(\d+)\/messages$/)
+      if (dm) {
+        dms.push({ userId: dm[1]!, content: JSON.parse(init.body).content })
+        return Response.json({ id: 'dm-message', channel_id: `dm-${dm[1]}` })
+      }
+      return Response.json({ id: 'message', channel_id: 'channel' })
+    })
+  })
+
+  /** OWNER and ACTIVE as members, QUEUED waiting, embed posted. */
+  async function full() {
+    const { id, guildId } = await make()
+    await approve(guildId, QUEUED)
+    await parties.joinParty(env.DB, guildId, id, user(ACTIVE))
+    await parties.joinParty(env.DB, guildId, id, user(QUEUED))
+    await parties.setEmbedMessage(env.DB, guildId, id, 'embed-msg', 'embed-chan')
+    return { id, guildId }
+  }
+
+  it('DMs a removed member once, naming the party and the way back', async () => {
+    const { id, guildId } = await full()
+    await revoke(guildId, ACTIVE)
+    await sweepRulesApproval(env)
+
+    expect(dms).toHaveLength(1)
+    expect(dms[0]!.userId).toBe(ACTIVE)
+    expect(dms[0]!.content).toContain('Arena')
+    expect(dms[0]!.content).toContain('/party rules quiz')
+    expect(dms[0]!.content).toContain(`https://discord.com/channels/${guildId}/embed-chan/embed-msg`)
+    expect((await parties.getParty(env.DB, guildId, id))!.members.map(m => m.userId)).toEqual([OWNER, QUEUED])
+  })
+
+  it('DMs a removed queued user', async () => {
+    const { id, guildId } = await full()
+    await revoke(guildId, QUEUED)
+    await sweepRulesApproval(env)
+
+    expect(dms.map(d => d.userId)).toEqual([QUEUED])
+    expect(dms[0]!.content).toContain('Arena')
+    expect((await parties.getParty(env.DB, guildId, id))!.queue).toHaveLength(0)
+  })
+
+  it('never DMs eligible members or the owner', async () => {
+    const { id, guildId } = await full()
+    await sweepRulesApproval(env)
+    expect(dms).toEqual([])
+
+    await revoke(guildId, OWNER)
+    await sweepRulesApproval(env)
+    expect(dms).toEqual([])
+    expect((await parties.getParty(env.DB, guildId, id))!.isClosed).toBe(true)
+  })
+
+  it('keeps removing and DMing when one DM fails', async () => {
+    const { id, guildId } = await full()
+    closedDms.add(QUEUED)
+    await revoke(guildId, QUEUED)
+    await revoke(guildId, ACTIVE)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await sweepRulesApproval(env)
+    warn.mockRestore()
+
+    const party = (await parties.getParty(env.DB, guildId, id))!
+    expect(party.members.map(m => m.userId)).toEqual([OWNER])
+    expect(party.queue).toHaveLength(0)
+    expect(dms.map(d => d.userId)).toEqual([ACTIVE])
+  })
+
+  it('does not DM again on the next sweep', async () => {
+    const { guildId } = await full()
+    await revoke(guildId, ACTIVE)
+    await sweepRulesApproval(env)
+    await sweepRulesApproval(env)
+    expect(dms.map(d => d.userId)).toEqual([ACTIVE])
+  })
+})
+
 describe('entry routes', () => {
   it.each([handleJoinButton, handleQueueButton])('denies an unapproved button interaction', async handler => {
     const { id, guildId } = await make()
