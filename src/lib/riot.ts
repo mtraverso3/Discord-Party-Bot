@@ -222,6 +222,24 @@ export async function fetchMatch(
   }
 }
 
+// Every client in a game polls for it, so Riot lookups are shared via the Cache API.
+const RIOT_CACHE_URL = 'https://cache.partybot.internal/riot'
+const PUUID_TTL_SECONDS = 24 * 60 * 60
+const SPECTATOR_TTL_SECONDS = 30
+
+async function cacheGet<T>(key: string): Promise<T | undefined> {
+  const cache = await caches.open('riot')
+  const hit = await cache.match(key).catch(() => null)
+  return hit ? ((await hit.json()) as T) : undefined
+}
+
+async function cachePut(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  const cache = await caches.open('riot')
+  await cache.put(key, new Response(JSON.stringify(value), {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${ttlSeconds}` },
+  })).catch(() => {})
+}
+
 /** Resolve a Riot ID to its public encrypted puuid via Account-v1, or null. */
 async function resolvePuuid(
   token: string,
@@ -229,6 +247,10 @@ async function resolvePuuid(
   gameName: string,
   tagLine: string,
 ): Promise<string | null> {
+  const key = `${RIOT_CACHE_URL}/account/${cluster}/${encodeURIComponent(gameName.toLowerCase())}/${encodeURIComponent(tagLine.toLowerCase())}`
+  const cached = await cacheGet<{ puuid: string }>(key)
+  if (cached) return cached.puuid
+
   const res = await fetch(
     `https://${cluster}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`,
     { headers: { 'X-Riot-Token': token.trim() } },
@@ -239,7 +261,9 @@ async function resolvePuuid(
     throw new Error(`account ${res.status}: ${detail.slice(0, 300)}`)
   }
   const body = (await res.json()) as { puuid?: string }
-  return typeof body.puuid === 'string' && body.puuid ? body.puuid : null
+  if (typeof body.puuid !== 'string' || !body.puuid) return null
+  await cachePut(key, { puuid: body.puuid }, PUUID_TTL_SECONDS)
+  return body.puuid
 }
 
 /**
@@ -261,11 +285,18 @@ export async function fetchLiveGame(
   const puuid = await resolvePuuid(token, cluster, gameName, tagLine)
   if (!puuid) return null
 
+  const key = `${RIOT_CACHE_URL}/spectator/${platform}/${encodeURIComponent(puuid)}`
+  const cached = await cacheGet<{ game: LiveGame | null }>(key)
+  if (cached) return cached.game
+
   const res = await fetch(
     `https://${platform}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/${encodeURIComponent(puuid)}`,
     { headers: { 'X-Riot-Token': token.trim() } },
   )
-  if (res.status === 404) return null      // not currently in a (spectatable) game
+  if (res.status === 404) {                // not currently in a (spectatable) game
+    await cachePut(key, { game: null }, SPECTATOR_TTL_SECONDS)
+    return null
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
     throw new Error(`spectator ${res.status}: ${detail.slice(0, 300)}`)
@@ -274,10 +305,12 @@ export async function fetchLiveGame(
     gameId: number
     participants: { riotId?: string; championId: number; teamId: number }[]
   }
-  return {
+  const game: LiveGame = {
     gameId: body.gameId,
     participants: (body.participants ?? [])
       .filter(p => typeof p.riotId === 'string' && p.riotId)
       .map(p => ({ riotId: p.riotId as string, championId: p.championId, teamId: p.teamId })),
   }
+  await cachePut(key, { game }, SPECTATOR_TTL_SECONDS)
+  return game
 }
