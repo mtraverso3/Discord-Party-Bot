@@ -49,6 +49,21 @@ export async function postMessage(
   return res.json<{ id: string; channel_id: string }>()
 }
 
+export async function openDmChannel(token: string, userId: string): Promise<{ id: string }> {
+  const res = await discordFetch(token, '/users/@me/channels', {
+    method: 'POST',
+    body: JSON.stringify({ recipient_id: userId }),
+  })
+  if (!res.ok) throw new Error(`openDmChannel failed: ${res.status}`)
+  return res.json<{ id: string }>()
+}
+
+/** Throws when the user can't be reached, e.g. DMs closed or no shared server. */
+export async function sendDirectMessage(token: string, userId: string, body: unknown): Promise<void> {
+  const channel = await openDmChannel(token, userId)
+  await postMessage(token, channel.id, body)
+}
+
 export async function editMessage(
   token: string,
   channelId: string,
