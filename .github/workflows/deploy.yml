@@ -3,13 +3,16 @@ name: Deploy
 # Manual deploys — trigger from the Actions tab ("Run workflow").
 # Optionally re-registers the Discord slash commands in the same run.
 #
-# Also deploys automatically when a pull request is merged with the
-# "deploy-on-merge" label attached.
+# Merged pull requests can trigger it too, via labels:
+#   deploy-on-merge        — deploy (migrations + Worker) when the PR merges
+#   re-register-on-merge   — re-register the slash commands when the PR merges
+# Attach both to deploy and then re-register in one run, e.g. when a PR
+# changes a command's options. re-register-on-merge alone only registers.
 #
 # Required repository secrets:
 #   CLOUDFLARE_API_TOKEN    — API token with the "Edit Cloudflare Workers" template
 #   CLOUDFLARE_ACCOUNT_ID   — from the Workers overview page sidebar
-# Required only when "Re-register slash commands" is checked:
+# Required only when re-registering (the checkbox or re-register-on-merge):
 #   DISCORD_APPLICATION_ID  — Discord dev portal → General Information
 #   DISCORD_BOT_TOKEN       — Discord dev portal → Bot (reset to obtain)
 #
@@ -35,8 +38,13 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true &&
-       contains(github.event.pull_request.labels.*.name, 'deploy-on-merge'))
+       (contains(github.event.pull_request.labels.*.name, 'deploy-on-merge') ||
+        contains(github.event.pull_request.labels.*.name, 're-register-on-merge')))
     runs-on: ubuntu-latest
+    env:
+      # A manual run always deploys; a merge deploys only with its label.
+      DEPLOY: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'deploy-on-merge') }}
+      REGISTER: ${{ inputs.register == true || contains(github.event.pull_request.labels.*.name, 're-register-on-merge') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,25 +62,29 @@ jobs:
         run: npm ci && npm --prefix admin-ui ci
 
       - name: Typecheck and test before deploying
+        if: env.DEPLOY == 'true'
         run: npm run typecheck && npm test
 
       - name: Build admin UI
+        if: env.DEPLOY == 'true'
         run: npm --prefix admin-ui run build
 
       - name: Apply D1 migrations
+        if: env.DEPLOY == 'true'
         run: npx wrangler d1 migrations apply partybot --remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy to Cloudflare Workers
+        if: env.DEPLOY == 'true'
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Re-register Discord slash commands
-        if: inputs.register
+        if: env.REGISTER == 'true'
         run: npm run register
         env:
           DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
