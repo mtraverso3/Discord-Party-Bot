@@ -115,9 +115,6 @@ export interface RulesSession {
 
 export interface AppBindings extends Record<string, unknown> {
   DB: D1Database
-  // Legacy KV — only used by POST /admin/api/import-kv to migrate old data
-  // into D1. Optional so the binding can be removed after the import.
-  PARTY_KV?: KVNamespace
   DISCORD_PUBLIC_KEY: string
   DISCORD_BOT_TOKEN: string
   DISCORD_APPLICATION_ID: string

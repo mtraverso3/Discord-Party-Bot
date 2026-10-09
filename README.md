@@ -75,7 +75,6 @@ below.
 | [Admin dashboard](docs/admin-ui.md) | The `/admin` web app, Cloudflare Access, and Discord admin login |
 | [Rules check](docs/rules-check.md) | Gating parties behind rules pages, a quiz and an agreement |
 | [Desktop client](client/README.md) | The League companion app, and troubleshooting it |
-| [Migrating from KV](docs/migrating-from-kv.md) | One-time import for deployments that predate D1 |
 
 ## Development
 
