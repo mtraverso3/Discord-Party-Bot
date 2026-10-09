@@ -15,6 +15,7 @@ import * as notes from '../store/notes'
 import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
 import { handleRulesAdmin } from './rules'
 import { checkGuildChannels } from './channels'
+import { clientIp, rateLimited } from '../lib/rate-limit'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -48,6 +49,9 @@ export function adminIdentity(env: AppBindings, email?: string): AdminIdentity {
   return m ? { superAdmin: false, userId: m[1], guildId: m[2] } : { superAdmin: true }
 }
 
+// Routes that make one Discord API call per user they're asked about.
+const FANOUT_ROUTE = /^\/admin\/api\/(members(\/resolve|\/avatars)?|parties\/[^/]+\/voice)$/
+
 /**
  * A page on another site must not be able to drive the API with the admin's
  * Access cookie. Browsers label every request with where it came from.
@@ -63,6 +67,11 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
   if (req.method !== 'GET' && req.method !== 'HEAD' && isCrossSite(req, url)) {
     return json({ error: 'Cross-origin changes are not allowed.' }, 403)
   }
+  const who = email ?? clientIp(req)
+  const limited = await rateLimited(env.ADMIN_LIMITER, who, `admin ${url.pathname}`)
+    ?? (FANOUT_ROUTE.test(url.pathname) ? await rateLimited(env.ADMIN_FANOUT_LIMITER, who, `admin ${url.pathname}`) : null)
+  if (limited) return limited
+
   const guildId = url.searchParams.get('guild')
   const identity = adminIdentity(env, email)
 

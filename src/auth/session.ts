@@ -11,6 +11,7 @@
 import type { AppBindings } from '../types'
 import { signHmac, verifyHmac } from '../lib/jwt'
 import { consumeAdminLinkToken, isAdmin, touchAdminLogin } from '../store/adminAuth'
+import { clientIp, rateLimited } from '../lib/rate-limit'
 
 export const SESSION_COOKIE = 'pb_admin_session'
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000
@@ -74,6 +75,12 @@ export async function handleAuth(req: Request, env: AppBindings, url: URL): Prom
   }
 
   if (url.pathname !== '/auth/login') return new Response('Not Found', { status: 404 })
+  const limited = await rateLimited(env.AUTH_LIMITER, clientIp(req), '/auth/login')
+  if (limited) {
+    const res = page('Too many attempts', 'Wait a minute, then open the link from <code>/party admin</code> again.', 429)
+    res.headers.set('Retry-After', limited.headers.get('Retry-After')!)
+    return res
+  }
 
   const secret = env.ADMIN_SESSION_SECRET
   if (!secret) return page('Admin login is not configured', 'This bot has no ADMIN_SESSION_SECRET set.', 503)

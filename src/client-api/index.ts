@@ -7,6 +7,7 @@ import { activeSessionId } from '../store/history'
 import { reportGame } from '../store/games'
 import { gameAllowed, getGuildSettings, isKnownGame } from '../store/settings'
 import { trySyncEmbed } from '../lib/party'
+import { clientIp, rateLimited } from '../lib/rate-limit'
 import { getGuildMember, getMemberAvatarUrl } from '../lib/discord'
 import { fetchLiveGame, getChampionCatalog, platformForRegion } from '../lib/riot'
 
@@ -47,15 +48,8 @@ export async function handleClientApi(req: Request, env: AppBindings, url: URL):
   }
 }
 
-/** A 429 when `limiter` is out of budget for `key`, otherwise null. */
-async function rateLimited(limiter: RateLimit | undefined, key: string, what: string): Promise<Response | null> {
-  if (!limiter || (await limiter.limit({ key })).success) return null
-  console.warn(`rate limited: ${what}`)
-  return json({ ok: false, error: 'Too many requests. Try again in a minute.' }, 429)
-}
-
 async function routeClientApi(req: Request, env: AppBindings, url: URL): Promise<Response> {
-  const ip = req.headers.get('cf-connecting-ip') ?? 'unknown'
+  const ip = clientIp(req)
   const bearer = req.headers.get('Authorization')?.replace(/^Bearer\s+/, '').trim()
   const limited = await rateLimited(env.CLIENT_LIMITER, bearer ? `t:${bearer}` : `ip:${ip}`, url.pathname)
   if (limited) return limited

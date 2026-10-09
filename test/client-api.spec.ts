@@ -420,7 +420,9 @@ describe('client rate limits', () => {
   it('limits link-code guesses per IP', async () => {
     const guess = () => req('POST', '/client/auth', { body: { code: 'AAAAAAAA' }, ip: '203.0.113.7' })
     for (let i = 0; i < 10; i++) expect((await guess()).status).toBe(404)
-    expect((await guess()).status).toBe(429)
+    const limited = await guess()
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('retry-after')).toBe('60')
     expect((await req('POST', '/client/auth', { body: { code: 'AAAAAAAA' }, ip: '203.0.113.8' })).status).toBe(404)
   })
 
