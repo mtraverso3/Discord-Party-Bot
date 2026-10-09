@@ -123,7 +123,7 @@ describe('resolvePendingGames', () => {
     expect(g.status).toBe('resolved')
     expect(g.queueId).toBe(420)
     expect(g.participants).toEqual([
-      { puuid: 'p1', riotId: 'Me#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true },
+      { puuid: 'p1', riotId: 'Me#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true, subteam: null, placement: null },
     ])
   })
 
@@ -185,7 +185,79 @@ describe('listGamesForUser', () => {
     const list = await games.listGamesForUser(env.DB, mine.guildId, 'player')
     expect(list.map(g => g.matchId)).toEqual(['NA1_42'])
     expect(list[0]!.participants).toEqual([
-      { puuid: 'p1', riotId: 'Player#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true },
+      { puuid: 'p1', riotId: 'Player#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true, subteam: null, placement: null },
     ])
+  })
+})
+
+describe('Arena-style games', () => {
+  const original = globalThis.fetch
+  let arena: boolean
+  let missing: boolean
+
+  beforeEach(() => {
+    arena = true
+    missing = false
+    globalThis.fetch = vi.fn(async () => {
+      if (missing) return new Response('', { status: 404 })
+      const players = arena
+        ? [1, 1, 2, 2].map((sub, i) => ({ puuid: `a${i}`, championId: i + 1, championName: `C${i}`, teamId: 100, win: sub === 2, playerSubteamId: sub, subteamPlacement: sub === 2 ? 1 : 4 }))
+        : [{ puuid: 'n0', championId: 1, championName: 'Annie', teamId: 100, win: true }]
+      return Response.json({ info: { queueId: arena ? 1750 : 420, gameCreation: 1, gameDuration: 900, participants: players } })
+    }) as any
+  })
+  afterEach(() => { globalThis.fetch = original })
+
+  async function resolvedGame(gameId: string) {
+    const s = await makeSession()
+    await games.reportGame(env.DB, { ...s, region: 'NA', gameId, reportedBy: 'owner' })
+    for (let i = 0; i < 5; i++) await games.resolvePendingGames(env.DB, 'key')
+    return { s, game: (await games.listGamesForHistory(env.DB, s.historyId))[0]! }
+  }
+
+  it('keeps each player’s subteam and placement', async () => {
+    const { game } = await resolvedGame('7001')
+    expect(game.status).toBe('resolved')
+    expect(game.participants.map(p => [p.subteam, p.placement])).toEqual(
+      expect.arrayContaining([[1, 4], [1, 4], [2, 1], [2, 1]]))
+  })
+
+  it('leaves them empty for a normal game', async () => {
+    arena = false
+    const { game } = await resolvedGame('7002')
+    expect(game.participants[0]).toMatchObject({ subteam: null, placement: null })
+  })
+
+  it('re-fetches stored Arena games, but not plain 5v5 ones', async () => {
+    const { s: arenaSession } = await resolvedGame('7003')
+    arena = false
+    const normal = await makeSession()
+    await games.reportGame(env.DB, { ...normal, region: 'NA', gameId: '7004', reportedBy: 'owner' })
+    await env.DB.prepare(`
+      UPDATE party_games SET status = 'resolved', resolved_at = 1, queue_id = 420 WHERE history_id = ?1
+    `).bind(normal.historyId).run()
+    for (let i = 0; i < 10; i++) {
+      await env.DB.prepare(`
+        INSERT INTO party_game_participants (game_row_id, puuid, champion_id, team_id, win)
+        SELECT id, ?2, 1, ?3, 1 FROM party_games WHERE history_id = ?1
+      `).bind(normal.historyId, `p${i}`, i < 5 ? 100 : 200).run()
+    }
+
+    const migration = env.TEST_MIGRATIONS.find(m => m.name.startsWith('0016_'))!
+    await env.DB.prepare(migration.queries.at(-1)!).run()
+
+    expect((await games.listGamesForHistory(env.DB, arenaSession.historyId))[0]!.status).toBe('pending')
+    expect((await games.listGamesForHistory(env.DB, normal.historyId))[0]!.status).toBe('resolved')
+  })
+
+  it('keeps a previously resolved game resolved when a re-fetch comes back empty', async () => {
+    const { s } = await resolvedGame('7005')
+    await env.DB.prepare("UPDATE party_games SET status = 'pending', next_attempt_at = 0, reported_at = 0 WHERE history_id = ?1")
+      .bind(s.historyId).run()
+    missing = true
+    for (let i = 0; i < 5; i++) await games.resolvePendingGames(env.DB, 'key')
+    const game = (await games.listGamesForHistory(env.DB, s.historyId))[0]!
+    expect(game.status).toBe('resolved')
+    expect(game.participants).toHaveLength(4)
   })
 })

@@ -155,6 +155,8 @@ export interface MatchParticipant {
   championName: string
   teamId: number
   win: boolean
+  subteam: number | null     // Arena-style modes: which small team they were on
+  placement: number | null   // ...and where that team finished, 1 = first
 }
 
 export interface MatchDetails {
@@ -198,6 +200,9 @@ export async function fetchMatch(
         championName?: string
         teamId?: number
         win?: boolean
+        playerSubteamId?: number
+        subteamPlacement?: number
+        placement?: number
       }[]
     }
   }
@@ -217,6 +222,8 @@ export async function fetchMatch(
         championName: p.championName ?? '',
         teamId: p.teamId ?? 0,
         win: !!p.win,
+        subteam: p.playerSubteamId || null,
+        placement: p.subteamPlacement || p.placement || null,
       }
     }).filter(p => p.puuid),
   }
