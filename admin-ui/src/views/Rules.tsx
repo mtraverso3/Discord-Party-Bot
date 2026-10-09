@@ -17,7 +17,7 @@ interface RulesConfig {
   passingScore: number
 }
 interface Status {
-  channelId: string; enabled: boolean; defaultRequired: boolean
+  channelId: string; enabled: boolean; defaultRequired: boolean; published: boolean
   config: RulesConfig; counts: { total: number; approved: number }
 }
 interface RosterMember {
@@ -160,8 +160,13 @@ export function Rules() {
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={status.enabled ? 'success' : 'warning'}>{status.enabled ? 'Rules check on' : 'Rules check off'}</Badge>
-          <Badge>Rules version {status.config.version}</Badge>
+          <Badge>{status.published ? `Rules version ${status.config.version}` : 'No rules published'}</Badge>
         </div>
+        {!status.published && (
+          <p className="rounded-lg border bg-muted p-3 text-sm">
+            This server has no rules yet. Write at least one page below and publish it, then switch the check on.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3">
           {[[status.counts.approved, 'Approved'], [status.counts.total, 'Tracked members']].map(([value, label]) => <div className="rounded-lg border bg-muted/30 p-3" key={label}><div className="text-xl font-semibold">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div>)}
         </div>
@@ -192,7 +197,7 @@ export function Rules() {
           Approval is this bot's own record of who passed. Nothing is granted or taken away in Discord.
         </p>
         <div className="flex flex-wrap items-end gap-2">
-          <Button busy={busy} onClick={() => void action(async () => {
+          <Button busy={busy} disabled={!status.enabled && !status.published} onClick={() => void action(async () => {
             const turningOff = status.enabled
             if (turningOff && !await confirm('Switch the rules check off for this server? Parties that ask for it stop being gated, and their settings are kept.', 'Switch off')) return
             const result = await api<Status>('/rules/connect', { method: 'POST', body: JSON.stringify({ enabled: !turningOff }) })
@@ -201,7 +206,7 @@ export function Rules() {
           <Label className="min-w-56 flex-1">Rules channel
             <ChannelSelect channels={channels} value={channel} onChange={setChannel} placeholder="Pick the channel to post in" />
           </Label>
-          <Button variant="outline" busy={busy} disabled={!channel} onClick={() => void post()}>Post Start button</Button>
+          <Button variant="outline" busy={busy} disabled={!channel || !status.published} onClick={() => void post()}>Post Start button</Button>
           <Button variant="ghost" busy={busy} onClick={() => void action(async () => {
             const result = await api<Status>('/rules/status'); setStatus(s => s ? { ...s, counts: result.counts, enabled: result.enabled } : result)
           })}><RefreshCw />Refresh status</Button>

@@ -42,21 +42,43 @@ function call(path: string, guildId: string, method = 'GET', body?: unknown, ema
 const publish = async (guildId: string, config: any, expectedVersion: number, requireReapproval = false) =>
   call('publish', guildId, 'POST', { config, expectedVersion, requireReapproval })
 
+/** Publish version 1 and switch the check on, as an admin would. */
+const connect = async (guildId: string) => {
+  await publish(guildId, CONFIG, 1)
+  return call('connect', guildId, 'POST')
+}
+
 const CONFIG = {
   pages: [{ title: 'Rules', text: 'Be excellent.' }],
   questions: [{ text: 'Ready?', correct: ['Yes'], incorrect: ['No'], explanation: 'Good.' }],
   agreement: 'I agree.',
 }
 
-it('serves the built-in rules until a guild publishes its own', async () => {
+it('has no rules, and no check, until a guild publishes its own', async () => {
   const g = guild()
   const res = await call('status', g)
   expect(res.status).toBe(200)
   const body = await res.json<any>()
-  expect(body.enabled).toBe(false)
-  expect(body.config.version).toBe(1)
-  expect(body.config.pages.length).toBeGreaterThan(0)
-  expect(body.counts).toEqual({ total: 0, approved: 0 })
+  expect(body).toMatchObject({ enabled: false, published: false, counts: { total: 0, approved: 0 } })
+  expect(body.config).toEqual({ version: 1, pages: [], questions: [], agreement: '', passingScore: 100 })
+
+  const refused = await call('connect', g, 'POST')
+  expect(refused.status).toBe(400)
+  expect((await refused.json<any>()).error).toContain('Publish your rules first')
+  expect((await call('post', g, 'POST', { channelId: '700000000000000001' })).status).toBe(400)
+  expect(discord.mock.calls.some(([u]) => String(u).endsWith('/messages'))).toBe(false)
+
+  await publish(g, CONFIG, 1)
+  expect((await (await call('status', g)).json<any>()).published).toBe(true)
+  expect((await (await call('connect', g, 'POST')).json<any>()).enabled).toBe(true)
+  expect((await call('connect', g, 'POST', { enabled: false })).status).toBe(200)
+})
+
+it("doesn't count a gate switched on before any rules were published", async () => {
+  const g = guild()
+  await saveRulesGate(env.DB, g, { enabled: true })
+  expect((await getRulesGate(env.DB, g))?.enabled).toBe(false)
+  await rulesAccess(env).require(g, MEMBER)
 })
 
 it('rejects cross-guild access', async () => {
@@ -77,7 +99,7 @@ it('switches the gate on, and off again, from the dashboard', async () => {
   const g = guild()
   await rulesAccess(env).require(g, MEMBER)  // ungated: anyone passes
 
-  const connected = await (await call('connect', g, 'POST')).json<any>()
+  const connected = await (await connect(g)).json<any>()
   expect(connected.enabled).toBe(true)
   await expect(rulesAccess(env).require(g, MEMBER)).rejects.toThrow('rules check')
 
@@ -127,23 +149,24 @@ it('accepts a quiz of any length, including none at all', async () => {
 
 it('requires everyone to verify again only when asked', async () => {
   const g = guild()
-  await call('connect', g, 'POST')
+  await connect(g)
   await env.DB.prepare(`
     INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
     VALUES (?1, ?2, 'approved', 0, 0, 1, 1, ?3)
   `).bind(g, MEMBER, Date.now()).run()
 
-  const quiet = await (await publish(g, CONFIG, 1)).json<any>()
+  const quiet = await (await publish(g, CONFIG, 2)).json<any>()
   expect(quiet.message).toContain('stay valid')
   await rulesAccess(env).require(g, MEMBER)
 
-  const reset = await (await publish(g, CONFIG, 2, true)).json<any>()
+  const reset = await (await publish(g, CONFIG, 3, true)).json<any>()
   expect(reset.message).toContain('1 member(s)')
   await expect(rulesAccess(env).require(g, MEMBER)).rejects.toThrow('rules check')
 })
 
 it('posts the start message to a channel and remembers it', async () => {
   const g = guild()
+  await publish(g, CONFIG, 1)
   expect((await call('post', g, 'POST')).status).toBe(400)  // no channel known yet
 
   const res = await call('post', g, 'POST', { channelId: '700000000000000001' })
@@ -165,7 +188,7 @@ it("won't post the start message into another server's channel", async () => {
 
 it('counts a revocation only when it takes away a live approval', async () => {
   const g = guild()
-  await call('connect', g, 'POST')
+  await connect(g)
   await env.DB.prepare(`
     INSERT INTO rules_members (guild_id, user_id, state, generation, revocations, completions, version, accepted_at)
     VALUES (?1, ?2, 'approved', 0, 0, 1, 1, ?3)
@@ -192,7 +215,7 @@ it('counts a revocation only when it takes away a live approval', async () => {
 
 it('approves a member from the panel, without the quiz', async () => {
   const g = guild()
-  await call('connect', g, 'POST')
+  await connect(g)
 
   const approved = await (await call(`members/${MEMBER}/approve`, g, 'POST', { reason: 'Vouched for' })).json<any>()
   expect(approved.message).toContain('Approved without the check')
@@ -212,7 +235,7 @@ it('approves a member from the panel, without the quiz', async () => {
 
 it('refuses to approve without a reason, or with the check switched off', async () => {
   const g = guild()
-  await call('connect', g, 'POST')
+  await connect(g)
   expect((await call(`members/${MEMBER}/approve`, g, 'POST', { reason: '  ' })).status).toBe(400)
 
   const off = guild()
@@ -261,9 +284,9 @@ it('lets only one of two simultaneous publishes land', async () => {
 
 it('requeues exactly the members approved when a publish asks for it', async () => {
   const g = guild()
-  await call('connect', g, 'POST')
+  await connect(g)
   await approveManually(env.DB, g, MEMBER, 'mod', 'vouched', 1)
-  const res = await publishRulesConfig(env.DB, g, CONFIG, 1, true, 'admin')
+  const res = await publishRulesConfig(env.DB, g, CONFIG, 2, true, 'admin')
   expect(res).toMatchObject({ ok: true, requeued: 1 })
   expect((await getMember(env.DB, g, MEMBER)).state).toBe('unapproved')
   expect((await memberHistory(env.DB, g, MEMBER))[0]).toMatchObject({ kind: 'reset', actor: 'admin' })

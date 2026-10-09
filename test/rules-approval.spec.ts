@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test'
+import { enableRules } from './rules-fixture'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as parties from '../src/store/parties'
 import { exemptFromRules, rulesAccess } from '../src/lib/rules'
@@ -61,7 +62,7 @@ const revoke = (guildId: string, id: string) =>
 async function make(maxSize = 2) {
   const id = `R${seq++}`
   const guildId = String(BigInt(G) + BigInt(seq))
-  await saveRulesGate(env.DB, guildId, { enabled: true })
+  await enableRules(guildId)
   await approve(guildId, OWNER, GOOD, ACTIVE)
   const policy = rulesAccess(env)
   await parties.createParty(env.DB, {
@@ -408,7 +409,7 @@ describe('admin exemption', () => {
     // The guild has a check and the admin has not passed it, but this party is
     // open — so there is nothing to excuse and nothing to warn about.
     const guildId = String(BigInt(G) + BigInt(9700 + seq++))
-    await saveRulesGate(env.DB, guildId, { enabled: true })
+    await enableRules(guildId)
     await makeAdmin(guildId)
     await parties.createParty(env.DB, {
       id: `N${seq++}`, guildId, name: 'Open', description: '', game: 'Other',
@@ -445,7 +446,7 @@ describe('per-party opt-in', () => {
   /** Same gated server, but a party that never asked for the check. */
   async function openParty() {
     const guildId = String(BigInt(G) + BigInt(8000 + seq++))
-    await saveRulesGate(env.DB, guildId, { enabled: true })
+    await enableRules(guildId)
     await approve(guildId, OWNER)
     const id = `O${seq++}`
     await parties.createParty(env.DB, {
@@ -463,7 +464,7 @@ describe('per-party opt-in', () => {
 
   it('creates an unchecked party even for an owner who has not passed', async () => {
     const guildId = String(BigInt(G) + BigInt(8500 + seq++))
-    await saveRulesGate(env.DB, guildId, { enabled: true })
+    await enableRules(guildId)
     const created = await parties.createParty(env.DB, {
       id: `U${seq++}`, guildId, name: 'Open', description: '', game: 'Other', owner: user(BAD), maxSize: 4,
     }, rulesAccess(env))
