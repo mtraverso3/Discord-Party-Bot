@@ -111,10 +111,16 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      # The message and tag label the version in the Cloudflare dashboard: the
+      # merged PR, or the commit for a manual run.
       - name: Deploy to Cloudflare Workers
         if: env.DEPLOY == 'true'
-        run: npx wrangler deploy
+        run: |
+          if [ -n "$PR_NUMBER" ]; then message="#$PR_NUMBER $PR_TITLE"; else message="$(git log -1 --format=%s)"; fi
+          npx wrangler deploy --tag "$(git rev-parse --short HEAD)" --message "${message:0:100}"
         env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
