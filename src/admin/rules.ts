@@ -1,7 +1,7 @@
 import type { AppBindings } from '../types'
-import { changeApproval as applyApprovalChange, formatStatus, postRulesMessage } from '../commands/rules'
+import { NOT_PUBLISHED, changeApproval as applyApprovalChange, formatStatus, postRulesMessage } from '../commands/rules'
 import {
-  approveManually, getMember, getRulesConfig, getRulesGate, listMembers, memberCounts,
+  approveManually, getMember, getRulesConfig, getRulesGate, hasPublishedRules, isPublished, listMembers, memberCounts,
   memberHistory, publishRulesConfig, saveRulesGate,
 } from '../store/rules'
 import { checkGuildChannels } from './channels'
@@ -59,6 +59,7 @@ async function status(env: AppBindings, guildId: string): Promise<Response> {
     channelId: gate?.channelId ?? '',
     enabled: !!gate?.enabled,
     defaultRequired: !!gate?.defaultRequired,
+    published: isPublished(config),
     config,
     counts,
   })
@@ -81,6 +82,10 @@ async function roster(env: AppBindings, guildId: string): Promise<Response> {
 async function connect(env: AppBindings, guildId: string, body: any): Promise<Response> {
   // `enabled` says the server has a check at all; parties opt in individually.
   const enabled = body?.enabled === undefined ? true : body.enabled === true
+  // With nothing to pass, gated parties would refuse everyone.
+  if (enabled && !await hasPublishedRules(env.DB, guildId)) {
+    return json({ error: 'Publish your rules first, then switch the check on.' }, 400)
+  }
   await saveRulesGate(env.DB, guildId, {
     enabled,
     ...(body?.defaultRequired === undefined ? {} : { defaultRequired: body.defaultRequired === true }),
@@ -109,7 +114,7 @@ async function post(env: AppBindings, guildId: string, body: any): Promise<Respo
   const channel = await checkGuildChannels(env, guildId, [{ id: channelId, kind: 'text' }])
   if (!channel.ok) return json({ error: channel.error }, channel.status)
   try {
-    await postRulesMessage(env, guildId, channelId)
+    if (!await postRulesMessage(env, guildId, channelId)) return json({ error: NOT_PUBLISHED }, 400)
   } catch (e) {
     console.error('rules post failed:', e)
     return json({ error: "Could not post there — check the bot's permissions in that channel." }, 502)

@@ -4,7 +4,8 @@ import * as parties from '../src/store/parties'
 import { rulesAccess } from '../src/lib/rules'
 import { sweepRulesApproval } from '../src/lib/rules-sweep'
 import { handleAdminApi } from '../src/admin/api'
-import { getRulesGate } from '../src/store/rules'
+import { getRulesGate, publishRulesConfig } from '../src/store/rules'
+import { TEST_RULES } from './rules-fixture'
 import { sweepStaleSessions } from '../src/store/rules'
 
 // Deploying this must change nothing for a server that has not asked for a
@@ -66,6 +67,7 @@ it('runs the every-minute sweep over an ungated guild without touching it', asyn
 
 it('does not switch the gate on as a side effect of posting the Start button', async () => {
   const g = guild()
+  await publishRulesConfig(env.DB, g, TEST_RULES, 1, false, 'admin')
   const url = new URL(`https://p.test/admin/api/rules/post?guild=${g}`)
   const res = await handleAdminApi(new Request(url, {
     method: 'POST',

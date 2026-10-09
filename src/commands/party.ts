@@ -1,5 +1,5 @@
 import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage } from '../lib/rules'
-import { beginQuiz, changeApproval, formatStatus, postRulesMessage, renderRulesPage } from './rules'
+import { NOT_PUBLISHED, beginQuiz, changeApproval, formatStatus, postRulesMessage, renderRulesPage } from './rules'
 import { approveManually, getMember, getRulesConfig, getRulesGate, hasPublishedRules, memberHistory } from '../store/rules'
 import { Modal, TextInput, type CommandContext, type ModalContext } from 'discord-hono'
 import type { AppBindings, AppEnv } from '../types'
@@ -643,13 +643,7 @@ async function bump(c: CommandContext<AppEnv>, guildId: string, channelId: strin
 
 /** The rules themselves, readable by anyone whether or not they have passed. */
 async function rulesView(c: CommandContext<AppEnv>, guildId: string, userId: string) {
-  const [gate, published] = await Promise.all([
-    getRulesGate(c.env.DB, guildId),
-    hasPublishedRules(c.env.DB, guildId),
-  ])
-  // Without either, the guild would be shown the built-in sample rules as if
-  // they were its own.
-  if (!gate?.enabled && !published) {
+  if (!await hasPublishedRules(c.env.DB, guildId)) {
     return c.followup({ content: "This server hasn't set up a rules check.", flags: 64 })
   }
 
@@ -686,7 +680,7 @@ async function rulesPost(c: CommandContext<AppEnv>, guildId: string) {
     })
   }
   try {
-    await postRulesMessage(c.env, guildId, gate.channelId)
+    if (!await postRulesMessage(c.env, guildId, gate.channelId)) return c.followup({ content: NOT_PUBLISHED, flags: 64 })
   } catch (e) {
     console.error('rules-post failed:', e)
     return c.followup({ content: `Couldn't post in <#${gate.channelId}> — check the bot's permissions there.`, flags: 64 })
