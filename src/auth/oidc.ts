@@ -21,6 +21,7 @@ import type { AppBindings } from '../types'
 import { publicJwk, signRs256, verifyRs256, sha256B64url, timingSafeEqual, type RsaPrivateJwk } from '../lib/jwt'
 import { consumeOidcCode, generateOidcCode, isAdmin, writeOidcCode } from '../store/adminAuth'
 import { readSession, page, normalizeBaseUrl } from './session'
+import { clientIp, rateLimited } from '../lib/rate-limit'
 
 const ID_TOKEN_TTL_S = 60 * 60
 const SUPPORTED_SCOPES = 'openid email profile'
@@ -72,6 +73,11 @@ function json(body: unknown, status = 200): Response {
 export async function handleOidc(req: Request, env: AppBindings, url: URL): Promise<Response> {
   const cfg = config(env)
   if (!cfg) return json({ error: 'server_error', error_description: 'OIDC login not configured' }, 503)
+
+  if (url.pathname === '/oidc/authorize' || url.pathname === '/oidc/token') {
+    const limited = await rateLimited(env.AUTH_LIMITER, clientIp(req), url.pathname)
+    if (limited) return limited
+  }
 
   switch (url.pathname) {
     case '/.well-known/openid-configuration': return discovery(cfg)

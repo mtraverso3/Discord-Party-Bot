@@ -23,8 +23,8 @@ database_name = "partybot"
 database_id = "81fb42ec-e425-4c49-bb92-dc8efc921fae"
 migrations_dir = "migrations"
 
-# Desktop-client API rate limits, per data center. Hits are logged as
-# "rate limited" in Workers Logs.
+# Rate limits, per data center. Hits are logged as "rate limited" in Workers
+# Logs.
 [[ratelimits]]
 name = "CLIENT_LIMITER"       # every client call, per token (or IP without one)
 namespace_id = "4201"
@@ -39,6 +39,21 @@ simple = { limit = 10, period = 60 }
 name = "RIOT_LIMITER"         # live-game lookups that spend the Riot API key, per user
 namespace_id = "4203"
 simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "AUTH_LIMITER"         # magic-link login and the OIDC authorize/token endpoints, per IP
+namespace_id = "4204"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "ADMIN_LIMITER"        # every admin API call, per admin
+namespace_id = "4205"
+simple = { limit = 600, period = 60 }
+
+[[ratelimits]]
+name = "ADMIN_FANOUT_LIMITER" # admin routes that make one Discord call per user, per admin
+namespace_id = "4206"
+simple = { limit = 120, period = 60 }
 
 # Cron sweeps: idle parties, expired link codes and client tokens, admin login
 # tokens and OIDC codes, and audit log trimming.

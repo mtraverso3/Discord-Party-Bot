@@ -144,6 +144,9 @@ export interface AppBindings extends Record<string, unknown> {
   CLIENT_LIMITER?: RateLimit
   CLIENT_AUTH_LIMITER?: RateLimit
   RIOT_LIMITER?: RateLimit
+  AUTH_LIMITER?: RateLimit
+  ADMIN_LIMITER?: RateLimit
+  ADMIN_FANOUT_LIMITER?: RateLimit
   // Static assets binding serving the built admin SPA (admin-ui/dist).
   ASSETS?: Fetcher
 }
