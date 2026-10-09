@@ -1,0 +1,39 @@
+name: Migrations
+
+# Migrations run before the new Worker is live, so the code already deployed
+# briefly runs against the new schema. This fails a PR whose new migrations
+# remove or rename something that code may still use. Split the change across
+# two deploys (docs/deploying.md), or add the breaking-migration label to ship
+# it in a maintenance window.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths: ['migrations/**']
+
+concurrency:
+  group: migrations-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  breaking-changes:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'breaking-migration') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check new migrations
+        run: npx tsx scripts/check-migrations.ts origin/${{ github.base_ref }}

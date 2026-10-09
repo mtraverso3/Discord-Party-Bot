@@ -75,6 +75,7 @@ below.
 | [Admin dashboard](docs/admin-ui.md) | The `/admin` web app, Cloudflare Access, and Discord admin login |
 | [Rules check](docs/rules-check.md) | Gating parties behind rules pages, a quiz and an agreement |
 | [Desktop client](client/README.md) | The League companion app, and troubleshooting it |
+| [Deploying](docs/deploying.md) | Shipping changes while parties are running, and splitting schema changes |
 
 ## Development
 
