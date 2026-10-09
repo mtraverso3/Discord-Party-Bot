@@ -13,7 +13,6 @@ import * as history from '../store/history'
 import * as games from '../store/games'
 import * as notes from '../store/notes'
 import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, getUserById, getUserVoiceChannel, searchGuildMembers } from '../lib/discord'
-import { importFromKv } from './import'
 import { handleRulesAdmin } from './rules'
 import { checkGuildChannels } from './channels'
 
@@ -72,7 +71,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
 
   // Cross-guild endpoints don't need a ?guild= param. Everything else (including
   // the now per-guild admin allow-list) is scoped to a specific guild.
-  const guildless = path === '/me' || path === '/guilds' || path === '/import-kv'
+  const guildless = path === '/me' || path === '/guilds'
   if (!guildId && !guildless) {
     return json({ error: 'guild query param required' }, 400)
   }
@@ -80,7 +79,6 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
   // Magic-link admins are pinned to the single guild that minted their link.
   // Super admins (real CF Access email) are unrestricted — the status quo.
   if (!identity.superAdmin) {
-    if (path === '/import-kv') return json({ error: 'Forbidden — super admins only' }, 403)
     if (guildId && guildId !== identity.guildId) {
       return json({ error: 'Forbidden — outside your guild' }, 403)
     }
@@ -100,7 +98,6 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path.startsWith('/rules/')) return handleRulesAdmin(req, env, guildId!, path, email || identity.userId || 'Admin panel')
     if (path === '/me' && method === 'GET') return await meRoute(env, identity, email)
     if (path === '/guilds' && method === 'GET') return await listGuilds(env, identity)
-    if (path === '/import-kv' && method === 'POST') return await importFromKv(env)
     if (path === '/admins' && method === 'GET') return json(await listAdmins(env.DB, guildId!))
     if (path === '/admins' && method === 'POST') return await addAdminRoute(env, guildId!, body, email)
     const adm = path.match(/^\/admins\/([^/]+)$/)

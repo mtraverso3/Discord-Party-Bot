@@ -105,9 +105,8 @@ export default {
     )
   },
 
-  // Replaces the old Durable Object inactivity alarm: parties idle past their
-  // tier's threshold are disbanded and their embeds greyed out; expired link
-  // codes and client tokens are purged alongside.
+  // Parties idle past their tier's threshold are disbanded and their embeds
+  // greyed out; expired link codes and client tokens are purged alongside.
   async scheduled(_event: ScheduledController, env: AppBindings, ctx: ExecutionContext): Promise<void> {
     if (_event.cron === '* * * * *') {
       ctx.waitUntil((async () => {
