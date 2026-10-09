@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { generateLinkCode, handleClientApi, writeLinkCode } from '../src/client-api'
 import { hashToken } from '../src/store/clientAuth'
+import { exhaust } from './limits'
 import { closeParty, createParty, joinParty } from '../src/store/parties'
 import { saveUserIgn } from '../src/store/profiles'
 import { MAX_GAMES_PER_SESSION } from '../src/store/games'
@@ -419,24 +420,25 @@ describe('client game reports', () => {
 describe('client rate limits', () => {
   it('limits link-code guesses per IP', async () => {
     const guess = () => req('POST', '/client/auth', { body: { code: 'AAAAAAAA' }, ip: '203.0.113.7' })
-    for (let i = 0; i < 10; i++) expect((await guess()).status).toBe(404)
-    const limited = await guess()
-    expect(limited.status).toBe(429)
-    expect(limited.headers.get('retry-after')).toBe('60')
+    const { before, limited } = await exhaust(10, guess)
+    expect(new Set(before)).toEqual(new Set([404]))
+    expect(limited?.headers.get('retry-after')).toBe('60')
     expect((await req('POST', '/client/auth', { body: { code: 'AAAAAAAA' }, ip: '203.0.113.8' })).status).toBe(404)
   })
 
   it('limits live-game lookups per user', async () => {
     const token = await linkUser(MEMBER, 'M', 'g-riot')
     const live = () => req('POST', '/client/champions/live', { token, body: { region: 'NA', gameName: 'a', tagLine: 'b' } })
-    for (let i = 0; i < 30; i++) expect((await live()).status).toBe(200)
-    expect((await live()).status).toBe(429)
+    const { before, limited } = await exhaust(30, live)
+    expect(new Set(before)).toEqual(new Set([200]))
+    expect(limited?.status).toBe(429)
   })
 
   it('limits every call per token', async () => {
     const token = 'e'.repeat(64)
-    for (let i = 0; i < 300; i++) expect((await req('GET', '/client/session', { token })).status).toBe(401)
-    expect((await req('GET', '/client/session', { token })).status).toBe(429)
+    const { before, limited } = await exhaust(300, () => req('GET', '/client/session', { token }))
+    expect(new Set(before)).toEqual(new Set([401]))
+    expect(limited?.status).toBe(429)
   })
 })
 
