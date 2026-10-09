@@ -33,9 +33,21 @@ removal. A scratch table created and dropped within one migration is fine.
 
 ## When splitting isn't worth it
 
-Add the `breaking-migration` label to the PR. The check then passes, and you
-accept that the bot may error for the moment between the migration and the
-deploy. Prefer deploying it when no parties are running.
+Add the `breaking-migration` label to the PR so the check passes. The deploy
+then runs in **maintenance mode**:
+
+1. Before migrating, Deploy checks which migrations production hasn't applied
+   yet. If any of them removes or renames something, it switches maintenance on.
+   You can also force it with the **maintenance** checkbox when running Deploy
+   by hand.
+2. While it's on, which is usually under a minute:
+   - Discord commands and buttons get a private "PartyBot is updating" reply.
+   - The desktop client and dashboard get a 503 that says when to retry; the
+     client waits and retries on its own.
+   - The cron sweeps skip a run.
+   - Parties aren't touched, just paused.
+3. After a successful deploy it switches off. If the deploy fails it expires on
+   its own after 10 minutes, so PartyBot is never left paused.
 
 ## Other things old copies keep using
 
