@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { handleAdminApi } from '../src/admin/api'
 import { handleOidc } from '../src/auth/oidc'
 import { handleAuth } from '../src/auth/session'
+import { exhaust } from './limits'
 
 let seq = 0
 const ip = () => `198.51.100.${++seq}`
@@ -29,10 +30,9 @@ describe('login rate limits', () => {
       const url = new URL('https://party.example.test/auth/login?token=nope')
       return handleAuth(new Request(url, { headers: { 'cf-connecting-ip': addr } }), oidcEnv, url)
     }
-    expect(await times(30, () => login(from))).not.toContain(429)
-    const limited = await login(from)
-    expect(limited.status).toBe(429)
-    expect(limited.headers.get('retry-after')).toBe('60')
+    const { before, limited } = await exhaust(30, () => login(from))
+    expect(before).not.toContain(429)
+    expect(limited?.headers.get('retry-after')).toBe('60')
     expect((await login(ip())).status).not.toBe(429)
   })
 
@@ -45,8 +45,9 @@ describe('login rate limits', () => {
         body: method === 'POST' ? 'grant_type=nope' : undefined,
       }), oidcEnv, url)
     }
-    expect(await times(30, () => call('/oidc/token', 'POST'))).not.toContain(429)
-    expect((await call('/oidc/token', 'POST')).status).toBe(429)
+    const { before, limited } = await exhaust(30, () => call('/oidc/token', 'POST'))
+    expect(before).not.toContain(429)
+    expect(limited?.status).toBe(429)
     expect(await times(50, () => call('/oidc/jwks'))).not.toContain(429)
     expect(await times(50, () => call('/.well-known/openid-configuration'))).not.toContain(429)
   })
@@ -60,18 +61,18 @@ describe('admin API rate limits', () => {
 
   it('limits each admin, not everyone', async () => {
     const who = `busy-${++seq}@example.com`
-    expect(await times(600, () => admin(who, '/settings'))).not.toContain(429)
-    const limited = await admin(who, '/settings')
-    expect(limited.status).toBe(429)
-    expect(limited.headers.get('retry-after')).toBe('60')
-    expect((await limited.json<any>()).error).toContain('Too many requests')
+    const { before, limited } = await exhaust(600, () => admin(who, '/settings'))
+    expect(before).not.toContain(429)
+    expect(limited?.headers.get('retry-after')).toBe('60')
+    expect((await limited!.json<any>()).error).toContain('Too many requests')
     expect((await admin(`calm-${++seq}@example.com`, '/settings')).status).toBe(200)
   })
 
   it('limits the routes that fan out to Discord more tightly', async () => {
     const who = `search-${++seq}@example.com`
-    expect(await times(120, () => admin(who, '/members?q=a'))).not.toContain(429)
-    expect((await admin(who, '/members?q=a')).status).toBe(429)
+    const { before, limited } = await exhaust(120, () => admin(who, '/members?q=a'))
+    expect(before).not.toContain(429)
+    expect(limited?.status).toBe(429)
     expect((await admin(who, '/settings')).status).toBe(200)
   })
 })
