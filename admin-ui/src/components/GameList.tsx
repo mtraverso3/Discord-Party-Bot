@@ -18,7 +18,10 @@ const QUEUE_LABELS: Record<number, string> = {
   850: 'Co-op vs AI',
   900: 'URF',
   1700: 'Arena',
+  1710: 'Arena',
+  1750: 'Arena',
   1900: 'URF',
+  2400: 'ARAM Mayhem',
 }
 
 function queueLabel(id?: number): string | null {
@@ -39,14 +42,24 @@ function statusBadge(g: PartyGame) {
   return <Badge variant="warning">Pending</Badge>
 }
 
-function Team({ title, players }: { title: string; players: GameParticipant[] }) {
+function ordinal(n: number): string {
+  const tens = n % 100
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
+  return `${n}${suffix}`
+}
+
+function Team({ title, players, result }: { title: string; players: GameParticipant[]; result?: 'win' | 'placement' }) {
   if (players.length === 0) return null
   const won = players[0]?.win
+  const placement = players.find(p => p.placement)?.placement
   return (
     <div className="min-w-40 flex-1">
       <div className="mb-1 flex items-center gap-1.5 text-[0.7rem] font-semibold tracking-wide text-muted-foreground uppercase">
         {title}
-        {won != null && <Badge variant={won ? 'success' : 'destructive'}>{won ? 'Win' : 'Loss'}</Badge>}
+        {result === 'win' && won != null && <Badge variant={won ? 'success' : 'destructive'}>{won ? 'Win' : 'Loss'}</Badge>}
+        {result === 'placement' && placement != null && (
+          <Badge variant={placement === 1 ? 'success' : 'secondary'}>{ordinal(placement)}</Badge>
+        )}
       </div>
       <ul className="space-y-0.5">
         {players.map(p => (
@@ -60,10 +73,37 @@ function Team({ title, players }: { title: string; players: GameParticipant[] })
   )
 }
 
+/** Arena-style games: one group per subteam, best placement first. */
+function subteams(players: GameParticipant[]): GameParticipant[][] {
+  const groups = new Map<number, GameParticipant[]>()
+  for (const p of players) groups.set(p.subteam ?? 0, [...(groups.get(p.subteam ?? 0) ?? []), p])
+  const rank = (group: GameParticipant[]) => group.find(p => p.placement)?.placement ?? Infinity
+  return [...groups.entries()].sort(([a, x], [b, y]) => rank(x) - rank(y) || a - b).map(([, group]) => group)
+}
+
+function Teams({ players }: { players: GameParticipant[] }) {
+  if (players.some(p => p.subteam)) {
+    return (
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-4">
+        {subteams(players).map(group => (
+          <Team key={group[0]!.puuid} title={`Team ${group[0]!.subteam ?? '?'}`} players={group} result="placement" />
+        ))}
+      </div>
+    )
+  }
+  const blue = players.filter(p => p.teamId === 100)
+  const red = players.filter(p => p.teamId === 200)
+  const other = players.filter(p => p.teamId !== 100 && p.teamId !== 200)
+  return (
+    <div className="flex flex-wrap gap-4">
+      <Team title="Blue" players={blue} result="win" />
+      <Team title="Red" players={red} result="win" />
+      <Team title="Players" players={other} />
+    </div>
+  )
+}
+
 function GameCard({ game: g }: { game: PartyGame }) {
-  const blue = g.participants.filter(p => p.teamId === 100)
-  const red = g.participants.filter(p => p.teamId === 200)
-  const other = g.participants.filter(p => p.teamId !== 100 && p.teamId !== 200)
   const ql = queueLabel(g.queueId)
   const dur = duration(g.gameDuration)
 
@@ -84,11 +124,7 @@ function GameCard({ game: g }: { game: PartyGame }) {
         </span>
       </div>
       {g.participants.length > 0 ? (
-        <div className="flex flex-wrap gap-4">
-          <Team title="Blue" players={blue} />
-          <Team title="Red" players={red} />
-          <Team title="Players" players={other} />
-        </div>
+        <Teams players={g.participants} />
       ) : (
         <p className="text-xs text-muted-foreground">
           {g.status === 'failed'

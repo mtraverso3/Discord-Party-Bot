@@ -170,6 +170,8 @@ export interface GameParticipant {
   championName: string
   teamId: number
   win: boolean | null
+  subteam: number | null
+  placement: number | null
 }
 
 export interface PartyGame {

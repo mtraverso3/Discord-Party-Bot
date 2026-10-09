@@ -29,6 +29,8 @@ export interface GameParticipant {
   championName: string
   teamId: number
   win: boolean | null
+  subteam: number | null
+  placement: number | null
 }
 
 export interface PartyGame {
@@ -115,6 +117,7 @@ export async function listGamesForHistory(db: D1Database, historyId: number): Pr
     `).bind(historyId).all<{
       game_row_id: number; puuid: string; riot_id: string
       champion_id: number; champion_name: string; team_id: number; win: number | null
+      subteam: number | null; placement: number | null
     }>(),
   ])
   return games.map(g => ({
@@ -137,6 +140,8 @@ export async function listGamesForHistory(db: D1Database, historyId: number): Pr
       championName: p.champion_name,
       teamId: p.team_id,
       win: p.win == null ? null : !!p.win,
+      subteam: p.subteam,
+      placement: p.placement,
     })),
   }))
 }
@@ -166,6 +171,7 @@ export async function listGamesForUser(
   `).bind(JSON.stringify(games.map(g => g.id))).all<{
     game_row_id: number; puuid: string; riot_id: string
     champion_id: number; champion_name: string; team_id: number; win: number | null
+    subteam: number | null; placement: number | null
   }>()
 
   return games.map(g => ({
@@ -188,6 +194,8 @@ export async function listGamesForUser(
       championName: p.champion_name,
       teamId: p.team_id,
       win: p.win == null ? null : !!p.win,
+      subteam: p.subteam,
+      placement: p.placement,
     })),
   }))
 }
@@ -230,9 +238,9 @@ export async function resolvePendingGames(
         `).bind(g.id, now, match.queueId, match.gameCreation, match.gameDuration),
         db.prepare('DELETE FROM party_game_participants WHERE game_row_id = ?1').bind(g.id),
         ...match.participants.map(p => db.prepare(`
-          INSERT INTO party_game_participants (game_row_id, puuid, riot_id, champion_id, champion_name, team_id, win)
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-        `).bind(g.id, p.puuid, p.riotId, p.championId, p.championName, p.teamId, p.win ? 1 : 0)),
+          INSERT INTO party_game_participants (game_row_id, puuid, riot_id, champion_id, champion_name, team_id, win, subteam, placement)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        `).bind(g.id, p.puuid, p.riotId, p.championId, p.championName, p.teamId, p.win ? 1 : 0, p.subteam, p.placement)),
       ])
       resolved++
     } catch (e) {
@@ -254,7 +262,11 @@ async function retryLater(db: D1Database, g: GameRow, now: number, error?: strin
   `).bind(g.id, now + retryDelayMs(g.attempts + 1), error ?? null).run()
 }
 
+/** Give up on a report. One that resolved before (a re-fetch) keeps what it had. */
 async function failGame(db: D1Database, id: number, error: string): Promise<void> {
-  await db.prepare("UPDATE party_games SET status = 'failed', error = ?2, attempts = attempts + 1 WHERE id = ?1")
-    .bind(id, error).run()
+  await db.prepare(`
+    UPDATE party_games SET status = CASE WHEN resolved_at IS NULL THEN 'failed' ELSE 'resolved' END,
+      error = CASE WHEN resolved_at IS NULL THEN ?2 ELSE error END, attempts = attempts + 1
+    WHERE id = ?1
+  `).bind(id, error).run()
 }
