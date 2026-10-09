@@ -16,6 +16,7 @@ import { getBotGuilds, getGuildChannels, getGuildMember, getMemberAvatarUrl, get
 import { handleRulesAdmin } from './rules'
 import { checkGuildChannels } from './channels'
 import { clientIp, rateLimited } from '../lib/rate-limit'
+import { maintenanceResponse } from '../lib/maintenance'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -67,6 +68,9 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
   if (req.method !== 'GET' && req.method !== 'HEAD' && isCrossSite(req, url)) {
     return json({ error: 'Cross-origin changes are not allowed.' }, 403)
   }
+  const updating = await maintenanceResponse(env.DB)
+  if (updating) return updating
+
   const who = email ?? clientIp(req)
   const limited = await rateLimited(env.ADMIN_LIMITER, who, `admin ${url.pathname}`)
     ?? (FANOUT_ROUTE.test(url.pathname) ? await rateLimited(env.ADMIN_FANOUT_LIMITER, who, `admin ${url.pathname}`) : null)

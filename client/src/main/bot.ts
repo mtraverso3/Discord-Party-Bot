@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { KnownPlayer, TaggedPlayer } from '../shared/types'
 import type { LiveResult } from '../shared/live-cache'
-import { BUSY_MESSAGE, waitUntil } from '../shared/backoff'
+import { waitMessage, waitUntil } from '../shared/backoff'
 
 const DEFAULT_BOT_URL = 'https://partybot.mtraverso.net'
 
@@ -61,10 +61,11 @@ export function linkState(): { linked: boolean; displayName?: string; userId?: s
 }
 
 let busyUntil = 0
+let busyStatus = 429
 
 async function botFetch(method: string, path: string, body?: unknown, token?: string): Promise<{ status: number; body: any }> {
   // Rate-limited: stay quiet until PartyBot said to come back, rather than retrying every poll.
-  if (Date.now() < busyUntil) return { status: 429, body: { error: BUSY_MESSAGE } }
+  if (Date.now() < busyUntil) return { status: busyStatus, body: { error: waitMessage(busyStatus) } }
   // Identifies the desktop client to Cloudflare so it isn't mistaken for a
   // headless bot by edge heuristics (e.g. Bot Fight Mode) — those block
   // before the request reaches this Worker's own code, surfacing as a 403
@@ -80,7 +81,8 @@ async function botFetch(method: string, path: string, body?: unknown, token?: st
   const wait = waitUntil(res.status, res.headers.get('retry-after'), Date.now())
   if (wait !== null) {
     busyUntil = wait
-    return { status: 429, body: { error: BUSY_MESSAGE } }
+    busyStatus = res.status
+    return { status: res.status, body: { error: waitMessage(res.status) } }
   }
   let parsed: any = null
   try { parsed = await res.json() } catch { /* non-JSON */ }

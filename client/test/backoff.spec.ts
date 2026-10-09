@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_WAIT_MS, waitUntil } from '../src/shared/backoff'
+import { DEFAULT_WAIT_MS, waitMessage, waitUntil } from '../src/shared/backoff'
 
 describe('waitUntil', () => {
-  it('only asks to wait on a 429', () => {
+  it('only asks to wait on a 429, or a 503 that says when to come back', () => {
     for (const status of [200, 401, 403, 404, 500, 502]) expect(waitUntil(status, '60', 1000)).toBeNull()
+    expect(waitUntil(503, null, 1000)).toBeNull()
+    expect(waitUntil(503, '20', 1000)).toBe(21_000)
+  })
+
+  it('says why it is waiting', () => {
+    expect(waitMessage(429)).toContain('busy')
+    expect(waitMessage(503)).toContain('updating')
   })
 
   it('honours Retry-After', () => {

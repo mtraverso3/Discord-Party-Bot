@@ -16,6 +16,7 @@ import { sweepExpiredAuth } from './store/clientAuth'
 import { sweepExpiredAdminAuth } from './store/adminAuth'
 import { resolvePendingGames } from './store/games'
 import { landingPage } from './landing'
+import { maintenanceInteraction, maintenanceResponse, maintenanceUntil } from './lib/maintenance'
 import { sweepRulesApproval } from './lib/rules-sweep'
 import { sweepStaleSessions } from './store/rules'
 
@@ -44,7 +45,7 @@ export default {
       return handleAdmin(req, env)
     }
     if (url.pathname.startsWith('/client/')) {
-      return handleClientApi(req, env, url)
+      return await maintenanceResponse(env.DB) ?? handleClientApi(req, env, url)
     }
     // Discord-identity admin login. These live outside the Access-protected
     // /admin* so browsers and Access itself can reach them unauthenticated.
@@ -73,6 +74,9 @@ export default {
 
     let interaction: any
     try { interaction = JSON.parse(body) } catch { return new Response('Bad JSON', { status: 400 }) }
+
+    const updating = await maintenanceInteraction(env.DB, interaction.type)
+    if (updating) return updating
 
     // Autocomplete (the per-guild game list on /party ign) is answered here
     // directly; it's a quick read and discord-hono has no handler for it.
@@ -108,6 +112,8 @@ export default {
   // Parties idle past their tier's threshold are disbanded and their embeds
   // greyed out; expired link codes and client tokens are purged alongside.
   async scheduled(_event: ScheduledController, env: AppBindings, ctx: ExecutionContext): Promise<void> {
+    // Mid-deploy the schema may be half migrated; the next run catches up.
+    if ((await maintenanceUntil(env.DB)) > Date.now()) return
     if (_event.cron === '* * * * *') {
       ctx.waitUntil((async () => {
         await sweepRulesApproval(env)
