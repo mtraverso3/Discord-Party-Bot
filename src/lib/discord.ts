@@ -31,6 +31,9 @@ async function discordFetch(token: string, path: string, init: RequestInit = {})
     // Only the header is read, so the body is still intact for the caller.
     const wait = res.status === 429 && attempt < RATE_LIMIT_RETRIES ? retryAfterMs(res) : null
     if (wait === null) return res
+    // Release the connection before waiting: a Worker gets six, and a burst of
+    // parallel lookups holding unread 429s stalls until the runtime cancels them.
+    await res.body?.cancel()
     console.warn(`Discord rate-limited ${path} — retrying in ${wait}ms`)
     await new Promise(resolve => setTimeout(resolve, wait))
   }
@@ -163,10 +166,14 @@ export async function getMemberAvatarUrl(
   const hit = await cache.match(cacheKey).catch(() => null)
   if (hit) return (await hit.text()) || null
 
-  let url: string | null = null
+  let url: string | null
   try {
     url = memberAvatarUrl(guildId, userId, await getGuildMember(token, guildId, userId))
-  } catch { /* leave null; client falls back to initials */ }
+  } catch {
+    // Don't cache a failed lookup (e.g. still rate-limited) as "no avatar" for
+    // 6h; return null so the client shows initials and the next poll retries.
+    return null
+  }
   await cache.put(cacheKey, new Response(url ?? '', {
     headers: { 'Cache-Control': `max-age=${AVATAR_CACHE_TTL_SECONDS}` },
   })).catch(() => {})
