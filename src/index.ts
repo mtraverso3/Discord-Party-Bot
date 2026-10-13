@@ -19,6 +19,7 @@ import { landingPage } from './landing'
 import { maintenanceInteraction, maintenanceResponse, maintenanceUntil } from './lib/maintenance'
 import { sweepRulesApproval } from './lib/rules-sweep'
 import { sweepStaleSessions } from './store/rules'
+import { refreshAugmentTextIfStale } from './lib/augment-text'
 
 const inner = new DiscordHono<AppEnv>()
   .command('party', handleParty)
@@ -139,6 +140,11 @@ export default {
       const resolved = await resolvePendingGames(env.DB, env.RIOT_API_KEY)
       if (resolved > 0) console.log(`Resolved ${resolved} pending League game(s)`)
     })().catch(e => console.error('scheduled sweep failed:', e)))
+    // Separate from the sweep so a CommunityDragon outage can't hold it up.
+    ctx.waitUntil(refreshAugmentTextIfStale(env.DB).then(
+      count => { if (count != null) console.log(`Refreshed augment text for ${count} augments`) },
+      e => console.error('augment text refresh failed:', e),
+    ))
   },
 }
 

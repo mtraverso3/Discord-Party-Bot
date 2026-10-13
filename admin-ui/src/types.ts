@@ -172,6 +172,8 @@ export interface GameParticipant {
   win: boolean | null
   subteam: number | null
   placement: number | null
+  items: number[]
+  augments: number[]
 }
 
 export interface PartyGame {

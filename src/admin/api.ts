@@ -17,6 +17,7 @@ import { handleRulesAdmin } from './rules'
 import { checkGuildChannels } from './channels'
 import { clientIp, rateLimited } from '../lib/rate-limit'
 import { maintenanceResponse } from '../lib/maintenance'
+import { getAugmentTextJson } from '../lib/augment-text'
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -84,7 +85,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
 
   // Cross-guild endpoints don't need a ?guild= param. Everything else (including
   // the now per-guild admin allow-list) is scoped to a specific guild.
-  const guildless = path === '/me' || path === '/guilds'
+  const guildless = path === '/me' || path === '/guilds' || path === '/lol/augment-text'
   if (!guildId && !guildless) {
     return json({ error: 'guild query param required' }, 400)
   }
@@ -111,6 +112,7 @@ export async function handleAdminApi(req: Request, env: AppBindings, url: URL, e
     if (path.startsWith('/rules/')) return handleRulesAdmin(req, env, guildId!, path, email || identity.userId || 'Admin panel')
     if (path === '/me' && method === 'GET') return await meRoute(env, identity, email)
     if (path === '/guilds' && method === 'GET') return await listGuilds(env, identity)
+    if (path === '/lol/augment-text' && method === 'GET') return await augmentTextRoute(env)
     if (path === '/admins' && method === 'GET') return json(await listAdmins(env.DB, guildId!))
     if (path === '/admins' && method === 'POST') return await addAdminRoute(env, guildId!, body, email)
     const adm = path.match(/^\/admins\/([^/]+)$/)
@@ -748,4 +750,12 @@ async function promoteMemberRoute(env: AppBindings, guildId: string, partyId: st
   if (result.status === 'not_in')        return json({ error: 'Not in party' }, 404)
   await trySyncEmbed(env, result.data)
   return json(result.data)
+}
+
+/** Augment hover text built by the cron; `{}` until the first refresh lands. */
+async function augmentTextRoute(env: AppBindings): Promise<Response> {
+  const stored = await getAugmentTextJson(env.DB)
+  return new Response(stored?.json ?? '{}', {
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, max-age=3600' },
+  })
 }
