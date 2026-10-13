@@ -166,6 +166,7 @@ export interface MatchDetails {
   queueId: number
   gameCreation: number
   gameDuration: number
+  endResult: string | null   // e.g. 'GameComplete', 'Abort_TooFewPlayers'
   participants: MatchParticipant[]
 }
 
@@ -194,6 +195,7 @@ export async function fetchMatch(
       queueId?: number
       gameCreation?: number
       gameDuration?: number
+      endOfGameResult?: string
       participants?: {
         puuid?: string
         riotIdGameName?: string
@@ -215,6 +217,7 @@ export async function fetchMatch(
     queueId: info.queueId ?? 0,
     gameCreation: info.gameCreation ?? 0,
     gameDuration: info.gameDuration ?? 0,
+    endResult: info.endOfGameResult || null,
     participants: (info.participants ?? []).map(p => {
       const name = p.riotIdGameName ?? ''
       const tag = p.riotIdTagline ?? ''

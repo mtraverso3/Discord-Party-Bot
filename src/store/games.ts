@@ -80,6 +80,7 @@ export interface PartyGame {
   queueId?: number
   gameCreation?: number
   gameDuration?: number
+  endResult?: string    // Riot's endOfGameResult, e.g. 'Abort_TooFewPlayers'
   error?: string
   participants: GameParticipant[]
 }
@@ -138,6 +139,7 @@ interface GameRow {
   queue_id: number | null
   game_creation: number | null
   game_duration: number | null
+  end_result: string | null
   error: string | null
 }
 
@@ -163,6 +165,7 @@ export async function listGamesForHistory(db: D1Database, historyId: number): Pr
     queueId: g.queue_id ?? undefined,
     gameCreation: g.game_creation ?? undefined,
     gameDuration: g.game_duration ?? undefined,
+    endResult: g.end_result ?? undefined,
     error: g.error ?? undefined,
     participants: parts.filter(p => p.game_row_id === g.id).map(toParticipant),
   }))
@@ -204,6 +207,7 @@ export async function listGamesForUser(
     queueId: g.queue_id ?? undefined,
     gameCreation: g.game_creation ?? undefined,
     gameDuration: g.game_duration ?? undefined,
+    endResult: g.end_result ?? undefined,
     error: g.error ?? undefined,
     participants: parts.filter(p => p.game_row_id === g.id).map(toParticipant),
   }))
@@ -242,9 +246,9 @@ export async function resolvePendingGames(
         db.prepare(`
           UPDATE party_games
           SET status = 'resolved', resolved_at = ?2, queue_id = ?3, game_creation = ?4,
-              game_duration = ?5, attempts = attempts + 1, error = NULL
+              game_duration = ?5, end_result = ?6, attempts = attempts + 1, error = NULL
           WHERE id = ?1
-        `).bind(g.id, now, match.queueId, match.gameCreation, match.gameDuration),
+        `).bind(g.id, now, match.queueId, match.gameCreation, match.gameDuration, match.endResult),
         db.prepare('DELETE FROM party_game_participants WHERE game_row_id = ?1').bind(g.id),
         ...match.participants.map(p => db.prepare(`
           INSERT INTO party_game_participants
