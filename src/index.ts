@@ -119,20 +119,21 @@ export default {
   async scheduled(_event: ScheduledController, env: AppBindings, ctx: ExecutionContext): Promise<void> {
     // Mid-deploy the schema may be half migrated; the next run catches up.
     if ((await maintenanceUntil(env.DB)) > Date.now()) return
-    if (_event.cron === '*/2 * * * *') {
-      // Fill in who played League games the desktop client reported, once
-      // Match-v5 has them (shortly after each game ends).
-      ctx.waitUntil(resolvePendingGames(env.DB, env.RIOT_API_KEY).then(
-        resolved => { if (resolved > 0) console.log(`Resolved ${resolved} pending League game(s)`) },
-        e => console.error('game resolve sweep failed:', e),
-      ))
-      return
-    }
     if (_event.cron === '* * * * *') {
       ctx.waitUntil((async () => {
         await sweepRulesApproval(env)
         await sweepStaleSessions(env.DB)
       })().catch(e => console.error('Rules approval sweep failed:', e)))
+      // Every other minute, fill in who played League games the desktop client
+      // reported, once Match-v5 has them (shortly after each game ends). This
+      // rides on the every-minute cron: a separate "*/2" trigger was registered
+      // but Cloudflare never fired it.
+      if (new Date(_event.scheduledTime).getUTCMinutes() % 2 === 0) {
+        ctx.waitUntil(resolvePendingGames(env.DB, env.RIOT_API_KEY).then(
+          resolved => { if (resolved > 0) console.log(`Resolved ${resolved} pending League game(s)`) },
+          e => console.error('game resolve sweep failed:', e),
+        ))
+      }
       return
     }
     ctx.waitUntil((async () => {
