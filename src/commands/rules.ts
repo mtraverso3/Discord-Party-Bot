@@ -3,7 +3,7 @@ import type { AppBindings, AppEnv, RulesConfig, RulesSession } from '../types'
 import { extractMemberInfo } from '../lib/party'
 import { checkFollowups } from '../lib/followup'
 import {
-  clearSession, getMember, getRulesConfig, getRulesGate, getSession,
+  clearSession, getMember, getRulesConfig, getRulesGate, getSession, isPublished,
   grantApproval, revokeApproval, saveSession,
 } from '../store/rules'
 
@@ -392,10 +392,14 @@ export function formatStatus(member: { state: string; completions: number; revoc
     + (member.version ? `\nAgreed to rules version ${member.version}.` : '')
 }
 
+export const NOT_PUBLISHED = "This server hasn't published its rules yet."
+
+/** Null when there are no published rules to start a check for. */
 export async function postRulesMessage(
   env: AppBindings, guildId: string, channelId: string,
-): Promise<RulesConfig> {
+): Promise<RulesConfig | null> {
   const config = await getRulesConfig(env.DB, guildId)
+  if (!isPublished(config)) return null
   const { postMessage } = await import('../lib/discord')
   await postMessage(env.DISCORD_BOT_TOKEN, channelId, startMessage(config))
   return config

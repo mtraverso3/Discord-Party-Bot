@@ -7,10 +7,10 @@ from **Rules & verification** in the [dashboard](admin-ui.md).
 ## Turn it on
 
 1. Open the admin dashboard, pick your server, and go to **Rules & verification**.
-2. Press **Switch the rules check on**. That makes it *available*; it does not
+2. Write the rules pages, quiz and agreement, then press **Publish rules & quiz**.
+   A server starts with no rules, and has no check until it publishes its own.
+3. Press **Switch the rules check on**. That makes it *available*; it does not
    gate anything on its own.
-3. Edit the rules pages, quiz and agreement if you want, then press
-   **Publish rules & quiz**.
 4. Choose a **rules channel** and press **Post Start button**. That posts one
    public message with a button; everything after it is private to the member.
 

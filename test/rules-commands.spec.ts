@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test'
+import { enableRules } from './rules-fixture'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleParty } from '../src/commands/party'
 import { handleRulesPage } from '../src/commands/rules'
@@ -77,7 +78,7 @@ async function runRaw(guildId: string, name: string, permissions = NO_PERMS) {
 }
 
 const gated = async (guildId: string, channelId?: string) =>
-  saveRulesGate(env.DB, guildId, { enabled: true, ...(channelId ? { channelId } : {}) })
+  enableRules(guildId, channelId ? { channelId } : {})
 
 describe('rules moderator commands', () => {
   it.each([
@@ -254,8 +255,8 @@ describe('rules moderator commands', () => {
 
     it('opens on the first page with Previous disabled', async () => {
       const g = guild()
-      await gated(g)
       await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+      await gated(g)
 
       const sent: any[] = []
       const c: any = {
@@ -284,8 +285,8 @@ describe('rules moderator commands', () => {
 
     it('pages forward and back, and stops at both ends', async () => {
       const g = guild()
-      await gated(g)
       await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+      await gated(g)
 
       const second = await page(g, '1')
       expect(second.embeds[0].title).toBe('Second page')
@@ -301,8 +302,8 @@ describe('rules moderator commands', () => {
 
     it('clamps a page number that is out of range', async () => {
       const g = guild()
-      await gated(g)
       await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+      await gated(g)
 
       expect((await page(g, '99')).embeds[0].title).toBe('Third page')
       expect((await page(g, '-5')).embeds[0].title).toBe('First page')
@@ -324,9 +325,12 @@ describe('rules moderator commands', () => {
       expect(text).toContain(`<@${TARGET}>`)
     })
 
-    it('does not show the built-in sample rules as if they were the server’s', async () => {
+    it('shows nothing, and offers no quiz, in a server that never published rules', async () => {
       const untouched = guild()
+      await saveRulesGate(env.DB, untouched, { enabled: true, channelId: '700000000000000001' })
       expect(await run(untouched, 'rules-read', {}, NO_PERMS)).toContain("hasn't set up a rules check")
+      expect((await runRaw(untouched, 'rules-quiz')).content).toContain("hasn't switched the rules check on")
+      expect(await run(untouched, 'rules-post')).toContain("hasn't switched the rules check on")
     })
   })
   describe('/party rules quiz — starting the check on demand', () => {
@@ -338,8 +342,8 @@ describe('rules moderator commands', () => {
 
     it('opens the check at the first rules page', async () => {
       const g = guild()
-      await gated(g)
       await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+      await gated(g)
 
       const payload = await runRaw(g, 'rules-quiz')
       expect(payload.embeds[0].title).toBe('Conduct')
@@ -350,8 +354,8 @@ describe('rules moderator commands', () => {
 
     it('needs no party, and no posted Start button', async () => {
       const g = guild()
-      await gated(g)
       await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+      await gated(g)
 
       const payload = await runRaw(g, 'rules-quiz')
       expect(payload.embeds).toBeTruthy()
@@ -367,8 +371,8 @@ describe('rules moderator commands', () => {
 
     it('tells an approved member there is nothing to take', async () => {
       const g = guild()
-      await gated(g)
       await publishRulesConfig(env.DB, g, RULES, 1, false, 'admin')
+      await gated(g)
       await approveManually(env.DB, g, MOD, 'admin', 'Vouched for', 1)
 
       expect((await runRaw(g, 'rules-quiz')).content).toContain('already approved')

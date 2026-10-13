@@ -1,7 +1,6 @@
 import type {
   RulesConfig, RulesEvent, RulesGate, RulesMemberRow, RulesQuestion, RulesSession,
 } from '../types'
-import { DEFAULT_RULES } from '../lib/rules-content'
 
 // All rules state: the published text and quiz, who has passed, the audit
 // trail, and any quiz in flight. Mutations are guarded statements, the same
@@ -16,10 +15,20 @@ export const SESSION_TTL_MS = 15 * 60 * 1000
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
+/** A guild that has never published has no rules: version 1, nothing in it. */
+export function emptyRulesConfig(): RulesConfig {
+  return { version: 1, pages: [], questions: [], agreement: '', passingScore: 100 }
+}
+
+/** Published rules always have a page, so an empty config means nothing published. */
+export function isPublished(config: RulesConfig): boolean {
+  return config.pages.length > 0
+}
+
 export async function getRulesConfig(db: D1Database, guildId: string): Promise<RulesConfig> {
   const row = await db.prepare('SELECT * FROM rules_config WHERE guild_id = ?1').bind(guildId)
     .first<{ version: number; pages: string; questions: string; agreement: string; passing_score: number }>()
-  if (!row) return structuredClone(DEFAULT_RULES)
+  if (!row) return emptyRulesConfig()
   return {
     version: row.version,
     pages: JSON.parse(row.pages),
@@ -29,7 +38,7 @@ export async function getRulesConfig(db: D1Database, guildId: string): Promise<R
   }
 }
 
-/** Whether the guild has published rules of its own, rather than the defaults. */
+/** Whether the guild has published rules of its own. */
 export async function hasPublishedRules(db: D1Database, guildId: string): Promise<boolean> {
   const row = await db.prepare('SELECT 1 FROM rules_config WHERE guild_id = ?1').bind(guildId).first()
   return !!row
@@ -165,12 +174,16 @@ export function validateRulesConfig(raw: any): ValidationResult {
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
 
+/** The gate only counts as on once the guild has published rules to pass. */
 export async function getRulesGate(db: D1Database, guildId: string): Promise<RulesGate | null> {
-  const row = await db.prepare('SELECT * FROM rules_gate WHERE guild_id = ?1').bind(guildId)
-    .first<{ enabled: number; default_required: number; channel_id: string | null }>()
+  const row = await db.prepare(`
+    SELECT g.*, EXISTS (SELECT 1 FROM rules_config c WHERE c.guild_id = g.guild_id) AS published
+    FROM rules_gate g WHERE g.guild_id = ?1
+  `).bind(guildId)
+    .first<{ enabled: number; default_required: number; channel_id: string | null; published: number }>()
   if (!row) return null
   return {
-    enabled: !!row.enabled,
+    enabled: !!row.enabled && !!row.published,
     defaultRequired: !!row.default_required,
     channelId: row.channel_id ?? undefined,
   }
