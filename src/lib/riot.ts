@@ -170,6 +170,11 @@ export interface MatchDetails {
   participants: MatchParticipant[]
 }
 
+/** Riot answered 429: back off for now rather than counting it against the game. */
+export class RiotRateLimited extends Error {
+  constructor() { super('Riot API rate limit') }
+}
+
 /**
  * Fetch a finished match from Match-v5, or null if it isn't available yet (a
  * game still in progress, or too old to be indexed, both return 404). Throws on
@@ -186,6 +191,10 @@ export async function fetchMatch(
     { headers: { 'X-Riot-Token': token.trim() } },
   )
   if (res.status === 404) return null
+  if (res.status === 429) {
+    await res.body?.cancel()
+    throw new RiotRateLimited()
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
     throw new Error(`match ${res.status}: ${detail.slice(0, 300)}`)

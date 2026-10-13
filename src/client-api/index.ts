@@ -4,12 +4,12 @@ import * as parties from '../store/parties'
 import { findUserIdByRiotId, getIgnMap, getUserIgn } from '../store/profiles'
 import { consumeLinkCode, createClientToken, deleteClientToken, resolveClientToken, type TokenRecord } from '../store/clientAuth'
 import { activeSessionId } from '../store/history'
-import { reportGame } from '../store/games'
+import { reportGame, resolveEndedGame } from '../store/games'
 import { gameAllowed, getGuildSettings, isKnownGame } from '../store/settings'
 import { trySyncEmbed } from '../lib/party'
 import { clientIp, rateLimited } from '../lib/rate-limit'
 import { getGuildMember, getMemberAvatarUrl } from '../lib/discord'
-import { fetchLiveGame, getChampionCatalog, platformForRegion } from '../lib/riot'
+import { fetchLiveGame, getChampionCatalog, matchIdForGame, platformForRegion } from '../lib/riot'
 
 export { generateLinkCode, writeLinkCode, type LinkRecord } from '../store/clientAuth'
 
@@ -25,6 +25,7 @@ export { generateLinkCode, writeLinkCode, type LinkRecord } from '../store/clien
 //   POST   /client/party/approve (Bearer) { userId } -> { ok } | { ok: false, error }
 //   POST   /client/party/deny    (Bearer) { userId } -> { ok } | { ok: false, error }
 //   POST   /client/party/game-report (Bearer) { region, gameId } -> { ok, status, matchId } | { ok: false, error }
+//   POST   /client/party/game-ended  (Bearer) { region, gameId } -> { ok, resolved }
 //   GET    /client/champions/catalog (Bearer) -> { version, champions: Record<id, { id, name, iconUrl }> }
 //   POST   /client/champions/live    (Bearer) { region, gameName, tagLine } -> { ok, configured, live, participants: [{ riotId, championId, teamId }] }
 //
@@ -80,6 +81,9 @@ async function routeClientApi(req: Request, env: AppBindings, url: URL): Promise
   }
   if (url.pathname === '/client/party/game-report' && req.method === 'POST') {
     return await reportPartyGame(req, env)
+  }
+  if (url.pathname === '/client/party/game-ended' && req.method === 'POST') {
+    return await partyGameEnded(req, env)
   }
   if (url.pathname === '/client/champions/catalog' && req.method === 'GET') {
     return await championCatalog(req, env)
@@ -457,6 +461,32 @@ async function reportPartyGame(req: Request, env: AppBindings): Promise<Response
   })
   if (!result.ok) return json({ ok: false, error: result.error }, 400)
   return json({ ok: true, status: result.status, matchId: result.matchId })
+}
+
+// The client saw a game it reported end. Match-v5 usually has it within a
+// minute or two; try now so history fills in without waiting for the sweep,
+// which keeps checking if Riot isn't there yet. Any linked user can nudge a
+// game reported in their guild; it only moves the lookup earlier.
+async function partyGameEnded(req: Request, env: AppBindings): Promise<Response> {
+  const auth = await authenticate(req, env)
+  if (!auth) return json({ ok: false, error: 'Not linked.' }, 401)
+  // It spends the Riot key, like the live-game lookup.
+  const limited = await rateLimited(env.RIOT_LIMITER, auth.rec.userId, `/client/party/game-ended user=${auth.rec.userId}`)
+  if (limited) return limited
+
+  let body: { region?: unknown; gameId?: unknown }
+  try {
+    body = await req.json()
+  } catch {
+    return json({ ok: false, error: 'Invalid JSON body.' }, 400)
+  }
+  const region = typeof body.region === 'string' ? body.region.trim() : ''
+  const gameId = body.gameId != null ? String(body.gameId).trim() : ''
+  const matchId = /^\d{1,20}$/.test(gameId) ? matchIdForGame(region, gameId) : null
+  if (!matchId) return json({ ok: false, error: 'A supported region and numeric gameId are required.' }, 400)
+
+  const resolved = await resolveEndedGame(env.DB, env.RIOT_API_KEY, auth.rec.guildId, matchId)
+  return json({ ok: true, resolved: resolved > 0 })
 }
 
 // Serves the Data Dragon champion catalog (id -> name + icon URL) so the client
