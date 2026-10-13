@@ -18,6 +18,14 @@ function embedColor(party: PartyData): number {
  * separate from party.rulesRequired, which is the party's stored setting and
  * survives the server switching the feature off.
  */
+/**
+ * The `1.` label in front of a list row, padded on the right to the widest
+ * number in the list so the names after it line up (`1. ` next to `15.`).
+ */
+export function listNumber(index: number, count: number): string {
+  return `\`${`${index + 1}.`.padEnd(String(count).length + 1)}\``
+}
+
 export function buildPartyEmbed(party: PartyData, rulesEnforced = party.rulesRequired) {
   const isFull = party.members.length >= party.maxSize
   const statusLabel = party.isClosed ? '🔒 CLOSED' : isFull ? '🟡 FULL' : '🟢 OPEN'
@@ -28,11 +36,11 @@ export function buildPartyEmbed(party: PartyData, rulesEnforced = party.rulesReq
     const away = m.away ? ' 💤' : ''
     const assigned = party.banlist?.assignments[m.userId]
     const ban = assigned ? ` — 🚫 **${assigned}**` : ''
-    return `\`${i + 1}.\` <@${m.userId}>${crown}${away}${ign}${ban}`
+    return `${listNumber(i, party.members.length)} <@${m.userId}>${crown}${away}${ign}${ban}`
   })
   const queueLines = party.queue.map((q, i) => {
     const ign = q.ign ? ` *(${q.ign})*` : ''
-    return `\`${i + 1}.\` <@${q.userId}>${ign}`
+    return `${listNumber(i, party.queue.length)} <@${q.userId}>${ign}`
   })
 
   const awayCount = party.members.filter(m => m.away).length

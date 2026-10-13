@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPartyEmbed, embedSize } from '../src/lib/embeds'
+import { buildPartyEmbed, embedSize, listNumber } from '../src/lib/embeds'
 import type { PartyData } from '../src/types'
 
 const id = (i: number) => String(100000000000000000n + BigInt(i))
@@ -61,5 +61,24 @@ describe('party embed limits', () => {
     const embed = buildPartyEmbed(party({ members: 5, ban: 'X'.repeat(2000) }))
     expectWithinLimits(embed)
     for (let i = 0; i < 5; i++) expect(text(embed)).toContain(`<@${id(i)}>`)
+  })
+})
+
+describe('list numbers', () => {
+  it('pads single digits on the right when the list reaches two digits', () => {
+    expect(listNumber(0, 15)).toBe('`1. `')
+    expect(listNumber(8, 15)).toBe('`9. `')
+    expect(listNumber(9, 15)).toBe('`10.`')
+  })
+
+  it('adds no padding to a short list', () => {
+    expect(listNumber(0, 9)).toBe('`1.`')
+  })
+
+  it('aligns the member and queue rows of the embed', () => {
+    const embed = buildPartyEmbed(party({ members: 15, queue: 3 }))
+    expect(text(embed)).toContain(`\`1. \` <@${id(0)}>`)
+    expect(text(embed)).toContain('`15.` <@')
+    expect(text(embed)).toMatch(/`1\.` <@/)  // a 3-person queue needs no padding
   })
 })
