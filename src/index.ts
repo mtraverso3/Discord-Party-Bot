@@ -75,6 +75,10 @@ export default {
     let interaction: any
     try { interaction = JSON.parse(body) } catch { return new Response('Bad JSON', { status: 400 }) }
 
+    // One searchable line per interaction, so "the bot didn't reply" can be
+    // matched to a user, a subcommand and what they typed.
+    if (interaction.type !== 1) console.log(describeInteraction(interaction))
+
     const updating = await maintenanceInteraction(env.DB, interaction.type)
     if (updating) return updating
 
@@ -136,6 +140,33 @@ export default {
       if (resolved > 0) console.log(`Resolved ${resolved} pending League game(s)`)
     })().catch(e => console.error('scheduled sweep failed:', e)))
   },
+}
+
+const INTERACTION_TYPES: Record<number, string> = { 2: 'command', 3: 'component', 4: 'autocomplete', 5: 'modal' }
+
+function describeInteraction(interaction: any): Record<string, unknown> {
+  const data = interaction.data ?? {}
+  const user = interaction.member?.user ?? interaction.user ?? {}
+  const out: Record<string, unknown> = {
+    message: 'interaction',
+    type: INTERACTION_TYPES[interaction.type] ?? interaction.type,
+    userId: user.id,
+    username: user.username,
+    guildId: interaction.guild_id,
+  }
+  if (data.custom_id) out.customId = data.custom_id
+  if (data.name) {
+    // Walk subcommand groups/subcommands down to the leaf options.
+    const path = [data.name]
+    let options: any[] = data.options ?? []
+    while (options.length === 1 && (options[0].type === 1 || options[0].type === 2)) {
+      path.push(options[0].name)
+      options = options[0].options ?? []
+    }
+    out.command = path.join(' ')
+    out.options = Object.fromEntries(options.map(o => [o.name, o.value]))
+  }
+  return out
 }
 
 async function verifyDiscordSignature(

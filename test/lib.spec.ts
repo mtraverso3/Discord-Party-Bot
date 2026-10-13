@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { canBump, enabledGames, gameAllowed, getGuildSettings, guildGames, sanitizeSettings, saveGuildSettings, SETTINGS_DEFAULTS } from '../src/store/settings'
 import { BUILTIN_GAMES, GAME_NAME_MAX, resolveGameName } from '../src/lib/games'
 import { appendAudit, getAudit } from '../src/store/audit'
@@ -7,6 +7,7 @@ import { IGN_MAX, findUserIdByRiotId, getIgnMap, getUserProfile, saveUserIgn } f
 import { randomId } from '../src/lib/id'
 import { timingSafeEqual } from '../src/lib/jwt'
 import { parseCreateModalSubmit } from '../src/lib/modal'
+import { checkFollowups } from '../src/lib/followup'
 import {
   createTemplate, deleteTemplate, getTemplate, getTemplates,
   sanitizeTemplateInput, updateTemplate,
@@ -243,5 +244,26 @@ describe('timingSafeEqual', () => {
     expect(await timingSafeEqual('secret', 'secreT')).toBe(false)
     expect(await timingSafeEqual('secret', 'a much longer string')).toBe(false)
     expect(await timingSafeEqual('', '')).toBe(true)
+  })
+})
+
+describe('checkFollowups', () => {
+  it('retries a short rate limit once and returns the retry', async () => {
+    const send = vi.fn<(data?: unknown) => Promise<Response>>()
+      .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'retry-after': '0' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+    const c = checkFollowups({ followup: send }, 'test')
+    const res = await c.followup({ content: 'hi' })
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(res.status).toBe(200)
+  })
+
+  it('logs a rejected reply with its status and body', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const c = checkFollowups({ followup: async (_data?: unknown) => new Response('Unknown Webhook', { status: 404 }) }, 'party ign')
+    const res = await c.followup({ content: 'hi' })
+    expect(res.status).toBe(404)
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ label: 'party ign', status: 404, body: 'Unknown Webhook' }))
+    error.mockRestore()
   })
 })

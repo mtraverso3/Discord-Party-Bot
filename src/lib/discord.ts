@@ -109,11 +109,16 @@ export async function editInteractionResponse(
   interactionToken: string,
   body: unknown,
 ): Promise<void> {
-  await fetch(`${BASE}/webhooks/${appId}/${interactionToken}/messages/@original`, {
+  const res = await fetch(`${BASE}/webhooks/${appId}/${interactionToken}/messages/@original`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  // Callers don't check this; without the log a lost reply leaves no trace.
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    console.error({ message: 'Discord interaction edit failed', status: res.status, body: text.slice(0, 500) })
+  }
 }
 
 export async function getGuildMember(

@@ -1,6 +1,7 @@
 import type { ComponentContext } from 'discord-hono'
 import type { AppBindings, AppEnv, RulesConfig, RulesSession } from '../types'
 import { extractMemberInfo } from '../lib/party'
+import { checkFollowups } from '../lib/followup'
 import {
   clearSession, getMember, getRulesConfig, getRulesGate, getSession,
   grantApproval, revokeApproval, saveSession,
@@ -238,6 +239,7 @@ export async function beginQuiz(env: AppBindings, guildId: string, userId: strin
 
 export async function handleRulesStart(c: ComponentContext<AppEnv>) {
   return c.ephemeral().resDefer(async (c) => {
+    checkFollowups(c, 'rules start')
     const guildId = c.interaction.guild_id
     if (!guildId) return c.followup({ content: 'Use this inside the server.', flags: 64 })
     const { userId } = extractMemberInfo(c.interaction)

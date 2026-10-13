@@ -15,6 +15,7 @@ import { generateLinkCode, writeLinkCode } from '../store/clientAuth'
 import { generateAdminToken, isAdmin, writeAdminLinkToken } from '../store/adminAuth'
 import { normalizeBaseUrl } from '../auth/session'
 import { editInteractionResponse } from '../lib/discord'
+import { checkFollowups } from '../lib/followup'
 import { buildHelpComponents, buildHelpEmbed, buildPartyEmbed } from '../lib/embeds'
 import { buildCreateModalJSON, buildEditModalJSON, createModalRules, parseCreateModalSubmit, parseEditModalCustomId, parseEditModalSubmit } from '../lib/modal'
 
@@ -60,6 +61,7 @@ export async function handleParty(c: CommandContext<AppEnv>) {
 
   return c.ephemeral().resDefer(async (c) => {
     const { name, opts } = sub(c)
+    checkFollowups(c, `party ${name}`)
     const guildId = c.interaction.guild_id!
     const channelId = c.interaction.channel_id!
     const { userId, username, displayName } = extractMemberInfo(c.interaction)
@@ -858,6 +860,7 @@ async function openBanlistModal(c: CommandContext<AppEnv>) {
 
 export async function handleBanlistModal(c: ModalContext<AppEnv>) {
   return c.ephemeral().resDefer(async (c) => {
+    checkFollowups(c, 'banlist modal')
     const partyId = c.get('custom_id') as string | undefined
     const guildId = c.interaction.guild_id!
     const { userId } = extractMemberInfo(c.interaction)
