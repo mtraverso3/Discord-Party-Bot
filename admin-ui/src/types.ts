@@ -188,6 +188,7 @@ export interface PartyGame {
   queueId?: number
   gameCreation?: number
   gameDuration?: number
+  endResult?: string
   error?: string
   participants: GameParticipant[]
 }

@@ -194,10 +194,12 @@ describe('Arena-style games', () => {
   const original = globalThis.fetch
   let arena: boolean
   let missing: boolean
+  let endOfGameResult: string | undefined
 
   beforeEach(() => {
     arena = true
     missing = false
+    endOfGameResult = undefined
     globalThis.fetch = vi.fn(async () => {
       if (missing) return new Response('', { status: 404 })
       const players = arena
@@ -208,7 +210,7 @@ describe('Arena-style games', () => {
             playerAugment1: 118, playerAugment2: 234, playerAugment3: 0, playerAugment4: 0, playerAugment5: 0, playerAugment6: 0,
           }))
         : [{ puuid: 'n0', championId: 1, championName: 'Annie', teamId: 100, win: true, item0: 3089, item1: 0, item6: 3340 }]
-      return Response.json({ info: { queueId: arena ? 1750 : 420, gameCreation: 1, gameDuration: 900, participants: players } })
+      return Response.json({ info: { queueId: arena ? 1750 : 420, gameCreation: 1, gameDuration: 900, endOfGameResult, participants: players } })
     }) as any
   })
   afterEach(() => { globalThis.fetch = original })
@@ -242,6 +244,14 @@ describe('Arena-style games', () => {
     arena = false
     const { game } = await resolvedGame('7006')
     expect(game.participants[0]).toMatchObject({ items: [3089, 3340], augments: [] })
+  })
+
+  it('records how the game ended, e.g. a lobby aborted before it started', async () => {
+    endOfGameResult = 'Abort_TooFewPlayers'
+    const { game } = await resolvedGame('7008')
+    expect(game.endResult).toBe('Abort_TooFewPlayers')
+    endOfGameResult = undefined
+    expect((await resolvedGame('7009')).game.endResult).toBeUndefined()
   })
 
   it('reads participants stored before items existed as empty', async () => {

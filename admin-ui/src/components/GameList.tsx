@@ -44,7 +44,19 @@ function duration(seconds?: number): string | null {
 function statusBadge(g: PartyGame) {
   if (g.status === 'resolved') return <Badge variant="success">Resolved</Badge>
   if (g.status === 'failed') return <Badge variant="destructive">Unavailable</Badge>
+  // Re-fetched games (e.g. after a migration) keep what they had meanwhile.
+  if (g.resolvedAt) return <Badge variant="success" title="Refreshing from Riot">Resolved</Badge>
   return <Badge variant="warning">Pending</Badge>
+}
+
+/**
+ * A lobby that never really started (Riot: "Abort_TooFewPlayers" when someone
+ * didn't load in). Riot puts everyone on one team with no winner. Games stored
+ * before the end result was recorded fall back to "nobody won".
+ */
+function isAborted(g: PartyGame): boolean {
+  if (g.endResult) return g.endResult.startsWith('Abort')
+  return g.participants.length > 0 && !g.participants.some(p => p.win || p.subteam)
 }
 
 function ordinal(n: number): string {
@@ -192,7 +204,8 @@ function subteams(players: GameParticipant[]): GameParticipant[][] {
 
 interface TeamGroup { key: string; title: string; players: GameParticipant[]; result?: 'win' | 'placement' }
 
-function teamGroups(players: GameParticipant[]): TeamGroup[] {
+function teamGroups(players: GameParticipant[], aborted: boolean): TeamGroup[] {
+  if (aborted) return [{ key: 'lobby', title: 'Lobby', players }]
   if (players.some(p => p.subteam)) {
     return subteams(players).map(group => ({
       key: group[0]!.puuid, title: `Team ${group[0]!.subteam ?? '?'}`, players: group, result: 'placement' as const,
@@ -235,13 +248,15 @@ function GameCard({ game: g, catalog }: { game: PartyGame; catalog: LoadoutCatal
   const [expanded, setExpanded] = useState(false)
   const ql = queueLabel(g.queueId)
   const dur = duration(g.gameDuration)
-  const groups = teamGroups(g.participants)
+  const aborted = isAborted(g)
+  const groups = teamGroups(g.participants, aborted)
 
   return (
     <div className="rounded-lg border p-3">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
         {statusBadge(g)}
         {ql && <Badge variant="outline">{ql}</Badge>}
+        {aborted && <Badge variant="secondary" title={g.endResult ?? 'Nobody won this game'}>Aborted</Badge>}
         {g.region && <Badge variant="secondary">{g.region}</Badge>}
         <span className="font-mono text-[0.7rem] text-muted-foreground">{g.matchId}</span>
         <span className="grow" />
