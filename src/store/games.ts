@@ -6,19 +6,28 @@
 // cron sweep (resolvePendingGames) retries until the game finishes, then writes
 // the participants. Reports that never resolve are aged out to `failed`.
 
-import { fetchMatch, matchIdForGame, platformForRegion } from '../lib/riot'
+import { RiotRateLimited, fetchMatch, matchIdForGame, platformForRegion } from '../lib/riot'
 
 // Give up on a report the API never returns (custom games aren't indexed by
 // Match-v5 at all, so those will always age out — expected).
 const PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000
-const RESOLVE_BATCH = 20
+// Per 2-minute sweep. Riot's smallest key limit is 100 calls per 2 minutes,
+// shared with live-game lookups, so this leaves room for those.
+const RESOLVE_BATCH = 40
+const RESOLVE_CONCURRENCY = 4
 export const MAX_GAMES_PER_SESSION = 100
-// Just under the 15-minute sweep, so a retry isn't pushed back a whole tick.
+// A game shows up in Match-v5 shortly after it ends, so while it could still be
+// running we check every sweep (just under 2 minutes, so a retry isn't pushed
+// back a whole tick). Past that it's likely a custom game Riot never returns,
+// so back off, doubling up to 4h, until it ages out.
+const EARLY_WINDOW_MS = 2 * 60 * 60 * 1000
+const EARLY_RETRY_MS = 110 * 1000
 const RETRY_BASE_MS = 14 * 60 * 1000
 const RETRY_MAX_MS = 4 * 60 * 60 * 1000
 
-/** Delay before the next try after `attempts` misses, doubling up to 4h. */
-export function retryDelayMs(attempts: number): number {
+/** Delay before the next try after `attempts` misses, for a report `ageMs` old. */
+export function retryDelayMs(attempts: number, ageMs = Infinity): number {
+  if (ageMs < EARLY_WINDOW_MS) return EARLY_RETRY_MS
   return Math.min(RETRY_BASE_MS * 2 ** Math.max(attempts - 1, 0), RETRY_MAX_MS)
 }
 
@@ -223,58 +232,92 @@ export async function resolvePendingGames(
   db: D1Database, riotApiKey: string | undefined, now = Date.now(),
 ): Promise<number> {
   if (!riotApiKey) return 0
+  // Games that never resolved come before re-fetches of ones that did (e.g. a
+  // migration's backfill), so a backfill never holds up new games.
   const { results } = await db.prepare(`
     SELECT * FROM party_games WHERE status = 'pending' AND next_attempt_at <= ?1
-    ORDER BY next_attempt_at, id LIMIT ?2
+    ORDER BY resolved_at IS NOT NULL, next_attempt_at, id LIMIT ?2
   `).bind(now, RESOLVE_BATCH).all<GameRow>()
+  return resolveGames(db, riotApiKey, results, now)
+}
 
+/**
+ * The desktop client saw a game end: try it right away instead of waiting for
+ * the next sweep. If Riot doesn't have it yet, the sweeps keep checking.
+ */
+export async function resolveEndedGame(
+  db: D1Database, riotApiKey: string | undefined, guildId: string, matchId: string, now = Date.now(),
+): Promise<number> {
+  const { results } = await db.prepare(`
+    SELECT * FROM party_games WHERE guild_id = ?1 AND match_id = ?2 AND status = 'pending'
+  `).bind(guildId, matchId).all<GameRow>()
+  if (!riotApiKey || results.length === 0) return 0
+  return resolveGames(db, riotApiKey, results, now)
+}
+
+/** Looks the games up a few at a time, stopping early if Riot rate-limits us. */
+async function resolveGames(db: D1Database, riotApiKey: string, rows: GameRow[], now: number): Promise<number> {
   let resolved = 0
-  for (const g of results) {
-    if (!g.region) { await failGame(db, g.id, 'no region recorded'); continue }
-    try {
-      const match = await fetchMatch(riotApiKey, g.region, g.match_id)
-      if (!match) {
-        // Not available yet. Retry next sweep, unless it's simply too old now.
-        if (now - g.reported_at > PENDING_MAX_AGE_MS) {
-          await failGame(db, g.id, 'match not found before timeout (custom game, or never finished)')
-        } else {
-          await retryLater(db, g, now)
-        }
-        continue
-      }
-      await db.batch([
-        db.prepare(`
-          UPDATE party_games
-          SET status = 'resolved', resolved_at = ?2, queue_id = ?3, game_creation = ?4,
-              game_duration = ?5, end_result = ?6, attempts = attempts + 1, error = NULL
-          WHERE id = ?1
-        `).bind(g.id, now, match.queueId, match.gameCreation, match.gameDuration, match.endResult),
-        db.prepare('DELETE FROM party_game_participants WHERE game_row_id = ?1').bind(g.id),
-        ...match.participants.map(p => db.prepare(`
-          INSERT INTO party_game_participants
-            (game_row_id, puuid, riot_id, champion_id, champion_name, team_id, win, subteam, placement, items, augments)
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-        `).bind(g.id, p.puuid, p.riotId, p.championId, p.championName, p.teamId, p.win ? 1 : 0, p.subteam, p.placement,
-          JSON.stringify(p.items), JSON.stringify(p.augments))),
-      ])
-      resolved++
-    } catch (e) {
-      const msg = (e as Error).message.slice(0, 300)
-      if (now - g.reported_at > PENDING_MAX_AGE_MS) {
-        await failGame(db, g.id, msg)
-      } else {
-        await retryLater(db, g, now, msg)
-      }
+  for (let i = 0; i < rows.length; i += RESOLVE_CONCURRENCY) {
+    const outcomes = await Promise.all(rows.slice(i, i + RESOLVE_CONCURRENCY).map(g => resolveOne(db, riotApiKey, g, now)))
+    resolved += outcomes.filter(o => o === 'resolved').length
+    if (outcomes.includes('rate-limited')) {
+      console.warn('Riot rate-limited the game resolver; the rest wait for the next sweep')
+      break
     }
   }
   return resolved
+}
+
+async function resolveOne(
+  db: D1Database, riotApiKey: string, g: GameRow, now: number,
+): Promise<'resolved' | 'pending' | 'rate-limited'> {
+  if (!g.region) { await failGame(db, g.id, 'no region recorded'); return 'pending' }
+  try {
+    const match = await fetchMatch(riotApiKey, g.region, g.match_id)
+    if (!match) {
+      // Not available yet. Retry next sweep, unless it's simply too old now.
+      if (now - g.reported_at > PENDING_MAX_AGE_MS) {
+        await failGame(db, g.id, 'match not found before timeout (custom game, or never finished)')
+      } else {
+        await retryLater(db, g, now)
+      }
+      return 'pending'
+    }
+    await db.batch([
+      db.prepare(`
+        UPDATE party_games
+        SET status = 'resolved', resolved_at = ?2, queue_id = ?3, game_creation = ?4,
+            game_duration = ?5, end_result = ?6, attempts = attempts + 1, error = NULL
+        WHERE id = ?1
+      `).bind(g.id, now, match.queueId, match.gameCreation, match.gameDuration, match.endResult),
+      db.prepare('DELETE FROM party_game_participants WHERE game_row_id = ?1').bind(g.id),
+      ...match.participants.map(p => db.prepare(`
+        INSERT INTO party_game_participants
+          (game_row_id, puuid, riot_id, champion_id, champion_name, team_id, win, subteam, placement, items, augments)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+      `).bind(g.id, p.puuid, p.riotId, p.championId, p.championName, p.teamId, p.win ? 1 : 0, p.subteam, p.placement,
+        JSON.stringify(p.items), JSON.stringify(p.augments))),
+    ])
+    return 'resolved'
+  } catch (e) {
+    // Rate limits aren't the game's fault: leave it due, without counting a try.
+    if (e instanceof RiotRateLimited) return 'rate-limited'
+    const msg = (e as Error).message.slice(0, 300)
+    if (now - g.reported_at > PENDING_MAX_AGE_MS) {
+      await failGame(db, g.id, msg)
+    } else {
+      await retryLater(db, g, now, msg)
+    }
+    return 'pending'
+  }
 }
 
 async function retryLater(db: D1Database, g: GameRow, now: number, error?: string): Promise<void> {
   await db.prepare(`
     UPDATE party_games SET attempts = attempts + 1, next_attempt_at = ?2, error = COALESCE(?3, error)
     WHERE id = ?1
-  `).bind(g.id, now + retryDelayMs(g.attempts + 1), error ?? null).run()
+  `).bind(g.id, now + retryDelayMs(g.attempts + 1, now - g.reported_at), error ?? null).run()
 }
 
 /** Give up on a report. One that resolved before (a re-fetch) keeps what it had. */

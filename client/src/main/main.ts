@@ -6,7 +6,7 @@ import {
 } from './lcu'
 import {
   addToParty, approveQueued, clearLink, denyQueued, fetchChampionCatalog, fetchLiveChampions, fetchSession,
-  getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode, lookupPlayers, reportGame, setAutoJoinSettings, setPartyGame,
+  getAutoJoinSettings, getTaggedPlayers, linkState, linkWithCode, lookupPlayers, reportGame, reportGameEnded, setAutoJoinSettings, setPartyGame,
   setTaggedPlayers, type ChampionCatalog, type LiveParticipant,
 } from './bot'
 import {
@@ -14,6 +14,7 @@ import {
   type LobbyEntry, type PartyEntry,
 } from '../shared/match'
 import { needsLiveFetch, nextLiveCache, type LiveCache } from '../shared/live-cache'
+import { nextGameReport, type GameReportState } from '../shared/game-report'
 import type {
   AutoJoinSettings, BanCheck, ChampionPick, GamePhase, GameView, InviteOutcome, InviteResult, LcuStatus,
   LobbyMode, LobbyView, Session, SessionResult, SummonerInfo, TaggedPlayer,
@@ -203,19 +204,24 @@ let lastSession: Session | null = null
 //
 // When a match starts we tell the Worker the gameId + region so it can record
 // which games this party played and later pull the champions from the Riot API.
-// One report per gameId (server dedupes anyway); only reports while linked to a
-// party, since a game with no party to attach to is nothing to record.
+// When it ends we say so, and the Worker looks it up right away. One report of
+// each per gameId (server dedupes anyway); starts only while in a party, since
+// a game with no party to attach to is nothing to record.
 
-let lastReportedGameId = 0
+const gameReports: GameReportState = { reported: null, endedSent: 0 }
 
 async function pollGameReport(): Promise<void> {
-  if (!creds || !region || !lastSession?.party) return
+  if (!creds || !region) return
   const phase = await fetchGameflowPhase(creds)
-  if (phase !== 'InProgress') return
-  const gameId = await fetchGameId(creds)
-  if (!gameId || gameId === lastReportedGameId) return
-  const res = await reportGame(region, String(gameId)).catch(() => ({ ok: false }))
-  if (res.ok) lastReportedGameId = gameId  // only latch on success, so a failed send retries next tick
+  const gameId = phase === 'InProgress' ? await fetchGameId(creds) : 0
+  const action = nextGameReport(gameReports, phase, region, gameId, !!lastSession?.party)
+  if (!action) return
+  const send = action.kind === 'start' ? reportGame : reportGameEnded
+  const res = await send(action.region, String(action.gameId)).catch(() => ({ ok: false }))
+  // Only latch on success, so a failed send retries next tick.
+  if (!res.ok) return
+  if (action.kind === 'start') gameReports.reported = { region: action.region, gameId: action.gameId }
+  else gameReports.endedSent = action.gameId
 }
 
 setInterval(() => { void pollGameReport() }, 5000)

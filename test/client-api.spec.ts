@@ -408,6 +408,17 @@ describe('client game reports', () => {
     expect((await report(token, '1')).status).toBe(404)
   })
 
+  it('accepts a game-ended nudge and rejects a malformed one', async () => {
+    await makeParty('g-rep4', 'REP004', OWNER)
+    const token = await linkUser(OWNER, 'Owner', 'g-rep4')
+    await report(token, '77')
+    const ended = (body: unknown, t = token) => req('POST', '/client/party/game-ended', { token: t || undefined, body })
+    expect((await ended({ region: 'NA', gameId: '77' })).status).toBe(200)
+    expect((await ended({ region: 'XX', gameId: '77' })).status).toBe(400)
+    expect((await ended({ region: 'NA', gameId: 'abc' })).status).toBe(400)
+    expect((await ended({ region: 'NA', gameId: '77' }, '')).status).toBe(401)
+  })
+
   it(`caps a session at ${MAX_GAMES_PER_SESSION} reports, but re-reporting a known game is fine`, async () => {
     await makeParty('g-rep3', 'REP003', OWNER)
     const token = await linkUser(OWNER, 'Owner', 'g-rep3')

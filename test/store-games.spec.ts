@@ -98,6 +98,7 @@ describe('resolvePendingGames', () => {
       const matchId = String(input).split('/').pop()!
       calls.push(matchId)
       if (matchId.endsWith('_500')) return new Response('boom', { status: 500 })
+      if (matchId.endsWith('_429')) return new Response('slow down', { status: 429 })
       if (!finished.has(matchId)) return new Response('', { status: 404 })
       return Response.json({
         info: {
@@ -165,6 +166,48 @@ describe('resolvePendingGames', () => {
   it('doubles the delay up to a cap', () => {
     expect(games.retryDelayMs(2)).toBe(2 * games.retryDelayMs(1))
     expect(games.retryDelayMs(50)).toBe(games.retryDelayMs(10))
+  })
+
+  it('checks a new game every sweep while it could still be running, then backs off', () => {
+    const HOUR = 60 * 60 * 1000
+    expect(games.retryDelayMs(1, 0)).toBeLessThan(2 * 60 * 1000)
+    expect(games.retryDelayMs(30, HOUR)).toBe(games.retryDelayMs(1, 0))
+    expect(games.retryDelayMs(1, 3 * HOUR)).toBe(games.retryDelayMs(1))
+  })
+
+  // These need the queue to themselves: other tests leave pending reports behind.
+  const clearQueue = () => env.DB.prepare("UPDATE party_games SET status = 'failed' WHERE status = 'pending'").run()
+
+  it('looks up games that never resolved before re-fetches of ones that did', async () => {
+    await clearQueue()
+    const s = await makeSession()
+    for (let i = 0; i < 45; i++) await report(s, `${3000 + i}`)
+    await env.DB.prepare('UPDATE party_games SET resolved_at = 1 WHERE history_id = ?1').bind(s.historyId).run()
+    await report(s, '3999')  // newest, so last by id
+    finished.add('NA1_3999')
+    await games.resolvePendingGames(env.DB, 'key')
+    expect((await status(s.historyId))['3999']!.status).toBe('resolved')
+  })
+
+  it('stops the sweep when Riot rate-limits, without counting it against the game', async () => {
+    await clearQueue()
+    const s = await makeSession()
+    await report(s, '429')
+    for (let i = 0; i < 10; i++) await report(s, `${4000 + i}`)
+    await games.resolvePendingGames(env.DB, 'key')
+    expect(calls.filter(id => id.startsWith('NA1_4'))).toHaveLength(4)  // the first group only
+    const row = await env.DB.prepare("SELECT attempts, next_attempt_at FROM party_games WHERE match_id = 'NA1_429'").first()
+    expect(row).toEqual({ attempts: 0, next_attempt_at: 0 })
+  })
+
+  it('looks a game up as soon as a client says it ended, within that guild only', async () => {
+    const s = await makeSession()
+    await report(s, '5001')
+    finished.add('NA1_5001')
+    expect(await games.resolveEndedGame(env.DB, 'key', 'some-other-guild', 'NA1_5001')).toBe(0)
+    expect((await status(s.historyId))['5001']!.status).toBe('pending')
+    expect(await games.resolveEndedGame(env.DB, 'key', s.guildId, 'NA1_5001')).toBe(1)
+    expect((await status(s.historyId))['5001']!.status).toBe('resolved')
   })
 })
 

@@ -119,6 +119,15 @@ export default {
   async scheduled(_event: ScheduledController, env: AppBindings, ctx: ExecutionContext): Promise<void> {
     // Mid-deploy the schema may be half migrated; the next run catches up.
     if ((await maintenanceUntil(env.DB)) > Date.now()) return
+    if (_event.cron === '*/2 * * * *') {
+      // Fill in who played League games the desktop client reported, once
+      // Match-v5 has them (shortly after each game ends).
+      ctx.waitUntil(resolvePendingGames(env.DB, env.RIOT_API_KEY).then(
+        resolved => { if (resolved > 0) console.log(`Resolved ${resolved} pending League game(s)`) },
+        e => console.error('game resolve sweep failed:', e),
+      ))
+      return
+    }
     if (_event.cron === '* * * * *') {
       ctx.waitUntil((async () => {
         await sweepRulesApproval(env)
@@ -135,10 +144,6 @@ export default {
       }
       await sweepExpiredAuth(env.DB)
       await sweepExpiredAdminAuth(env.DB)
-      // Fill in participants for League games the desktop client reported once
-      // the matches have finished and Match-v5 can return them.
-      const resolved = await resolvePendingGames(env.DB, env.RIOT_API_KEY)
-      if (resolved > 0) console.log(`Resolved ${resolved} pending League game(s)`)
     })().catch(e => console.error('scheduled sweep failed:', e)))
     // Separate from the sweep so a CommunityDragon outage can't hold it up.
     ctx.waitUntil(refreshAugmentTextIfStale(env.DB).then(
