@@ -157,6 +157,8 @@ export interface MatchParticipant {
   win: boolean
   subteam: number | null     // Arena-style modes: which small team they were on
   placement: number | null   // ...and where that team finished, 1 = first
+  items: number[]            // final items in slot order (item0..item6), empty slots dropped
+  augments: number[]         // Arena-style modes: augments in pick order
 }
 
 export interface MatchDetails {
@@ -203,6 +205,7 @@ export async function fetchMatch(
         playerSubteamId?: number
         subteamPlacement?: number
         placement?: number
+        [slot: `item${number}` | `playerAugment${number}`]: number | undefined
       }[]
     }
   }
@@ -224,6 +227,8 @@ export async function fetchMatch(
         win: !!p.win,
         subteam: p.playerSubteamId || null,
         placement: p.subteamPlacement || p.placement || null,
+        items: [0, 1, 2, 3, 4, 5, 6].map(i => p[`item${i}`] ?? 0).filter(id => id > 0),
+        augments: [1, 2, 3, 4, 5, 6].map(i => p[`playerAugment${i}`] ?? 0).filter(id => id > 0),
       }
     }).filter(p => p.puuid),
   }

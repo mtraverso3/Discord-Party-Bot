@@ -123,7 +123,7 @@ describe('resolvePendingGames', () => {
     expect(g.status).toBe('resolved')
     expect(g.queueId).toBe(420)
     expect(g.participants).toEqual([
-      { puuid: 'p1', riotId: 'Me#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true, subteam: null, placement: null },
+      { puuid: 'p1', riotId: 'Me#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true, subteam: null, placement: null, items: [], augments: [] },
     ])
   })
 
@@ -185,7 +185,7 @@ describe('listGamesForUser', () => {
     const list = await games.listGamesForUser(env.DB, mine.guildId, 'player')
     expect(list.map(g => g.matchId)).toEqual(['NA1_42'])
     expect(list[0]!.participants).toEqual([
-      { puuid: 'p1', riotId: 'Player#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true, subteam: null, placement: null },
+      { puuid: 'p1', riotId: 'Player#NA1', championId: 1, championName: 'Annie', teamId: 100, win: true, subteam: null, placement: null, items: [], augments: [] },
     ])
   })
 })
@@ -201,8 +201,13 @@ describe('Arena-style games', () => {
     globalThis.fetch = vi.fn(async () => {
       if (missing) return new Response('', { status: 404 })
       const players = arena
-        ? [1, 1, 2, 2].map((sub, i) => ({ puuid: `a${i}`, championId: i + 1, championName: `C${i}`, teamId: 100, win: sub === 2, playerSubteamId: sub, subteamPlacement: sub === 2 ? 1 : 4 }))
-        : [{ puuid: 'n0', championId: 1, championName: 'Annie', teamId: 100, win: true }]
+        ? [1, 1, 2, 2].map((sub, i) => ({
+            puuid: `a${i}`, championId: i + 1, championName: `C${i}`, teamId: 100, win: sub === 2,
+            playerSubteamId: sub, subteamPlacement: sub === 2 ? 1 : 4,
+            item0: 447106, item1: 0, item2: 223158, item3: 0, item4: 0, item5: 0, item6: 3348,
+            playerAugment1: 118, playerAugment2: 234, playerAugment3: 0, playerAugment4: 0, playerAugment5: 0, playerAugment6: 0,
+          }))
+        : [{ puuid: 'n0', championId: 1, championName: 'Annie', teamId: 100, win: true, item0: 3089, item1: 0, item6: 3340 }]
       return Response.json({ info: { queueId: arena ? 1750 : 420, gameCreation: 1, gameDuration: 900, participants: players } })
     }) as any
   })
@@ -226,6 +231,25 @@ describe('Arena-style games', () => {
     arena = false
     const { game } = await resolvedGame('7002')
     expect(game.participants[0]).toMatchObject({ subteam: null, placement: null })
+  })
+
+  it('keeps final items in slot order and augments in pick order, skipping empty ones', async () => {
+    const { game } = await resolvedGame('7005')
+    expect(game.participants[0]).toMatchObject({ items: [447106, 223158, 3348], augments: [118, 234] })
+  })
+
+  it('stores items without augments for a normal game', async () => {
+    arena = false
+    const { game } = await resolvedGame('7006')
+    expect(game.participants[0]).toMatchObject({ items: [3089, 3340], augments: [] })
+  })
+
+  it('reads participants stored before items existed as empty', async () => {
+    const { s, game } = await resolvedGame('7007')
+    await env.DB.prepare('UPDATE party_game_participants SET items = NULL, augments = NULL WHERE game_row_id = ?1')
+      .bind(game.id).run()
+    const [reread] = await games.listGamesForHistory(env.DB, s.historyId)
+    expect(reread!.participants[0]).toMatchObject({ items: [], augments: [] })
   })
 
   it('re-fetches stored Arena games, but not plain 5v5 ones', async () => {

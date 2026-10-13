@@ -31,6 +31,41 @@ export interface GameParticipant {
   win: boolean | null
   subteam: number | null
   placement: number | null
+  items: number[]      // final items, slot order, empty slots dropped
+  augments: number[]   // Arena-style modes, pick order
+}
+
+interface ParticipantRow {
+  game_row_id: number; puuid: string; riot_id: string
+  champion_id: number; champion_name: string; team_id: number; win: number | null
+  subteam: number | null; placement: number | null
+  items: string | null; augments: string | null
+}
+
+/** A JSON id list column; rows stored before it existed read as empty. */
+function idList(raw: string | null): number[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((n): n is number => typeof n === 'number') : []
+  } catch {
+    return []
+  }
+}
+
+function toParticipant(p: ParticipantRow): GameParticipant {
+  return {
+    puuid: p.puuid,
+    riotId: p.riot_id,
+    championId: p.champion_id,
+    championName: p.champion_name,
+    teamId: p.team_id,
+    win: p.win == null ? null : !!p.win,
+    subteam: p.subteam,
+    placement: p.placement,
+    items: idList(p.items),
+    augments: idList(p.augments),
+  }
 }
 
 export interface PartyGame {
@@ -114,11 +149,7 @@ export async function listGamesForHistory(db: D1Database, historyId: number): Pr
       SELECT p.* FROM party_game_participants p
       JOIN party_games g ON g.id = p.game_row_id
       WHERE g.history_id = ?1
-    `).bind(historyId).all<{
-      game_row_id: number; puuid: string; riot_id: string
-      champion_id: number; champion_name: string; team_id: number; win: number | null
-      subteam: number | null; placement: number | null
-    }>(),
+    `).bind(historyId).all<ParticipantRow>(),
   ])
   return games.map(g => ({
     id: g.id,
@@ -133,16 +164,7 @@ export async function listGamesForHistory(db: D1Database, historyId: number): Pr
     gameCreation: g.game_creation ?? undefined,
     gameDuration: g.game_duration ?? undefined,
     error: g.error ?? undefined,
-    participants: parts.filter(p => p.game_row_id === g.id).map(p => ({
-      puuid: p.puuid,
-      riotId: p.riot_id,
-      championId: p.champion_id,
-      championName: p.champion_name,
-      teamId: p.team_id,
-      win: p.win == null ? null : !!p.win,
-      subteam: p.subteam,
-      placement: p.placement,
-    })),
+    participants: parts.filter(p => p.game_row_id === g.id).map(toParticipant),
   }))
 }
 
@@ -168,11 +190,7 @@ export async function listGamesForUser(
 
   const { results: parts } = await db.prepare(`
     SELECT * FROM party_game_participants WHERE game_row_id IN (SELECT value FROM json_each(?1))
-  `).bind(JSON.stringify(games.map(g => g.id))).all<{
-    game_row_id: number; puuid: string; riot_id: string
-    champion_id: number; champion_name: string; team_id: number; win: number | null
-    subteam: number | null; placement: number | null
-  }>()
+  `).bind(JSON.stringify(games.map(g => g.id))).all<ParticipantRow>()
 
   return games.map(g => ({
     id: g.id,
@@ -187,16 +205,7 @@ export async function listGamesForUser(
     gameCreation: g.game_creation ?? undefined,
     gameDuration: g.game_duration ?? undefined,
     error: g.error ?? undefined,
-    participants: parts.filter(p => p.game_row_id === g.id).map(p => ({
-      puuid: p.puuid,
-      riotId: p.riot_id,
-      championId: p.champion_id,
-      championName: p.champion_name,
-      teamId: p.team_id,
-      win: p.win == null ? null : !!p.win,
-      subteam: p.subteam,
-      placement: p.placement,
-    })),
+    participants: parts.filter(p => p.game_row_id === g.id).map(toParticipant),
   }))
 }
 
@@ -238,9 +247,11 @@ export async function resolvePendingGames(
         `).bind(g.id, now, match.queueId, match.gameCreation, match.gameDuration),
         db.prepare('DELETE FROM party_game_participants WHERE game_row_id = ?1').bind(g.id),
         ...match.participants.map(p => db.prepare(`
-          INSERT INTO party_game_participants (game_row_id, puuid, riot_id, champion_id, champion_name, team_id, win, subteam, placement)
-          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-        `).bind(g.id, p.puuid, p.riotId, p.championId, p.championName, p.teamId, p.win ? 1 : 0, p.subteam, p.placement)),
+          INSERT INTO party_game_participants
+            (game_row_id, puuid, riot_id, champion_id, champion_name, team_id, win, subteam, placement, items, augments)
+          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        `).bind(g.id, p.puuid, p.riotId, p.championId, p.championName, p.teamId, p.win ? 1 : 0, p.subteam, p.placement,
+          JSON.stringify(p.items), JSON.stringify(p.augments))),
       ])
       resolved++
     } catch (e) {

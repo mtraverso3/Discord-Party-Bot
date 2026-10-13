@@ -1,6 +1,11 @@
-import { Gamepad2 } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, Gamepad2 } from 'lucide-react'
 import type { GameParticipant, PartyGame } from '../types'
+import { cn } from '../lib/cn'
 import { fmtAbs, relTime } from '../lib/time'
+import { championIconUrl, useLoadoutCatalog, type AugmentRarity, type LoadoutAsset, type LoadoutCatalog } from '../lib/lolAssets'
+import { HoverCard } from './HoverCard'
+import { LeagueText } from './LeagueText'
 import { Badge, EmptyState } from './ui'
 
 // Common League queue IDs → a short human label. Anything unmapped shows the
@@ -48,24 +53,128 @@ function ordinal(n: number): string {
   return `${n}${suffix}`
 }
 
-function Team({ title, players, result }: { title: string; players: GameParticipant[]; result?: 'win' | 'placement' }) {
-  if (players.length === 0) return null
+const RARITY_RING: Record<AugmentRarity, string> = {
+  silver: 'ring-zinc-400',
+  gold: 'ring-amber-400',
+  prismatic: 'ring-fuchsia-400',
+  other: 'ring-border',
+}
+
+const RARITY_TEXT: Record<AugmentRarity, string> = {
+  silver: 'text-zinc-300',
+  gold: 'text-amber-300',
+  prismatic: 'text-fuchsia-300',
+  other: 'text-zinc-200',
+}
+
+function ItemTip({ id, item }: { id: number; item?: LoadoutAsset }) {
+  return (
+    <>
+      <div className="mb-1 text-sm font-semibold text-amber-100">{item?.name ?? `Item ${id}`}</div>
+      {item?.description ? <LeagueText text={item.description} /> : <span className="text-zinc-400">No description available.</span>}
+    </>
+  )
+}
+
+function AugmentTip({ id, augment }: { id: number; augment?: LoadoutCatalog['augments'][number] }) {
+  const rarity = augment?.rarity ?? 'other'
+  return (
+    <>
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className={cn('text-sm font-semibold', RARITY_TEXT[rarity])}>{augment?.name ?? `Augment ${id}`}</span>
+        {rarity !== 'other' && <span className="text-[0.65rem] tracking-wide text-zinc-400 uppercase">{rarity}</span>}
+      </div>
+      {augment?.description ? <LeagueText text={augment.description} /> : <span className="text-zinc-400">No description available.</span>}
+    </>
+  )
+}
+
+function Icon({ src, label, className }: { src?: string | null; label: string; className?: string }) {
+  const [broken, setBroken] = useState(false)
+  if (!src || broken) {
+    return (
+      <span className={cn('inline-flex items-center justify-center bg-muted text-[0.6rem] font-semibold text-muted-foreground', className)}>
+        {label.slice(0, 1)}
+      </span>
+    )
+  }
+  return <img src={src} alt={label} loading="lazy" onError={() => setBroken(true)} className={className} />
+}
+
+/** What a player finished with: items, then augments ringed by rarity. */
+function Loadout({ player: p, catalog }: { player: GameParticipant; catalog: LoadoutCatalog | null }) {
+  if (p.items.length === 0 && p.augments.length === 0) return null
+  return (
+    <div className="mt-0.5 mb-1 flex flex-wrap items-center gap-0.5">
+      {p.items.map((id, i) => {
+        const item = catalog?.items[id]
+        return (
+          <HoverCard key={`i${i}`} content={<ItemTip id={id} item={item} />}>
+            <Icon src={item?.iconUrl} label={item?.name ?? `Item ${id}`} className="size-5 rounded-sm" />
+          </HoverCard>
+        )
+      })}
+      {p.items.length > 0 && p.augments.length > 0 && <span className="mx-1 h-4 w-px bg-border" />}
+      {p.augments.map((id, i) => {
+        const augment = catalog?.augments[id]
+        return (
+          <HoverCard key={`a${i}`} content={<AugmentTip id={id} augment={augment} />}>
+            {/* Augment icons are white line art on transparent; the dark backing
+                keeps them visible on the light theme, as the game shows them. */}
+            <Icon
+              src={augment?.iconUrl} label={augment?.name ?? `Augment ${id}`}
+              className={cn('size-5 rounded-full bg-zinc-800 p-0.5 ring-1', RARITY_RING[augment?.rarity ?? 'other'])}
+            />
+          </HoverCard>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChampionIcon({ player: p, catalog, className }: { player: GameParticipant; catalog: LoadoutCatalog | null; className?: string }) {
+  const name = p.championName || `Champion ${p.championId}`
+  return (
+    <HoverCard content={<><div className="text-sm font-semibold text-amber-100">{name}</div><div className="text-zinc-400">{p.riotId || 'Unknown player'}</div></>}>
+      <Icon src={championIconUrl(catalog, p.championName)} label={name} className={cn('size-6 rounded', className)} />
+    </HoverCard>
+  )
+}
+
+function ResultBadge({ players, result }: { players: GameParticipant[]; result?: 'win' | 'placement' }) {
   const won = players[0]?.win
   const placement = players.find(p => p.placement)?.placement
+  if (result === 'win' && won != null) return <Badge variant={won ? 'success' : 'destructive'}>{won ? 'Win' : 'Loss'}</Badge>
+  if (result === 'placement' && placement != null) {
+    return <Badge variant={placement === 1 ? 'success' : 'secondary'}>{ordinal(placement)}</Badge>
+  }
+  return null
+}
+
+function Team({ title, players, result, catalog }: {
+  title: string
+  players: GameParticipant[]
+  result?: 'win' | 'placement'
+  catalog: LoadoutCatalog | null
+}) {
+  if (players.length === 0) return null
   return (
     <div className="min-w-40 flex-1">
       <div className="mb-1 flex items-center gap-1.5 text-[0.7rem] font-semibold tracking-wide text-muted-foreground uppercase">
         {title}
-        {result === 'win' && won != null && <Badge variant={won ? 'success' : 'destructive'}>{won ? 'Win' : 'Loss'}</Badge>}
-        {result === 'placement' && placement != null && (
-          <Badge variant={placement === 1 ? 'success' : 'secondary'}>{ordinal(placement)}</Badge>
-        )}
+        <ResultBadge players={players} result={result} />
       </div>
-      <ul className="space-y-0.5">
+      <ul className="space-y-1">
         {players.map(p => (
-          <li key={p.puuid} className="flex items-baseline justify-between gap-2 text-sm">
-            <span className="font-medium">{p.championName || `Champion ${p.championId}`}</span>
-            <span className="truncate text-xs text-muted-foreground" title={p.riotId}>{p.riotId || '—'}</span>
+          <li key={p.puuid} className="flex gap-2 text-sm">
+            <ChampionIcon player={p} catalog={catalog} className="mt-0.5 size-7" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-medium">{p.championName || `Champion ${p.championId}`}</span>
+                <span className="truncate text-xs text-muted-foreground" title={p.riotId}>{p.riotId || '—'}</span>
+              </div>
+              <Loadout player={p} catalog={catalog} />
+            </div>
           </li>
         ))}
       </ul>
@@ -81,31 +190,52 @@ function subteams(players: GameParticipant[]): GameParticipant[][] {
   return [...groups.entries()].sort(([a, x], [b, y]) => rank(x) - rank(y) || a - b).map(([, group]) => group)
 }
 
-function Teams({ players }: { players: GameParticipant[] }) {
+interface TeamGroup { key: string; title: string; players: GameParticipant[]; result?: 'win' | 'placement' }
+
+function teamGroups(players: GameParticipant[]): TeamGroup[] {
   if (players.some(p => p.subteam)) {
-    return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-4">
-        {subteams(players).map(group => (
-          <Team key={group[0]!.puuid} title={`Team ${group[0]!.subteam ?? '?'}`} players={group} result="placement" />
-        ))}
-      </div>
-    )
+    return subteams(players).map(group => ({
+      key: group[0]!.puuid, title: `Team ${group[0]!.subteam ?? '?'}`, players: group, result: 'placement' as const,
+    }))
   }
-  const blue = players.filter(p => p.teamId === 100)
-  const red = players.filter(p => p.teamId === 200)
-  const other = players.filter(p => p.teamId !== 100 && p.teamId !== 200)
+  return [
+    { key: 'blue', title: 'Blue', players: players.filter(p => p.teamId === 100), result: 'win' as const },
+    { key: 'red', title: 'Red', players: players.filter(p => p.teamId === 200), result: 'win' as const },
+    { key: 'other', title: 'Players', players: players.filter(p => p.teamId !== 100 && p.teamId !== 200) },
+  ].filter(g => g.players.length > 0)
+}
+
+/** One line per game: each team as a chip of champion portraits with its result. */
+function Summary({ groups, catalog }: { groups: TeamGroup[]; catalog: LoadoutCatalog | null }) {
   return (
-    <div className="flex flex-wrap gap-4">
-      <Team title="Blue" players={blue} result="win" />
-      <Team title="Red" players={red} result="win" />
-      <Team title="Players" players={other} />
+    <div className="flex flex-wrap gap-1.5">
+      {groups.map(g => (
+        <div key={g.key} className="flex items-center gap-1.5 rounded-md border px-1.5 py-1">
+          <ResultBadge players={g.players} result={g.result} />
+          {!g.result && <span className="text-[0.7rem] font-semibold text-muted-foreground uppercase">{g.title}</span>}
+          <div className="flex gap-0.5">
+            {g.players.map(p => <ChampionIcon key={p.puuid} player={p} catalog={catalog} />)}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
 
-function GameCard({ game: g }: { game: PartyGame }) {
+function Teams({ groups, catalog }: { groups: TeamGroup[]; catalog: LoadoutCatalog | null }) {
+  const arena = groups.some(g => g.result === 'placement')
+  return (
+    <div className={arena ? 'grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4' : 'flex flex-wrap gap-4'}>
+      {groups.map(g => <Team key={g.key} title={g.title} players={g.players} result={g.result} catalog={catalog} />)}
+    </div>
+  )
+}
+
+function GameCard({ game: g, catalog }: { game: PartyGame; catalog: LoadoutCatalog | null }) {
+  const [expanded, setExpanded] = useState(false)
   const ql = queueLabel(g.queueId)
   const dur = duration(g.gameDuration)
+  const groups = teamGroups(g.participants)
 
   return (
     <div className="rounded-lg border p-3">
@@ -122,9 +252,20 @@ function GameCard({ game: g }: { game: PartyGame }) {
         >
           {relTime(Date.now() - g.reportedAt)} ago
         </span>
+        {g.participants.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(e => !e)}
+            aria-expanded={expanded}
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          >
+            {expanded ? 'Less' : 'Details'}
+            <ChevronDown className={cn('size-3.5 transition-transform', expanded && 'rotate-180')} />
+          </button>
+        )}
       </div>
       {g.participants.length > 0 ? (
-        <Teams players={g.participants} />
+        expanded ? <Teams groups={groups} catalog={catalog} /> : <Summary groups={groups} catalog={catalog} />
       ) : (
         <p className="text-xs text-muted-foreground">
           {g.status === 'failed'
@@ -138,6 +279,7 @@ function GameCard({ game: g }: { game: PartyGame }) {
 
 /** Renders the League games reported for a party session. */
 export function GameList({ games }: { games: PartyGame[] }) {
+  const catalog = useLoadoutCatalog(games.some(g => g.participants.length > 0))
   if (games.length === 0) {
     return (
       <EmptyState icon={<Gamepad2 />} title="No games reported">
@@ -147,7 +289,7 @@ export function GameList({ games }: { games: PartyGame[] }) {
   }
   return (
     <div className="space-y-2.5">
-      {games.map(g => <GameCard key={g.id} game={g} />)}
+      {games.map(g => <GameCard key={g.id} game={g} catalog={catalog} />)}
     </div>
   )
 }
