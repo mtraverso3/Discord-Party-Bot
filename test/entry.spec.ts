@@ -2,6 +2,8 @@ import { env } from 'cloudflare:test'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from '../src/index'
 import * as parties from '../src/store/parties'
+import * as history from '../src/store/history'
+import * as games from '../src/store/games'
 
 // The Worker's front door: Discord's signature check, routing, and the crons.
 
@@ -116,6 +118,27 @@ describe('crons', () => {
     await Promise.all(c.pending)
     expect(await parties.getParty(env.DB, g, 'IDLE01')).toBeNull()
     expect(calls.some(x => x.method === 'PATCH' && x.url.includes('/messages/900000000000000001'))).toBe(true)
+  })
+
+  it('the every-minute sweep looks up reported League games on even minutes', async () => {
+    const g = guild()
+    await parties.createParty(env.DB, {
+      id: 'LOL001', guildId: g, name: 'League', description: '', game: 'LoL NA',
+      owner: { userId: 'o', username: 'o', displayName: 'O' }, maxSize: 5,
+    })
+    const historyId = (await history.activeSessionId(env.DB, g, 'LOL001'))!
+    await games.reportGame(env.DB, { historyId, guildId: g, partyId: 'LOL001', region: 'NA', gameId: '8001', reportedBy: 'o' })
+    const riotCalls = () => calls.filter(c => c.url.includes('api.riotgames.com')).length
+    const run = async (minute: number) => {
+      const c = ctx()
+      const scheduledTime = Date.UTC(2026, 9, 13, 6, minute)
+      await worker.scheduled({ cron: '* * * * *', scheduledTime } as any, { ...testEnv(), RIOT_API_KEY: 'key' }, c)
+      await Promise.all(c.pending)
+    }
+    await run(1)
+    expect(riotCalls()).toBe(0)
+    await run(2)
+    expect(riotCalls()).toBeGreaterThan(0)
   })
 
   it('the every-minute sweep runs without error', async () => {

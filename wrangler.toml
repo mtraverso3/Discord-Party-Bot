@@ -56,10 +56,10 @@ namespace_id = "4206"
 simple = { limit = 120, period = 60 }
 
 # Cron sweeps: idle parties, expired link codes and client tokens, admin login
-# tokens and OIDC codes, and audit log trimming. Every 2 minutes, League games
-# the desktop client reported are looked up in Riot's match history.
+# tokens and OIDC codes, and audit log trimming. Every other run of the
+# every-minute cron also looks up League games the desktop client reported.
 [triggers]
-crons = ["*/15 * * * *", "* * * * *", "*/2 * * * *"]
+crons = ["*/15 * * * *", "* * * * *"]
 
 # The every-minute trigger drops members who lose rules approval and clears
 # abandoned quizzes. The rules check is configured per guild from the admin UI
