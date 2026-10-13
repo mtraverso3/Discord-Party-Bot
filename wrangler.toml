@@ -78,6 +78,13 @@ deleted_classes = ["PartyState"]
 enabled = true
 invocation_logs = true
 
+# Traces record every outbound fetch (Discord, Riot) and D1 query with its
+# status and timing, so a failed reply shows up even where no code logs it.
+# Traffic is low enough to keep every trace.
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+
 # Secrets set via: wrangler secret put SECRET_NAME
 # DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID
 # Optional: RIOT_API_KEY — enables live-game champion lookups (Spectator API)

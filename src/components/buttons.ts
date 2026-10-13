@@ -2,6 +2,7 @@ import { RULES_EXEMPT_WARNING, exemptFromRules, rulesAccess, rulesErrorMessage }
 import type { ComponentContext } from 'discord-hono'
 import type { AppEnv } from '../types'
 import { extractMemberInfo, trySyncEmbed } from '../lib/party'
+import { checkFollowups } from '../lib/followup'
 import * as parties from '../store/parties'
 import { getUserIgn } from '../store/profiles'
 import { HELP_PAGES, buildHelpComponents, buildHelpEmbed } from '../lib/embeds'
@@ -69,17 +70,18 @@ async function joinViaButton(c: ComponentContext<AppEnv>, fromQueueButton: boole
 }
 
 export async function handleJoinButton(c: ComponentContext<AppEnv>) {
-  return c.ephemeral().resDefer(async (c) => joinViaButton(c, false))
+  return c.ephemeral().resDefer(async (c) => joinViaButton(checkFollowups(c, 'join button'), false))
 }
 
 export async function handleQueueButton(c: ComponentContext<AppEnv>) {
-  return c.ephemeral().resDefer(async (c) => joinViaButton(c, true))
+  return c.ephemeral().resDefer(async (c) => joinViaButton(checkFollowups(c, 'queue button'), true))
 }
 
 // ── BRB button (party_away;<partyId>) ─────────────────────────────────────────
 
 export async function handleAwayButton(c: ComponentContext<AppEnv>) {
   return c.ephemeral().resDefer(async (c) => {
+    checkFollowups(c, 'brb button')
     const partyId = (c.interaction.data as any).custom_id as string
     const guildId = c.interaction.guild_id!
     const { userId } = extractMemberInfo(c.interaction)
@@ -109,6 +111,7 @@ export async function handleAwayButton(c: ComponentContext<AppEnv>) {
 
 export async function handleLeaveButton(c: ComponentContext<AppEnv>) {
   return c.ephemeral().resDefer(async (c) => {
+    checkFollowups(c, 'leave button')
     const partyId = (c.interaction.data as any).custom_id as string
     const guildId = c.interaction.guild_id!
     const { userId } = extractMemberInfo(c.interaction)
