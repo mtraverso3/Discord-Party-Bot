@@ -1,7 +1,12 @@
+import { Search } from 'lucide-react'
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { api, isSnowflake } from '../api'
 import type { MemberHit } from '../types'
-import { Input, Mono } from './ui'
+import { cn } from '@/lib/utils'
+import { Avatar } from './Avatar'
+import { Mono } from './common'
+import { Input } from './ui/input'
+import { Popover, PopoverAnchor, PopoverContent } from './ui/popover'
 
 export interface UserPickerHandle {
   /** The chosen/pasted user ID, or '' if neither. */
@@ -13,15 +18,17 @@ export interface UserPickerHandle {
 interface Props {
   placeholder: string
   onPick?: (u: MemberHit) => void
+  className?: string
 }
 
 /**
  * Input that searches guild members by name (debounced) and also accepts a
- * pasted user ID.
+ * pasted user ID. Results render in a popover so dialogs and cards never clip them.
  */
-export const UserPicker = forwardRef<UserPickerHandle, Props>(function UserPicker({ placeholder, onPick }, ref) {
+export const UserPicker = forwardRef<UserPickerHandle, Props>(function UserPicker({ placeholder, onPick, className }, ref) {
   const [value, setValue] = useState('')
   const [results, setResults] = useState<MemberHit[]>([])
+  const [active, setActive] = useState(0)
   const chosen = useRef<MemberHit | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
@@ -53,6 +60,7 @@ export const UserPicker = forwardRef<UserPickerHandle, Props>(function UserPicke
       try { hits = await api<MemberHit[]>('/members?q=' + encodeURIComponent(q)) } catch { /* keep closed */ }
       if (valueRef.current.trim() !== q) return  // stale response
       setResults(hits)
+      setActive(0)
     }, 300)
   }
 
@@ -63,32 +71,63 @@ export const UserPicker = forwardRef<UserPickerHandle, Props>(function UserPicke
     onPick?.(u)
   }
 
+  const open = results.length > 0
+
   return (
-    <div className="relative">
-      <Input
-        type="text"
-        placeholder={placeholder}
-        autoComplete="off"
-        value={value}
-        onChange={e => onInput(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Escape') close() }}
-      />
-      {results.length > 0 && (
-        <div className="animate-fade-in absolute top-full right-0 left-0 z-20 mt-1 max-h-56 overflow-y-auto rounded-lg border bg-popover p-1 shadow-lg">
-          {results.map(u => (
+    <Popover open={open} onOpenChange={o => { if (!o) close() }}>
+      <PopoverAnchor asChild>
+        <div className={cn('relative', className)}>
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            className="pl-8"
+            placeholder={placeholder}
+            autoComplete="off"
+            value={value}
+            onChange={e => onInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Escape') close()
+              if (!open) return
+              if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(i + 1, results.length - 1)) }
+              if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(i - 1, 0)) }
+              if (e.key === 'Enter') { e.preventDefault(); pick(results[active]!) }
+            }}
+          />
+        </div>
+      </PopoverAnchor>
+      <PopoverContent
+        align="start"
+        className="w-(--radix-popover-trigger-width) min-w-64 p-1"
+        onOpenAutoFocus={e => e.preventDefault()}
+        onInteractOutside={e => {
+          // Clicking back into the input shouldn't close the list.
+          if ((e.target as HTMLElement).closest?.('[data-slot=input]')) e.preventDefault()
+        }}
+      >
+        <div role="listbox" className="max-h-64 overflow-y-auto">
+          {results.map((u, i) => (
             <button
               key={u.id}
               type="button"
-              className="flex w-full cursor-pointer items-baseline gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent"
+              role="option"
+              aria-selected={i === active}
+              className={cn(
+                'flex w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-left text-sm outline-none',
+                i === active ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/60',
+              )}
+              onMouseEnter={() => setActive(i)}
               onClick={() => pick(u)}
             >
-              <span className="font-medium">{u.displayName}</span>
-              <span className="text-xs text-muted-foreground">@{u.username}</span>
-              <Mono className="ml-auto">{u.id}</Mono>
+              <Avatar name={u.displayName} className="size-6" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{u.displayName}</span>
+                <span className="block truncate text-xs text-muted-foreground">@{u.username}</span>
+              </span>
+              <Mono className="hidden sm:inline">{u.id}</Mono>
             </button>
           ))}
         </div>
-      )}
-    </div>
+      </PopoverContent>
+    </Popover>
   )
 })

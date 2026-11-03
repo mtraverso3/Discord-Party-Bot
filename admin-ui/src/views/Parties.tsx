@@ -1,7 +1,10 @@
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronRight, Crown, Megaphone, Moon, Plus, RefreshCw, Search, Swords, Timer, Trash2, Volume1, Volume2, VolumeX } from 'lucide-react'
+import {
+  ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, Crown, Ellipsis, Lock, LockOpen, Megaphone, Moon, Plus,
+  RefreshCw, Search, Swords, Timer, Trash2, UserMinus, UserPlus, UserRound, Volume1, Volume2, VolumeX, X,
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
-import { cn } from '../lib/cn'
+import { cn } from '@/lib/utils'
 import { defaultGame, gameChoices } from '../games'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/Confirm'
@@ -9,7 +12,24 @@ import { Avatar } from '../components/Avatar'
 import { GameList } from '../components/GameList'
 import { UserPicker, type UserPickerHandle } from '../components/UserPicker'
 import { ChannelSelect } from '../components/ChannelSelect'
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Checkbox, EmptyState, ErrorNote, Input, Label, Mono, Segmented, Select, Spinner, StatusDot, Switch, Textarea } from '../components/ui'
+import {
+  CheckboxCard, CopyId, CountPill, EmptyState, ErrorNote, Field, GameSelect, MiniStat, Mono, PageSkeleton, SectionLabel,
+  SectionSkeleton, StatusDot,
+} from '../components/common'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '../components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu'
+import { Input } from '../components/ui/input'
+import { Progress } from '../components/ui/progress'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { Switch } from '../components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
+import { Textarea } from '../components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip'
 import { useGuildData } from '../lib/guildData'
 import { useLoad } from '../lib/useLoad'
 import { deadlineOf, fmtAbs, relTime } from '../lib/time'
@@ -36,6 +56,13 @@ function selectedPartyId(): string | null {
 
 const goToParty = (id: string) => { location.hash = '#/parties/' + encodeURIComponent(id) }
 const goToList = () => { location.hash = '#/parties' }
+
+function readPref(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+function writePref(key: string, value: string) {
+  try { localStorage.setItem(key, value) } catch { /* private mode */ }
+}
 
 export function Parties() {
   const guildData = useGuildData()
@@ -88,14 +115,14 @@ export function Parties() {
   }, [])
 
   if (error && !parties) return <ErrorNote>Error: {error}</ErrorNote>
-  if (!parties) return <Spinner />
+  if (!parties) return <PageSkeleton />
 
   if (selectedId) {
     const party = parties.find(p => p.id === selectedId)
     if (!party) {
       return (
         <div className="space-y-4">
-          <Button variant="outline" size="sm" onClick={goToList}><ArrowLeft />Back to parties</Button>
+          <BackButton />
           <EmptyState icon={<Swords />} title="Party not found">
             It may have been disbanded. Go back to the list to see current parties.
           </EmptyState>
@@ -125,6 +152,10 @@ export function Parties() {
   )
 }
 
+function BackButton() {
+  return <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" onClick={goToList}><ArrowLeft />All parties</Button>
+}
+
 // ── List view ─────────────────────────────────────────────────────────────────
 
 function PartyList({ parties, settings, voiceChannels, textChannels, onRefresh, onUpdate, setParties }: {
@@ -139,9 +170,10 @@ function PartyList({ parties, settings, voiceChannels, textChannels, onRefresh, 
   const toast = useToast()
   const confirm = useConfirm()
   const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<SortMode>(() => (localStorage.getItem('pb-sort') as SortMode) || 'newest')
-  const [auto, setAuto] = useState(() => localStorage.getItem('pb-autorefresh') === '1')
+  const [sort, setSort] = useState<SortMode>(() => (readPref('pb-sort') as SortMode) || 'newest')
+  const [auto, setAuto] = useState(() => readPref('pb-autorefresh') === '1')
   const [showCreate, setShowCreate] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     if (!auto) return
@@ -166,66 +198,90 @@ function PartyList({ parties, settings, voiceChannels, textChannels, onRefresh, 
             onChange={e => setQuery(e.target.value)}
           />
         </div>
-        <div className="w-44">
-        <Select
-          value={sort}
-          onChange={e => {
-            const v = e.target.value as SortMode
-            setSort(v)
-            localStorage.setItem('pb-sort', v)
-          }}
-        >
-          {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        <Select value={sort} onValueChange={v => { setSort(v as SortMode); writePref('pb-sort', v) }}>
+          <SelectTrigger className="w-44" aria-label="Sort parties"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {SORTS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+          </SelectContent>
         </Select>
-        </div>
-        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground" title="Refresh the list every 10 seconds">
-          <Switch checked={auto} onCheckedChange={v => {
-            setAuto(v)
-            localStorage.setItem('pb-autorefresh', v ? '1' : '0')
-          }} />
+        <label
+          className="flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground shadow-xs dark:bg-input/30"
+          title="Refresh the list every 10 seconds"
+        >
+          <Switch checked={auto} onCheckedChange={v => { setAuto(v); writePref('pb-autorefresh', v ? '1' : '0') }} />
           Auto-refresh
         </label>
-        <Button variant="outline" size="sm" onClick={onRefresh}><RefreshCw />Refresh</Button>
-        <Button
-          variant="destructive-outline"
-          size="sm"
-          onClick={async () => {
-            if (!(await confirm('Disband ALL parties in this guild? This cannot be undone.', 'Disband all'))) return
-            try {
-              await api('/clear', { method: 'POST' })
-              toast('Cleared')
-              onRefresh()
-            } catch (e) { toast((e as Error).message, 'err') }
-          }}
-        >
-          <Trash2 />Clear all…
-        </Button>
-        <Button size="sm" onClick={() => setShowCreate(s => !s)}><Plus />New party</Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Refresh"
+              onClick={async () => { setRefreshing(true); await onRefresh(); setRefreshing(false) }}
+            >
+              <RefreshCw className={cn(refreshing && 'animate-spin')} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Refresh</TooltipContent>
+        </Tooltip>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon" aria-label="More actions"><Ellipsis /></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={async () => {
+                if (!(await confirm('Disband ALL parties in this guild? This cannot be undone.', 'Disband all'))) return
+                try {
+                  await api('/clear', { method: 'POST' })
+                  toast('Cleared')
+                  onRefresh()
+                } catch (e) { toast((e as Error).message, 'err') }
+              }}
+            >
+              <Trash2 />Disband all parties…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button onClick={() => setShowCreate(true)}><Plus />New party</Button>
       </div>
 
-      {showCreate && (
-        <CreateForm
-          settings={settings}
-          voiceChannels={voiceChannels}
-          textChannels={textChannels}
-          onCreated={p => { onUpdate(p); setShowCreate(false); goToParty(p.id) }}
-          onCancel={() => setShowCreate(false)}
-        />
-      )}
+      <CreateDialog
+        open={showCreate}
+        onOpenChange={setShowCreate}
+        settings={settings}
+        voiceChannels={voiceChannels}
+        textChannels={textChannels}
+        onCreated={p => { onUpdate(p); setShowCreate(false); goToParty(p.id) }}
+      />
 
       {parties.length === 0 ? (
-        <EmptyState icon={<Swords />} title="No active parties">
-          Create one with the “New party” button above.
+        <EmptyState
+          icon={<Swords />}
+          title="No active parties"
+          action={<Button size="sm" onClick={() => setShowCreate(true)}><Plus />New party</Button>}
+        >
+          Parties members create in Discord show up here. You can also create one on a member's behalf.
         </EmptyState>
       ) : (
-        <div className="space-y-2.5">
-          <p className="text-xs text-muted-foreground">
-            {filtered.length === parties.length
-              ? `${parties.length} ${parties.length === 1 ? 'party' : 'parties'}`
-              : `${filtered.length} of ${parties.length} parties`}
-          </p>
-          {filtered.map(p => <PartyListRow key={p.id} party={p} onOpen={() => goToParty(p.id)} />)}
-        </div>
+        <Card className="gap-0 overflow-hidden py-0">
+          <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+            <span>
+              {filtered.length === parties.length
+                ? `${parties.length} ${parties.length === 1 ? 'party' : 'parties'}`
+                : `${filtered.length} of ${parties.length} parties`}
+            </span>
+            <span className="hidden sm:inline">Roster · Auto-disband</span>
+          </div>
+          {filtered.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">No parties match “{query}”.</p>
+          ) : (
+            <div className="divide-y">
+              {filtered.map(p => <PartyListRow key={p.id} party={p} onOpen={() => goToParty(p.id)} />)}
+            </div>
+          )}
+        </Card>
       )}
     </div>
   )
@@ -236,27 +292,42 @@ function PartyListRow({ party: p, onOpen }: { party: Party; onOpen: () => void }
   const now = Date.now()
   const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
   const status = statusOf(p)
+  const pct = p.maxSize > 0 ? Math.min(100, (p.members.length / p.maxSize) * 100) : 0
 
   return (
-    <Card className="overflow-hidden transition-colors hover:border-primary/40">
-      <button
-        type="button"
-        className="flex w-full cursor-pointer flex-wrap items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/40"
-        onClick={onOpen}
-      >
-        <Badge variant={status.variant}><StatusDot />{status.label}</Badge>
-        <span className="text-sm font-semibold">{p.name}</span>
-        <Badge variant="outline">{p.game}</Badge>
-        <Badge variant="secondary">{p.members.length}/{p.maxSize}</Badge>
-        {p.queue.length > 0 && <Badge variant="warning">{p.queue.length} queued</Badge>}
-        <span className="grow" />
-        <span className="inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted-foreground" title={'Auto-disband ' + fmtAbs(deadline)}>
+    <button
+      type="button"
+      className="group flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+      onClick={onOpen}
+    >
+      <div className="flex min-w-0 flex-1 basis-60 items-center gap-3">
+        <Badge variant={status.variant} className="w-16 justify-center"><StatusDot />{status.label}</Badge>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{p.name}</div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="truncate">{p.game}</span>
+            <span>·</span>
+            <Mono>{p.id}</Mono>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="flex w-32 items-center gap-2">
+          <Progress value={pct} className="h-1.5" indicatorClassName={pct >= 100 ? 'bg-warning' : undefined} />
+          <span className="w-9 text-right text-xs text-muted-foreground tabular-nums">{p.members.length}/{p.maxSize}</span>
+        </div>
+        <span className="w-20">
+          {p.queue.length > 0 && <Badge variant="warning">{p.queue.length} queued</Badge>}
+        </span>
+        <span
+          className="inline-flex w-24 items-center gap-1 text-xs whitespace-nowrap text-muted-foreground tabular-nums"
+          title={'Auto-disband ' + fmtAbs(deadline)}
+        >
           <Timer className="size-3.5" />{dueLabel}
         </span>
-        <Mono className="hidden sm:inline">{p.id}</Mono>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-      </button>
-    </Card>
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground" />
+      </div>
+    </button>
   )
 }
 
@@ -284,7 +355,29 @@ function statusOf(p: Party): { variant: 'destructive' | 'warning' | 'success'; l
       : { variant: 'success', label: 'Open' }
 }
 
-// ── Create form ──────────────────────────────────────────────────────────────
+// ── Create dialog ────────────────────────────────────────────────────────────
+
+function CreateDialog({ open, onOpenChange, ...rest }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  settings: GuildSettings | null
+  voiceChannels: ChannelInfo[]
+  textChannels: ChannelInfo[]
+  onCreated: (p: Party) => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>New party</DialogTitle>
+          <DialogDescription>Create a party on a member's behalf. The bot posts its embed in the channel you pick.</DialogDescription>
+        </DialogHeader>
+        {/* Remounting on open resets the form each time. */}
+        {open && <CreateForm {...rest} onCancel={() => onOpenChange(false)} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel }: {
   settings: GuildSettings | null
@@ -342,43 +435,36 @@ function CreateForm({ settings, voiceChannels, textChannels, onCreated, onCancel
   }
 
   return (
-    <Card className="animate-fade-in border-primary/30">
-      <CardHeader><CardTitle>New party</CardTitle></CardHeader>
-      <CardContent>
-        <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); if (!busy) submit() }}>
-          <Label>Owner<UserPicker ref={ownerPicker} placeholder="Search member by name, or paste an ID" /></Label>
-          <Label>Name<Input value={name} placeholder={'Defaults to "<owner>\'s party"'} maxLength={100} onChange={e => setName(e.target.value)} /></Label>
-          <Label>Game
-            <Select value={game} onChange={e => setGame(e.target.value)}>
-              {allowed.map(g => <option key={g} value={g}>{g}</option>)}
-            </Select>
-          </Label>
-          <Label>Player cap<Input type="number" min={2} max={50} value={cap} onChange={e => setCap(Number(e.target.value))} /></Label>
-          <Label>Post embed in
-            <ChannelSelect channels={textChannels} value={channel || textChannels[0]?.id || ''} onChange={setChannel} />
-          </Label>
-          <Label>Voice channel
-            <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
-          </Label>
-          <Label className="sm:col-span-2">Description<Textarea value={desc} placeholder="Description (optional)" onChange={e => setDesc(e.target.value)} /></Label>
-          {rulesAvailable && (
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent sm:col-span-2">
-              <Checkbox className="mt-0.5" checked={rules} onChange={e => setRules(e.target.checked)} />
-              <span>
-                Require the rules check
-                <span className="block text-xs text-muted-foreground">
-                  Only members who have passed can join this party.
-                </span>
-              </span>
-            </label>
-          )}
-          <div className="flex gap-2 sm:col-span-2">
-            <Button type="submit" busy={busy}>{busy ? 'Creating…' : 'Create party'}</Button>
-            <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+    <form className="grid gap-5" onSubmit={e => { e.preventDefault(); if (!busy) submit() }}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Owner"><UserPicker ref={ownerPicker} placeholder="Search by name, or paste an ID" /></Field>
+        <Field label="Name"><Input value={name} placeholder={'Defaults to "<owner>\'s party"'} maxLength={100} onChange={e => setName(e.target.value)} /></Field>
+        <Field label="Game"><GameSelect value={game} onChange={setGame} games={allowed} /></Field>
+        <Field label="Player cap"><Input type="number" min={2} max={50} value={cap} onChange={e => setCap(Number(e.target.value))} /></Field>
+        <Field label="Post embed in">
+          <ChannelSelect channels={textChannels} value={channel || textChannels[0]?.id || ''} onChange={setChannel} />
+        </Field>
+        <Field label="Voice channel">
+          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
+        </Field>
+        <Field label="Description" className="sm:col-span-2">
+          <Textarea value={desc} placeholder="Optional" onChange={e => setDesc(e.target.value)} />
+        </Field>
+        {rulesAvailable && (
+          <CheckboxCard
+            className="sm:col-span-2"
+            checked={rules}
+            onCheckedChange={setRules}
+            title="Require the rules check"
+            description="Only members who have passed can join this party."
+          />
+        )}
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" busy={busy}>{busy ? 'Creating…' : 'Create party'}</Button>
+      </DialogFooter>
+    </form>
   )
 }
 
@@ -392,6 +478,7 @@ function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
   onUpdate: (p: Party | null) => void
   onRemove: (id: string) => void
 }) {
+  const toast = useToast()
   const [section, setSection] = useState<Section>('people')
   const [avatars, setAvatars] = useState<Avatars>({})
 
@@ -407,53 +494,86 @@ function PartyDetail({ party: p, voiceChannels, onUpdate, onRemove }: {
     return () => { alive = false }
   }, [ids])
 
+  const act = async (fn: () => Promise<Party>, okMsg: string) => {
+    try {
+      onUpdate(await fn())
+      toast(okMsg)
+    } catch (e) { toast((e as Error).message, 'err') }
+  }
+
   const deadline = deadlineOf(p)
+  const last = p.lastActivityAt ?? p.createdAt
   const now = Date.now()
   const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
+  const lastLabel = last <= now ? relTime(now - last) + (relTime(now - last) === 'just now' ? '' : ' ago') : 'just now'
   const status = statusOf(p)
-
-  const tabs: [Section, string][] = [
-    ['people', `People (${p.members.length + p.queue.length})`],
-    ['settings', 'Settings'],
-    ['banlist', 'Banlist' + (p.banlist ? ` (${p.banlist.source.length})` : '')],
-    ['games', 'Games'],
-  ]
+  const owner = p.members.find(m => m.userId === p.ownerId)
 
   return (
-    <div className="space-y-4">
-      {/*<nav className="flex items-center gap-1.5 text-sm text-muted-foreground">*/}
-      {/*  <button type="button" className="cursor-pointer transition-colors hover:text-foreground" onClick={goToList}>*/}
-      {/*    Parties*/}
-      {/*  </button>*/}
-      {/*  <ChevronRight className="size-3.5" />*/}
-      {/*  <span className="font-medium text-foreground">{p.name}</span>*/}
-      {/*</nav>*/}
+    <div className="space-y-5">
+      <BackButton />
 
-      <Button variant="ghost" size="sm" className="-ml-2" onClick={goToList}><ArrowLeft />Back to parties</Button>
-
-      <Card>
-        <CardContent>
+      <Card className="gap-5">
+        <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={status.variant}><StatusDot />{status.label}</Badge>
-            <span className="text-base font-semibold">{p.name}</span>
             <Badge variant="outline">{p.game}</Badge>
-            <Badge variant="secondary">{p.members.length}/{p.maxSize}</Badge>
-            {p.queue.length > 0 && <Badge variant="warning">{p.queue.length} queued</Badge>}
-            <span className="grow" />
-            <span className="inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted-foreground" title={'Auto-disband ' + fmtAbs(deadline)}>
-              <Timer className="size-3.5" />{dueLabel}
-            </span>
-            <Mono>{p.id}</Mono>
+            {p.rulesRequired && <Badge variant="primary">Rules check</Badge>}
           </div>
-          {p.description && <p className="mt-2 text-sm text-muted-foreground whitespace-pre-line">{p.description}</p>}
+          <CardTitle className="mt-1 text-xl tracking-tight">{p.name}</CardTitle>
+          <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>Owned by <span className="font-medium text-foreground">{owner?.displayName ?? p.ownerName}</span></span>
+            <span aria-hidden>·</span>
+            <CopyId id={p.id} />
+          </CardDescription>
+          <CardAction className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => act(() => api<Party>('/parties/' + p.id + '/bump', { method: 'POST', body: JSON.stringify({}) }), 'Bumped')}
+            >
+              <Megaphone /><span className="hidden sm:inline">Bump embed</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => act(
+                () => api<Party>('/parties/' + p.id + (p.isClosed ? '/open' : '/close'), { method: 'POST' }),
+                p.isClosed ? 'Opened' : 'Closed',
+              )}
+            >
+              {p.isClosed ? <LockOpen /> : <Lock />}
+              <span className="hidden sm:inline">{p.isClosed ? 'Open party' : 'Close party'}</span>
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {p.description && <p className="text-sm whitespace-pre-line text-muted-foreground">{p.description}</p>}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+              <div className="text-xs text-muted-foreground">Roster</div>
+              <div className="mt-0.5 text-lg font-semibold tabular-nums">{p.members.length}<span className="text-sm font-normal text-muted-foreground"> / {p.maxSize}</span></div>
+              <Progress value={Math.min(100, (p.members.length / p.maxSize) * 100)} className="mt-1.5 h-1" />
+            </div>
+            <MiniStat label="Queue" value={p.queue.length} />
+            <MiniStat label="Last activity" value={lastLabel} title={fmtAbs(last)} />
+            <MiniStat label="Auto-disband" value={dueLabel} title={fmtAbs(deadline)} />
+          </div>
         </CardContent>
       </Card>
 
-      <Segmented value={section} onChange={setSection} options={tabs} />
-      {section === 'people' && <PeopleSection p={p} avatars={avatars} onUpdate={onUpdate} />}
-      {section === 'settings' && <SettingsSection p={p} voiceChannels={voiceChannels} onUpdate={onUpdate} onRemove={onRemove} />}
-      {section === 'banlist' && <BanlistSection p={p} onUpdate={onUpdate} />}
-      {section === 'games' && <GamesSection partyId={p.id} />}
+      <Tabs value={section} onValueChange={v => setSection(v as Section)}>
+        <TabsList>
+          <TabsTrigger value="people">People<CountPill n={p.members.length + p.queue.length} /></TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+          <TabsTrigger value="banlist">Banlist{p.banlist && <CountPill n={p.banlist.source.length} />}</TabsTrigger>
+          <TabsTrigger value="games">Games</TabsTrigger>
+        </TabsList>
+        <TabsContent value="people"><PeopleSection p={p} avatars={avatars} onUpdate={onUpdate} /></TabsContent>
+        <TabsContent value="settings"><SettingsSection p={p} voiceChannels={voiceChannels} onUpdate={onUpdate} onRemove={onRemove} /></TabsContent>
+        <TabsContent value="banlist"><BanlistSection p={p} onUpdate={onUpdate} /></TabsContent>
+        <TabsContent value="games"><GamesSection partyId={p.id} /></TabsContent>
+      </Tabs>
     </div>
   )
 }
@@ -471,10 +591,10 @@ function GamesSection({ partyId }: { partyId: string }) {
   }, [partyId])
 
   if (error) return <ErrorNote>Error: {error}</ErrorNote>
-  if (!data) return <Spinner />
+  if (!data) return <SectionSkeleton />
   return (
-    <div>
-      <p className="mb-3 text-xs text-muted-foreground">
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
         League games party members reported through the desktop client. Champions fill in once each match finishes.
       </p>
       <GameList games={data.games} />
@@ -505,71 +625,83 @@ function PeopleSection({ p, avatars, onUpdate }: { p: Party; avatars: Avatars; o
   }
 
   return (
-    <div>
-      <div className="divide-y rounded-lg border">
-        {p.members.map(m => (
-          <MemberRow
-            key={m.userId}
-            p={p}
-            m={m}
-            avatarUrl={avatars[m.userId]}
-            onPromote={() => call(() => api<Party>(`/parties/${p.id}/members/${m.userId}/promote`, { method: 'POST' }), 'Promoted')}
-            onRemove={() => call(() => api<Party>(`/parties/${p.id}/members/${m.userId}`, { method: 'DELETE' }), 'Removed')}
-            confirmPromote={() => confirm(`Promote ${m.displayName} to owner of "${p.name}"?`, 'Promote')}
-          />
-        ))}
-      </div>
-      {p.queue.length > 0 && (
-        <>
-          <div className="mt-4 mb-1.5 text-[0.7rem] font-semibold tracking-wide text-muted-foreground uppercase">
-            Queue — {p.queue.length} waiting
-          </div>
-          <div className="divide-y rounded-lg border">
-            {p.queue.map((q, i) => (
-              <QueueRow
-                key={q.userId}
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="space-y-4">
+        <Card className="gap-0 py-0">
+          <CardHeader className="border-b py-4 [.border-b]:pb-4">
+            <CardTitle className="text-sm">Members</CardTitle>
+            <CardDescription>{p.members.length} of {p.maxSize} spots taken</CardDescription>
+          </CardHeader>
+          <div className="divide-y">
+            {p.members.map(m => (
+              <MemberRow
+                key={m.userId}
                 p={p}
-                q={q}
-                idx={i}
-                avatarUrl={avatars[q.userId]}
-                onMove={dir => call(() => api<Party>(`/parties/${p.id}/queue/${q.userId}/move`, {
-                  method: 'POST', body: JSON.stringify({ direction: dir }),
-                }), 'Moved')}
-                onApprove={() => call(() => api<Party>(`/parties/${p.id}/members/${q.userId}/approve`, { method: 'POST' }), 'Approved')}
-                onDeny={() => call(() => api<Party>(`/parties/${p.id}/queue/${q.userId}`, { method: 'DELETE' }), 'Denied')}
+                m={m}
+                avatarUrl={avatars[m.userId]}
+                onPromote={() => call(() => api<Party>(`/parties/${p.id}/members/${m.userId}/promote`, { method: 'POST' }), 'Promoted')}
+                onRemove={() => call(() => api<Party>(`/parties/${p.id}/members/${m.userId}`, { method: 'DELETE' }), 'Removed')}
+                confirmPromote={() => confirm(`Promote ${m.displayName} to owner of "${p.name}"?`, 'Promote')}
               />
             ))}
           </div>
-        </>
-      )}
-      <form
-        className="mt-4 flex gap-2"
-        onSubmit={async e => {
-          e.preventDefault()
-          const userId = addPicker.current?.getId()
-          if (!userId) return toast('Pick a member from the list or paste a user ID.', 'err')
-          await call(() => api<Party>(`/parties/${p.id}/members`, {
-            method: 'POST', body: JSON.stringify({ userId }),
-          }), 'Added')
-          addPicker.current?.clear()
-        }}
-      >
-        <div className="flex-1">
-          <UserPicker ref={addPicker} placeholder="Add a member — search by name or paste an ID" />
-        </div>
-        <Button type="submit" variant="secondary"><Plus />Add</Button>
-      </form>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" busy={voiceBusy} onClick={checkVoice}><Volume2 />Check voice</Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => call(() => api<Party>('/parties/' + p.id + '/bump', { method: 'POST', body: JSON.stringify({}) }), 'Bumped')}
-        >
-          <Megaphone />Bump embed
-        </Button>
+          <CardFooter className="border-t py-3 [.border-t]:pt-3">
+            <form
+              className="flex w-full gap-2"
+              onSubmit={async e => {
+                e.preventDefault()
+                const userId = addPicker.current?.getId()
+                if (!userId) return toast('Pick a member from the list or paste a user ID.', 'err')
+                await call(() => api<Party>(`/parties/${p.id}/members`, {
+                  method: 'POST', body: JSON.stringify({ userId }),
+                }), 'Added')
+                addPicker.current?.clear()
+              }}
+            >
+              <UserPicker ref={addPicker} className="flex-1" placeholder="Add a member — search by name or paste an ID" />
+              <Button type="submit" variant="secondary"><UserPlus />Add</Button>
+            </form>
+          </CardFooter>
+        </Card>
+
+        {p.queue.length > 0 && (
+          <Card className="gap-0 py-0">
+            <CardHeader className="border-b py-4 [.border-b]:pb-4">
+              <CardTitle className="text-sm">Queue</CardTitle>
+              <CardDescription>{p.queue.length} waiting — approve to admit them, in order.</CardDescription>
+            </CardHeader>
+            <div className="divide-y">
+              {p.queue.map((q, i) => (
+                <QueueRow
+                  key={q.userId}
+                  p={p}
+                  q={q}
+                  idx={i}
+                  avatarUrl={avatars[q.userId]}
+                  onMove={dir => call(() => api<Party>(`/parties/${p.id}/queue/${q.userId}/move`, {
+                    method: 'POST', body: JSON.stringify({ direction: dir }),
+                  }), 'Moved')}
+                  onApprove={() => call(() => api<Party>(`/parties/${p.id}/members/${q.userId}/approve`, { method: 'POST' }), 'Approved')}
+                  onDeny={() => call(() => api<Party>(`/parties/${p.id}/queue/${q.userId}`, { method: 'DELETE' }), 'Denied')}
+                />
+              ))}
+            </div>
+          </Card>
+        )}
       </div>
-      {voice && <VoiceReport voice={voice} members={p.members} />}
+
+      <Card className="h-fit gap-4">
+        <CardHeader>
+          <CardTitle className="text-sm">Voice</CardTitle>
+          <CardDescription>See which members are in the linked voice channel.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button variant="outline" size="sm" className="w-full" busy={voiceBusy} onClick={checkVoice}>
+            {!voiceBusy && <Volume2 />}Check voice
+          </Button>
+          {voice && <VoiceReport voice={voice} members={p.members} />}
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -589,14 +721,14 @@ function VoiceReport({ voice, members }: { voice: VoiceStatus; members: PartyMem
   const total = voice.states.length
 
   return (
-    <div className="mt-3 divide-y rounded-lg border text-sm">
+    <div className="divide-y rounded-lg border text-sm">
       {groups.map(g => (
         <div key={g.key} className="flex items-start gap-2.5 px-3 py-2.5">
           <span className={cn('mt-0.5 shrink-0 [&_svg]:size-4', g.tone)}>{g.icon}</span>
           <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-1.5">
+            <div className="flex items-baseline justify-between gap-1.5">
               <span className="font-medium">{g.label}</span>
-              <span className="text-xs text-muted-foreground">{g.ids.length}/{total}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">{g.ids.length}/{total}</span>
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               {g.ids.length ? g.ids.map(nameOf).join(', ') : '—'}
@@ -604,6 +736,33 @@ function VoiceReport({ voice, members }: { voice: VoiceStatus; members: PartyMem
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function PersonCell({ name, username, userId, ign, avatarUrl, badges }: {
+  name: string
+  username: string
+  userId: string
+  ign?: string
+  avatarUrl?: string | null
+  badges?: ReactNode
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <Avatar name={name} imageUrl={avatarUrl} className="size-9" />
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 text-sm">
+          <span className="truncate font-medium">{name}</span>
+          {badges}
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="truncate">@{username}</span>
+          {ign && <><span aria-hidden>·</span><span className="truncate">{ign}</span></>}
+          <span aria-hidden className="hidden md:inline">·</span>
+          <Mono className="hidden md:inline">{userId}</Mono>
+        </div>
+      </div>
     </div>
   )
 }
@@ -618,31 +777,44 @@ function MemberRow({ p, m, avatarUrl, onPromote, onRemove, confirmPromote }: {
 }) {
   const isOwner = m.userId === p.ownerId
   return (
-    <div className="flex flex-wrap items-center gap-2.5 px-3 py-2 transition-colors hover:bg-muted/40">
-      <Avatar name={m.displayName} imageUrl={avatarUrl} />
-      <div className="min-w-40 flex-1">
-        <div className="flex items-center gap-1.5 text-sm">
-          <span className="font-medium">{m.displayName}</span>
-          {isOwner && <Crown className="size-3.5 text-warning" aria-label="Party owner" />}
-          {m.away && <Moon className="size-3.5 text-muted-foreground" aria-label="Marked as away (BRB)" />}
-          {m.ign && <span className="text-xs text-muted-foreground">{m.ign}</span>}
-        </div>
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span>@{m.username}</span>
-          <Mono>{m.userId}</Mono>
-        </div>
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => { location.hash = '#/users/' + encodeURIComponent(m.userId) }}
-      >
-        Profile
-      </Button>
-      {!isOwner && <Button variant="outline" size="sm" onClick={async () => { if (await confirmPromote()) onPromote() }}>Promote</Button>}
-      {!isOwner
-        ? <Button variant="destructive-outline" size="sm" onClick={onRemove}>Remove</Button>
-        : <Badge variant="warning"><Crown className="size-3" />owner</Badge>}
+    <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent/30">
+      <PersonCell
+        name={m.displayName}
+        username={m.username}
+        userId={m.userId}
+        ign={m.ign}
+        avatarUrl={avatarUrl}
+        badges={<>
+          {isOwner && <Badge variant="warning" className="px-1.5"><Crown />Owner</Badge>}
+          {m.away && (
+            <Tooltip>
+              <TooltipTrigger asChild><Moon className="size-3.5 text-muted-foreground" aria-label="Marked as away (BRB)" /></TooltipTrigger>
+              <TooltipContent>Marked as away (BRB)</TooltipContent>
+            </Tooltip>
+          )}
+        </>}
+      />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${m.displayName}`}><Ellipsis /></Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onSelect={() => { location.hash = '#/users/' + encodeURIComponent(m.userId) }}>
+            <UserRound />View profile
+          </DropdownMenuItem>
+          {!isOwner && (
+            <>
+              <DropdownMenuItem onSelect={async () => { if (await confirmPromote()) onPromote() }}>
+                <Crown />Promote to owner
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+                <UserMinus />Remove from party
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
@@ -657,23 +829,15 @@ function QueueRow({ p, q, idx, avatarUrl, onMove, onApprove, onDeny }: {
   onDeny: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2.5 px-3 py-2 transition-colors hover:bg-muted/40">
-      <span className="w-4 shrink-0 text-right font-mono text-xs text-muted-foreground">{idx + 1}</span>
-      <Avatar name={q.displayName} imageUrl={avatarUrl} />
-      <div className="min-w-40 flex-1">
-        <div className="flex items-center gap-1.5 text-sm">
-          <span className="font-medium">{q.displayName}</span>
-          {q.ign && <span className="text-xs text-muted-foreground">{q.ign}</span>}
-        </div>
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span>@{q.username}</span>
-          <Mono>{q.userId}</Mono>
-        </div>
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3 transition-colors hover:bg-accent/30">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground tabular-nums">{idx + 1}</span>
+      <PersonCell name={q.displayName} username={q.username} userId={q.userId} ign={q.ign} avatarUrl={avatarUrl} />
+      <div className="flex items-center gap-1">
+        <Button variant="ghost" size="icon-sm" aria-label="Move up" disabled={idx === 0} onClick={() => onMove('up')}><ArrowUp /></Button>
+        <Button variant="ghost" size="icon-sm" aria-label="Move down" disabled={idx === p.queue.length - 1} onClick={() => onMove('down')}><ArrowDown /></Button>
+        <Button variant="outline" size="sm" className="ml-1" onClick={onApprove}><Check />Approve</Button>
+        <Button variant="destructive-outline" size="sm" onClick={onDeny}><X />Deny</Button>
       </div>
-      <Button variant="ghost" size="icon" className="size-8" title="Move up" disabled={idx === 0} onClick={() => onMove('up')}><ArrowUp /></Button>
-      <Button variant="ghost" size="icon" className="size-8" title="Move down" disabled={idx === p.queue.length - 1} onClick={() => onMove('down')}><ArrowDown /></Button>
-      <Button variant="secondary" size="sm" onClick={onApprove}>Approve</Button>
-      <Button variant="destructive-outline" size="sm" onClick={onDeny}>Deny</Button>
     </div>
   )
 }
@@ -693,84 +857,64 @@ function SettingsSection({ p, voiceChannels, onUpdate, onRemove }: {
   const [game, setGame] = useState(p.game)
   const [voice, setVoice] = useState(p.voiceChannelId || '')
   const [desc, setDesc] = useState(p.description || '')
+  const [saving, setSaving] = useState(false)
 
-  const last = p.lastActivityAt ?? p.createdAt
-  const deadline = deadlineOf(p)
-  const now = Date.now()
-  const lastLabel = last <= now ? relTime(now - last) + ' ago' : 'just now'
-  const dueLabel = deadline > now ? 'in ' + relTime(deadline - now) : 'overdue'
-
-  const act = async (fn: () => Promise<Party>, okMsg: string) => {
+  const save = async () => {
+    setSaving(true)
     try {
-      onUpdate(await fn())
-      toast(okMsg)
-    } catch (e) { toast((e as Error).message, 'err') }
+      onUpdate(await api<Party>('/parties/' + p.id, {
+        method: 'PATCH',
+        body: JSON.stringify({ name, description: desc, maxSize: Number(cap), game, voiceChannelId: voice }),
+      }))
+      toast('Saved')
+    } catch (e) { toast((e as Error).message, 'err') } finally { setSaving(false) }
   }
 
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span title={fmtAbs(last)}>Last activity: <span className="font-medium text-foreground">{lastLabel}</span></span>
-        <span title={fmtAbs(deadline)}>Auto-disband: <span className="font-medium text-foreground">{dueLabel}</span></span>
-      </div>
-      <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={e => e.preventDefault()}>
-        <Label>Name<Input value={name} required maxLength={100} onChange={e => setName(e.target.value)} /></Label>
-        <Label>Player cap<Input type="number" min={2} max={50} required value={cap} onChange={e => setCap(Number(e.target.value))} /></Label>
-        <Label>Game
-          <Select value={game} onChange={e => setGame(e.target.value)}>
-            {gameChoices(settings, p.game).map(g => <option key={g} value={g}>{g}</option>)}
-          </Select>
-        </Label>
-        <Label>Voice channel
-          <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
-        </Label>
-        <Label className="sm:col-span-2">Description<Textarea value={desc} onChange={e => setDesc(e.target.value)} /></Label>
-      </form>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          onClick={() => act(() => api<Party>('/parties/' + p.id, {
-            method: 'PATCH',
-            body: JSON.stringify({ name, description: desc, maxSize: Number(cap), game, voiceChannelId: voice }),
-          }), 'Saved')}
-        >
-          Save changes
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => act(
-            () => api<Party>('/parties/' + p.id + (p.isClosed ? '/open' : '/close'), { method: 'POST' }),
-            p.isClosed ? 'Opened' : 'Closed',
-          )}
-        >
-          {p.isClosed ? 'Open party' : 'Close party'}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => act(() => api<Party>('/parties/' + p.id + '/bump', {
-            method: 'POST', body: JSON.stringify({}),
-          }), 'Bumped')}
-        >
-          Bump embed
-        </Button>
-        <span className="grow" />
-        <Button
-          variant="destructive-outline"
-          size="sm"
-          onClick={async () => {
-            if (!(await confirm(`Disband "${p.name}"? Members will be released and the embed marked disbanded.`, 'Disband'))) return
-            try {
-              await api('/parties/' + p.id, { method: 'DELETE' })
-              onRemove(p.id)
-              toast('Disbanded')
-            } catch (e) { toast((e as Error).message, 'err') }
-          }}
-        >
-          <Trash2 />Disband…
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Party details</CardTitle>
+          <CardDescription>Changes update the Discord embed once saved.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form id="party-settings" className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); save() }}>
+            <Field label="Name"><Input value={name} required maxLength={100} onChange={e => setName(e.target.value)} /></Field>
+            <Field label="Player cap"><Input type="number" min={2} max={50} required value={cap} onChange={e => setCap(Number(e.target.value))} /></Field>
+            <Field label="Game"><GameSelect value={game} onChange={setGame} games={gameChoices(settings, p.game)} /></Field>
+            <Field label="Voice channel">
+              <ChannelSelect channels={voiceChannels} value={voice} onChange={setVoice} allowNone />
+            </Field>
+            <Field label="Description" className="sm:col-span-2"><Textarea value={desc} onChange={e => setDesc(e.target.value)} /></Field>
+          </form>
+        </CardContent>
+        <CardFooter className="justify-end border-t [.border-t]:pt-5">
+          <Button type="submit" form="party-settings" busy={saving}>Save changes</Button>
+        </CardFooter>
+      </Card>
+
+      <Card className="border-destructive/30">
+        <CardHeader>
+          <CardTitle className="text-sm">Disband party</CardTitle>
+          <CardDescription>Members are released and the embed is marked disbanded. This can't be undone.</CardDescription>
+          <CardAction>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={async () => {
+                if (!(await confirm(`Disband "${p.name}"? Members will be released and the embed marked disbanded.`, 'Disband'))) return
+                try {
+                  await api('/parties/' + p.id, { method: 'DELETE' })
+                  onRemove(p.id)
+                  toast('Disbanded')
+                } catch (e) { toast((e as Error).message, 'err') }
+              }}
+            >
+              <Trash2 />Disband…
+            </Button>
+          </CardAction>
+        </CardHeader>
+      </Card>
     </div>
   )
 }
@@ -788,21 +932,56 @@ function BanlistSection({ p, onUpdate }: { p: Party; onUpdate: (p: Party | null)
     } catch (e) { toast((e as Error).message, 'err') }
   }
 
+  const assignments = p.banlist ? Object.entries(p.banlist.assignments) : []
+  const nameOf = (id: string) => p.members.find(m => m.userId === id)?.displayName ?? id
+
   return (
-    <div>
-      <p className="mb-2 text-xs text-muted-foreground">
-        Members are assigned one ban each, in paste order. Freed bans recycle to the next joiner.
-      </p>
-      <Textarea
-        className="min-h-28 font-mono text-xs"
-        placeholder="One champion per line — assigned to members in order"
-        value={text}
-        onChange={e => setText(e.target.value)}
-      />
-      <div className="mt-3 flex gap-2">
-        <Button size="sm" onClick={() => save(text)}>Save banlist</Button>
-        <Button variant="outline" size="sm" onClick={() => { setText(''); save('') }}>Clear</Button>
-      </div>
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Champion banlist</CardTitle>
+          <CardDescription>Members are assigned one ban each, in paste order. Freed bans recycle to the next joiner.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            className="min-h-48 font-mono text-xs"
+            placeholder="One champion per line — assigned to members in order"
+            value={text}
+            onChange={e => setText(e.target.value)}
+          />
+        </CardContent>
+        <CardFooter className="justify-end gap-2">
+          <Button variant="outline" onClick={() => { setText(''); save('') }}>Clear</Button>
+          <Button onClick={() => save(text)}>Save banlist</Button>
+        </CardFooter>
+      </Card>
+      <Card className="h-fit gap-3">
+        <CardHeader>
+          <CardTitle className="text-sm">Current assignments</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {assignments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No bans assigned yet.</p>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {assignments.map(([uid, champ]) => (
+                <li key={uid} className="flex items-center justify-between gap-2">
+                  <span className="truncate">{nameOf(uid)}</span>
+                  <Badge variant="destructive">{champ}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+          {p.banlist && p.banlist.pool.length > 0 && (
+            <div className="mt-4 space-y-1.5">
+              <SectionLabel>Unassigned</SectionLabel>
+              <div className="flex flex-wrap gap-1">
+                {p.banlist.pool.map(c => <Badge key={c} variant="outline">{c}</Badge>)}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

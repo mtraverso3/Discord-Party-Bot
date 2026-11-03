@@ -1,10 +1,17 @@
-import { RefreshCw, ScrollText } from 'lucide-react'
+import { RefreshCw, ScrollText, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useLoad } from '../lib/useLoad'
 import { fmtAbs, relTime } from '../lib/time'
 import type { AuditEntry } from '../types'
-import { Button, Card, EmptyState, ErrorNote, Spinner, Table, TBody, THead } from '../components/ui'
+import { EmptyState, ErrorNote, PageSkeleton } from '../components/common'
+import { Avatar } from '../components/Avatar'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card } from '../components/ui/card'
+import { Input } from '../components/ui/input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table'
+import { cn } from '@/lib/utils'
 
 // Discord-identity admins are recorded with a synthetic "<discordId>@…" email
 // (the OIDC provider has no real address). Surface those as the member's name.
@@ -71,9 +78,17 @@ function friendlyAction(entry: AuditEntry, name: (id: string) => string): string
   return m + ' ' + entry.path
 }
 
+const METHOD_TONE: Record<string, string> = {
+  POST: 'bg-primary/10 text-primary',
+  PATCH: 'bg-warning-muted text-warning',
+  DELETE: 'bg-danger-muted text-destructive',
+}
+
 export function Audit() {
   const { data: log, error, reload } = useLoad(() => api<AuditEntry[]>('/log'))
   const [names, setNames] = useState<Record<string, string>>({})
+  const [query, setQuery] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
   // Resolve every referenced Discord ID (acting admin + admin add/remove
   // targets) to a member name in one batched request.
@@ -94,29 +109,65 @@ export function Audit() {
   }
 
   if (error) return <ErrorNote>Error: {error}</ErrorNote>
-  if (!log) return <Spinner />
+  if (!log) return <PageSkeleton rows={6} />
   if (log.length === 0) return <EmptyState icon={<ScrollText />} title="No admin actions recorded yet" />
 
+  const q = query.trim().toLowerCase()
+  const rows = log
+    .map(entry => ({ entry, admin: adminLabel(entry.email), action: friendlyAction(entry, name) }))
+    .filter(r => !q || r.admin.toLowerCase().includes(q) || r.action.toLowerCase().includes(q))
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground">{log.length} recorded action{log.length === 1 ? '' : 's'}</span>
-        <Button variant="outline" size="sm" onClick={reload}><RefreshCw />Refresh</Button>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-52 flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input type="search" className="pl-8" placeholder="Filter by admin or action" value={query} onChange={e => setQuery(e.target.value)} />
+        </div>
+        <Button variant="outline" onClick={async () => { setRefreshing(true); await reload(); setRefreshing(false) }}>
+          <RefreshCw className={cn(refreshing && 'animate-spin')} />Refresh
+        </Button>
       </div>
-      <Card>
+      <Card className="gap-0 overflow-hidden py-0">
+        <div className="border-b bg-muted/30 px-6 py-2.5 text-xs text-muted-foreground">
+          {rows.length === log.length
+            ? `${log.length} recorded action${log.length === 1 ? '' : 's'}`
+            : `${rows.length} of ${log.length} actions`}
+        </div>
         <Table>
-          <THead><tr><th>When</th><th>Admin</th><th>Action</th></tr></THead>
-          <TBody>
-            {log.map((entry, i) => (
-              <tr key={i}>
-                <td className="whitespace-nowrap text-muted-foreground" title={fmtAbs(entry.ts)}>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-36">When</TableHead>
+              <TableHead className="w-56">Admin</TableHead>
+              <TableHead>Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(({ entry, admin, action }, i) => (
+              <TableRow key={i}>
+                <TableCell className="whitespace-nowrap text-muted-foreground" title={fmtAbs(entry.ts)}>
                   {whenLabel(entry.ts)}
-                </td>
-                <td className="whitespace-nowrap">{adminLabel(entry.email)}</td>
-                <td>{friendlyAction(entry, name)}</td>
-              </tr>
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <span className="flex items-center gap-2">
+                    <Avatar name={admin} className="size-6" />
+                    <span className="max-w-44 truncate">{admin}</span>
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="flex items-center gap-2">
+                    <Badge className={cn('w-14 justify-center font-mono text-[0.65rem]', METHOD_TONE[entry.method])}>{entry.method}</Badge>
+                    <span>{action}</span>
+                  </span>
+                </TableCell>
+              </TableRow>
             ))}
-          </TBody>
+            {rows.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={3} className="py-10 text-center text-muted-foreground">No actions match “{query}”.</TableCell>
+              </TableRow>
+            )}
+          </TableBody>
         </Table>
       </Card>
     </div>
