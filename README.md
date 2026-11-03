@@ -90,8 +90,8 @@ npm run deploy
 - **Framework**: `discord-hono`
 - **State**: Cloudflare D1, with the schema in `migrations/` and the queries in
   `src/store/`
-- **Dashboard**: React + Vite in `admin-ui/`, served by the Worker as static
-  assets
+- **Dashboard**: React + Vite + shadcn/ui (Tailwind v4) in `admin-ui/`, served by
+  the Worker as static assets
 
 All state lives in D1: parties, members and queues, banlists, IGN profiles,
 guild settings, templates, the audit log and desktop-client auth. Invariants

@@ -1,6 +1,8 @@
 import { hueOf } from '../lib/time'
-import { cn } from '../lib/cn'
+import { cn } from '@/lib/utils'
+import { Avatar as AvatarRoot, AvatarFallback, AvatarImage } from './ui/avatar'
 
+/** Discord avatar with a deterministic coloured initial while loading or when missing. */
 export function Avatar({ name, imageUrl, title, className }: {
   name?: string
   imageUrl?: string | null
@@ -8,26 +10,15 @@ export function Avatar({ name, imageUrl, title, className }: {
   className?: string
 }) {
   const n = name || '?'
-  if (imageUrl) {
-    return (
-      <img
-        src={imageUrl}
-        alt={title ?? n}
-        title={title}
-        className={cn('size-8 shrink-0 rounded-full object-cover', className)}
-      />
-    )
-  }
   return (
-    <span
-      className={cn(
-        'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white select-none',
-        className,
-      )}
-      style={{ background: `hsl(${hueOf(n)}, 48%, 46%)` }}
-      title={title}
-    >
-      {n.slice(0, 1).toUpperCase()}
-    </span>
+    <AvatarRoot className={cn('size-8', className)} title={title}>
+      {imageUrl && <AvatarImage src={imageUrl} alt={title ?? n} />}
+      <AvatarFallback
+        className="text-xs font-semibold text-white select-none"
+        style={{ background: `hsl(${hueOf(n)}, 48%, 46%)` }}
+      >
+        {n.slice(0, 1).toUpperCase()}
+      </AvatarFallback>
+    </AvatarRoot>
   )
 }

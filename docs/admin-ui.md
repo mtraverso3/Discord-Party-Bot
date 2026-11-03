@@ -54,6 +54,12 @@ To work on the UI itself, run `wrangler dev` in the repo root and `npm run dev`
 in `admin-ui/`. The Vite dev server proxies `/admin/api` to the Worker and
 hot-reloads the SPA.
 
+The UI is built from [shadcn/ui](https://ui.shadcn.com) components (Radix
+primitives + Tailwind v4), copied into `admin-ui/src/components/ui/`. The colour
+theme lives as CSS variables in `admin-ui/src/styles.css`, shared with the
+desktop client. To add another component, run
+`npx shadcn@latest add <name>` in `admin-ui/` (`components.json` is set up).
+
 ## Discord admin login (optional)
 
 This lets specific **Discord users** into the dashboard without giving them an

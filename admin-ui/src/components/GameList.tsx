@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { ChevronDown, Gamepad2 } from 'lucide-react'
 import type { GameParticipant, PartyGame } from '../types'
-import { cn } from '../lib/cn'
+import { cn } from '@/lib/utils'
 import { fmtAbs, relTime } from '../lib/time'
 import { championIconUrl, useLoadoutCatalog, type AugmentRarity, type LoadoutAsset, type LoadoutCatalog } from '../lib/lolAssets'
 import { HoverCard } from './HoverCard'
 import { LeagueText } from './LeagueText'
-import { Badge, EmptyState } from './ui'
+import { EmptyState } from './common'
+import { Badge } from './ui/badge'
+import { Button } from './ui/button'
 
 // Common League queue IDs → a short human label. Anything unmapped shows the
 // raw id so we never hide information we simply haven't named yet.
@@ -223,7 +225,7 @@ function Summary({ groups, catalog }: { groups: TeamGroup[]; catalog: LoadoutCat
   return (
     <div className="flex flex-wrap gap-1.5">
       {groups.map(g => (
-        <div key={g.key} className="flex items-center gap-1.5 rounded-md border px-1.5 py-1">
+        <div key={g.key} className="flex items-center gap-1.5 rounded-lg border bg-muted/30 px-2 py-1.5">
           <ResultBadge players={g.players} result={g.result} />
           {!g.result && <span className="text-[0.7rem] font-semibold text-muted-foreground uppercase">{g.title}</span>}
           <div className="flex gap-0.5">
@@ -252,8 +254,8 @@ function GameCard({ game: g, catalog }: { game: PartyGame; catalog: LoadoutCatal
   const groups = teamGroups(g.participants, aborted)
 
   return (
-    <div className="rounded-lg border p-3">
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+    <div className="rounded-xl border bg-card p-4 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
         {statusBadge(g)}
         {ql && <Badge variant="outline">{ql}</Badge>}
         {aborted && <Badge variant="secondary" title={g.endResult ?? 'Nobody won this game'}>Aborted</Badge>}
@@ -268,15 +270,16 @@ function GameCard({ game: g, catalog }: { game: PartyGame; catalog: LoadoutCatal
           {relTime(Date.now() - g.reportedAt)} ago
         </span>
         {g.participants.length > 0 && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setExpanded(e => !e)}
             aria-expanded={expanded}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
           >
             {expanded ? 'Less' : 'Details'}
             <ChevronDown className={cn('size-3.5 transition-transform', expanded && 'rotate-180')} />
-          </button>
+          </Button>
         )}
       </div>
       {g.participants.length > 0 ? (
@@ -303,7 +306,7 @@ export function GameList({ games }: { games: PartyGame[] }) {
     )
   }
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-3">
       {games.map(g => <GameCard key={g.id} game={g} catalog={catalog} />)}
     </div>
   )

@@ -1,42 +1,26 @@
-import { CheckCircle2, XCircle } from 'lucide-react'
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
-import { cn } from '../lib/cn'
+import { createContext, useCallback, useContext, type ReactNode } from 'react'
+import { toast as sonner } from 'sonner'
+import { Toaster } from './ui/sonner'
 
 type ToastFn = (msg: string, kind?: 'ok' | 'err') => void
 
 const ToastContext = createContext<ToastFn>(() => {})
 
+/** `toast(message, 'ok' | 'err')` — a thin wrapper over sonner so views keep one call shape. */
 export function useToast(): ToastFn {
   return useContext(ToastContext)
 }
 
-export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-
+export function ToastProvider({ theme, children }: { theme: 'light' | 'dark'; children: ReactNode }) {
   const show = useCallback<ToastFn>((msg, kind = 'ok') => {
-    setToast({ msg, kind })
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => setToast(null), kind === 'err' ? 5000 : 2500)
+    if (kind === 'err') sonner.error(msg, { duration: 5000 })
+    else sonner.success(msg, { duration: 2500 })
   }, [])
 
   return (
     <ToastContext.Provider value={show}>
       {children}
-      {toast && (
-        <div
-          className={cn(
-            'animate-toast-in fixed right-4 bottom-4 z-50 flex max-w-sm items-center gap-2.5 rounded-lg border bg-popover px-4 py-3 text-sm text-popover-foreground shadow-lg',
-            toast.kind === 'err' && 'border-destructive/40',
-          )}
-          role="status"
-        >
-          {toast.kind === 'err'
-            ? <XCircle className="size-4 shrink-0 text-destructive" />
-            : <CheckCircle2 className="size-4 shrink-0 text-success" />}
-          {toast.msg}
-        </div>
-      )}
+      <Toaster theme={theme} position="bottom-right" />
     </ToastContext.Provider>
   )
 }
